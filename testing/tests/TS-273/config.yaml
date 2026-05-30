@@ -1,0 +1,9 @@
+test_id: TS-273
+type: cli
+framework: unittest
+platform: python
+dependencies:
+  - Dart SDK available on PATH or via TRACKSTATE_DART_BIN
+notes:
+  - Verifies the live TrackState CLI maps an unsupported hosted provider to exit code 5 and the documented JSON error contract.
+  - Executes `trackstate session --target hosted --provider gitlab --repository owner/repo` when a standalone binary is available, otherwise falls back to `dart run trackstate session --target hosted --provider gitlab --repository owner/repo`.

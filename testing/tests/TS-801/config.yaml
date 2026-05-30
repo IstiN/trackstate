@@ -1,0 +1,14 @@
+test_id: TS-801
+type: ui
+framework: flutter_test
+platform: linux
+dependencies:
+  - Flutter SDK available on PATH
+notes:
+  - Launches the production first-launch local-folder onboarding flow with an actual temp directory that contains only hidden non-Git files.
+  - Verifies the post-selection UI copy instructs users to choose an existing Git repository or an empty folder.
+  - Verifies the visible Initialize action is disabled for the blocked hidden-files-only folder state.
+runtime_inputs:
+  picker_mode: initialize-folder
+  folder_fixture: hidden-files-only non-git temp directory containing .DS_Store and .metadata
+  run_command: flutter test testing/tests/TS-801/test_ts_801.dart --reporter expanded
