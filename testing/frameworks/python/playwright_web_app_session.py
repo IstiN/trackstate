@@ -1,14 +1,23 @@
 from __future__ import annotations
 
 from contextlib import AbstractContextManager
+from datetime import datetime, timezone
 import json
 from typing import Any, Sequence
 
 try:
-    from playwright.sync_api import Browser, BrowserContext, Page, Route, sync_playwright
+    from playwright.sync_api import (
+        Browser,
+        BrowserContext,
+        Page,
+        Request,
+        Response,
+        Route,
+        sync_playwright,
+    )
     from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 except ModuleNotFoundError:  # pragma: no cover - exercised in no-Playwright unit envs
-    Browser = BrowserContext = Page = Route = Any
+    Browser = BrowserContext = Page = Request = Response = Route = Any
 
     class PlaywrightTimeoutError(Exception):
         pass
@@ -30,6 +39,10 @@ from testing.core.interfaces.web_app_session import (
 class PlaywrightWebAppSession(WebAppSession):
     def __init__(self, page: Page) -> None:
         self._page = page
+        self._network_recorders: dict[str, dict[str, Any]] = {}
+        self._page.on("request", self._handle_page_request)
+        self._page.on("requestfinished", self._handle_page_request_finished)
+        self._page.on("requestfailed", self._handle_page_request_failed)
 
     def set_viewport_size(self, *, width: int, height: int) -> None:
         self._page.set_viewport_size({"width": width, "height": height})
@@ -770,6 +783,24 @@ class PlaywrightWebAppSession(WebAppSession):
     def mouse_move(self, x: float, y: float) -> None:
         self._page.mouse.move(x, y)
 
+    def start_network_recording(self, *, name: str, url_fragment: str) -> None:
+        self._network_recorders[name] = {
+            "url_fragment": url_fragment.lower(),
+            "next_id": 1,
+            "entries": [],
+            "request_ids": {},
+        }
+
+    def read_network_log(self, *, name: str) -> list[dict[str, object]]:
+        recorder = self._network_recorders.get(name)
+        if recorder is None:
+            return []
+        return [
+            dict(entry)
+            for entry in recorder.get("entries", [])
+            if isinstance(entry, dict)
+        ]
+
     def _locator(
         self,
         selector: str,
@@ -779,6 +810,122 @@ class PlaywrightWebAppSession(WebAppSession):
     ):
         locator = self._page.locator(selector, has_text=has_text)
         return locator.nth(index)
+
+    def _handle_page_request(self, request: Request) -> None:
+        request_url = str(getattr(request, "url", ""))
+        request_method = str(getattr(request, "method", "GET")).upper()
+        request_body = self._request_post_data(request)
+        for name, recorder in self._matching_network_recorders(request_url):
+            request_id = f"{name}-{recorder['next_id']}"
+            recorder["next_id"] += 1
+            recorder["request_ids"][id(request)] = request_id
+            self._append_network_entry(
+                recorder,
+                {
+                    "phase": "request",
+                    "transport": "playwright",
+                    "requestId": request_id,
+                    "method": request_method,
+                    "url": request_url,
+                    "bodyText": request_body,
+                },
+            )
+
+    def _handle_page_request_finished(self, request: Request) -> None:
+        request_url = str(getattr(request, "url", ""))
+        request_method = str(getattr(request, "method", "GET")).upper()
+        for _, recorder in self._matching_network_recorders(request_url):
+            request_id = recorder["request_ids"].pop(id(request), None)
+            if not request_id:
+                continue
+            response = request.response()
+            response_status = None if response is None else int(response.status)
+            response_text = self._response_text(response)
+            self._append_network_entry(
+                recorder,
+                {
+                    "phase": "response",
+                    "transport": "playwright",
+                    "requestId": request_id,
+                    "method": request_method,
+                    "url": request_url,
+                    "status": response_status,
+                    "responseText": response_text,
+                },
+            )
+
+    def _handle_page_request_failed(self, request: Request) -> None:
+        request_url = str(getattr(request, "url", ""))
+        request_method = str(getattr(request, "method", "GET")).upper()
+        for _, recorder in self._matching_network_recorders(request_url):
+            request_id = recorder["request_ids"].pop(id(request), None)
+            if not request_id:
+                continue
+            self._append_network_entry(
+                recorder,
+                {
+                    "phase": "error",
+                    "transport": "playwright",
+                    "requestId": request_id,
+                    "method": request_method,
+                    "url": request_url,
+                    "errorText": self._request_failure_text(request),
+                },
+            )
+
+    def _matching_network_recorders(
+        self,
+        request_url: str,
+    ) -> list[tuple[str, dict[str, Any]]]:
+        lowered_url = request_url.lower()
+        return [
+            (name, recorder)
+            for name, recorder in self._network_recorders.items()
+            if str(recorder.get("url_fragment", "")) in lowered_url
+        ]
+
+    def _append_network_entry(
+        self,
+        recorder: dict[str, Any],
+        entry: dict[str, object],
+    ) -> None:
+        entries = recorder.setdefault("entries", [])
+        assert isinstance(entries, list)
+        entries.append(
+            {
+                **entry,
+                "order": len(entries) + 1,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+
+    def _request_post_data(self, request: Request) -> str:
+        post_data = getattr(request, "post_data", None)
+        try:
+            payload = post_data() if callable(post_data) else post_data
+        except Exception as error:  # pragma: no cover - defensive Playwright fallback
+            return f"[[unreadable request body: {error}]]"
+        if payload is None:
+            return ""
+        return str(payload)
+
+    def _response_text(self, response: Response | None) -> str | None:
+        if response is None:
+            return None
+        try:
+            return response.text()
+        except Exception as error:  # pragma: no cover - defensive Playwright fallback
+            return f"[[unreadable response body: {error}]]"
+
+    def _request_failure_text(self, request: Request) -> str | None:
+        failure = getattr(request, "failure", None)
+        try:
+            payload = failure() if callable(failure) else failure
+        except Exception as error:  # pragma: no cover - defensive Playwright fallback
+            return f"[[unreadable request failure: {error}]]"
+        if payload is None:
+            return None
+        return str(payload)
 
 
 class PlaywrightWebAppRuntime(AbstractContextManager[PlaywrightWebAppSession]):

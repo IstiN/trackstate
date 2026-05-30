@@ -42,7 +42,7 @@ BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
 SCREENSHOT_PATH = OUTPUTS_DIR / "ts396_failure.png"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts396_success.png"
 TARGET_ISSUE_PATH = "DEMO/DEMO-1/DEMO-2"
-DESKTOP_VIEWPORT = {"width": 1440, "height": 960}
+DESKTOP_VIEWPORT = {"width": 1440, "height": 900}
 COMPACT_VIEWPORT = {"width": 390, "height": 844}
 REQUEST_STEPS = [
     "Open the deployed TrackState app at https://istin.github.io/trackstate-setup/.",
@@ -368,12 +368,7 @@ def main() -> None:
                     result["step_failures"] = step_failures
                     page.screenshot(str(SCREENSHOT_PATH))
                     result["screenshot"] = str(SCREENSHOT_PATH)
-                    raise AssertionError(
-                        "\n\n".join(
-                            f"Step {entry['step']} failed: {entry['error']}"
-                            for entry in step_failures
-                        )
-                    )
+                    raise AssertionError(_build_combined_failure_message(step_failures))
 
                 page.screenshot(str(SUCCESS_SCREENSHOT_PATH))
                 result["screenshot"] = str(SUCCESS_SCREENSHOT_PATH)
@@ -383,7 +378,7 @@ def main() -> None:
                     result["screenshot"] = str(SCREENSHOT_PATH)
                 raise
     except AssertionError as error:
-        result["error"] = str(error)
+        result["error"] = f"AssertionError: {error}"
         result["traceback"] = traceback.format_exc()
         _write_result_if_requested(result)
         print(json.dumps(result, indent=2))
@@ -637,11 +632,9 @@ def _build_human_verification_lines(payload: dict[str, object], *, jira: bool) -
                     "Desktop Board entry point visibly opens as a right-side drawer for "
                     "DEMO-2."
                 ),
-                observed=(
-                    f"Drawer geometry: {_format_observation_dict(board)}. Visible state included "
-                    "'Edit issue', 'DEMO-2 · Story', 'Priority Highest', 'Save', and 'Cancel'. "
-                    f"Summary rendered as {board.get('summary_value', '')!r} and Description "
-                    f"rendered as {board.get('description_value', '')!r}."
+                observed=_format_surface_observation(
+                    "Drawer geometry",
+                    board,
                 ),
                 jira=jira,
             ),
@@ -654,11 +647,9 @@ def _build_human_verification_lines(payload: dict[str, object], *, jira: bool) -
                 check=(
                     "Desktop Issue Detail entry point shows the same right-docked Edit surface."
                 ),
-                observed=(
-                    f"Drawer geometry: {_format_observation_dict(detail)}. The detail-triggered "
-                    f"surface again showed empty Summary {detail.get('summary_value', '')!r} "
-                    f"and Description {detail.get('description_value', '')!r} while Priority "
-                    "stayed visible as Highest."
+                observed=_format_surface_observation(
+                    "Drawer geometry",
+                    detail,
                 ),
                 jira=jira,
             ),
@@ -672,11 +663,9 @@ def _build_human_verification_lines(payload: dict[str, object], *, jira: bool) -
                     "Compact 390px entry point opens as a near full-width sheet from the "
                     "user's perspective."
                 ),
-                observed=(
-                    f"Sheet geometry: {_format_observation_dict(compact)}. The compact surface "
-                    f"kept the same visible labels and actions, but Summary remained "
-                    f"{compact.get('summary_value', '')!r} and Description remained "
-                    f"{compact.get('description_value', '')!r}."
+                observed=_format_surface_observation(
+                    "Sheet geometry",
+                    compact,
                 ),
                 jira=jira,
             ),
@@ -694,11 +683,35 @@ def _format_human_line(*, check: str, observed: str, jira: bool) -> str:
 def _format_observation_dict(observation: dict[str, object]) -> str:
     return (
         "viewport="
-        f"{observation.get('viewport_width', 0):.0f}x{observation.get('viewport_height', 0):.0f}, "
-        f"left={observation.get('left', 0):.1f}, top={observation.get('top', 0):.1f}, "
-        f"width={observation.get('width', 0):.1f}, height={observation.get('height', 0):.1f}, "
-        f"rightInset={observation.get('right_inset', 0):.1f}, "
-        f"bottomInset={observation.get('bottom_inset', 0):.1f}"
+        f"{_number(observation.get('viewport_width')):.0f}x"
+        f"{_number(observation.get('viewport_height')):.0f}, "
+        f"left={_number(observation.get('left')):.1f}, "
+        f"top={_number(observation.get('top')):.1f}, "
+        f"width={_number(observation.get('width')):.1f}, "
+        f"height={_number(observation.get('height')):.1f}, "
+        f"rightInset={_number(observation.get('right_inset')):.1f}, "
+        f"bottomInset={_number(observation.get('bottom_inset')):.1f}"
+    )
+
+
+def _number(value: object) -> float:
+    return float(value) if isinstance(value, (int, float)) else 0.0
+
+
+def _display_priority_from_observation(observation: dict[str, object]) -> str:
+    for key in ("priority_label", "priority_text"):
+        value = observation.get(key)
+        if isinstance(value, str) and value.strip():
+            return value
+    return "<missing>"
+
+
+def _format_surface_observation(prefix: str, observation: dict[str, object]) -> str:
+    return (
+        f"{prefix}: {_format_observation_dict(observation)}. "
+        f"Summary rendered as {observation.get('summary_value', '')!r}, "
+        f"Description rendered as {observation.get('description_value', '')!r}, "
+        f"and Priority rendered as {_display_priority_from_observation(observation)!r}."
     )
 
 
@@ -721,7 +734,7 @@ def _build_jira_comment(payload: dict[str, object], *, passed: bool) -> str:
         f"*Test case:* {TEST_CASE_TITLE}",
         f"*Environment:* {payload.get('app_url', 'unknown')} in Chromium on {platform.platform()}",
         f"*Repository:* {payload.get('repository', 'unknown')} @ {payload.get('repository_ref', 'unknown')}",
-        "*Viewport coverage:* desktop 1440x960, compact 390x844",
+        "*Viewport coverage:* desktop 1440x900, compact 390x844",
         "*Linked bugs reviewed:* TS-1086, TS-1067, TS-1169",
         "*Timing notes:* No additional async wait was required by the linked bug fixes.",
         "",
@@ -772,7 +785,7 @@ def _build_pr_body(payload: dict[str, object], *, passed: bool) -> str:
         f"**Test case:** {TEST_CASE_TITLE}",
         f"**Environment:** `{payload.get('app_url', 'unknown')}` in Chromium on `{platform.platform()}`",
         f"**Repository:** `{payload.get('repository', 'unknown')}` @ `{payload.get('repository_ref', 'unknown')}`",
-        "**Viewport coverage:** `1440x960` desktop, `390x844` compact",
+        "**Viewport coverage:** `1440x900` desktop, `390x844` compact",
         "**Linked bugs reviewed:** `TS-1086`, `TS-1067`, `TS-1169`",
         "**Timing notes:** No additional async wait was required by the linked bug fixes.",
         "",
@@ -814,20 +827,21 @@ def _build_response_summary(payload: dict[str, object], *, passed: bool) -> str:
 
     return (
         f"{TICKET_KEY} failed.\n\n"
-        "The deployed hosted app opened the shared Edit issue surface from every required "
-        "entry point, and the responsive layout matched the ticket, but the Summary and "
-        "Description fields were empty instead of preloading the DEMO-2 issue data.\n\n"
+        f"{_build_actual_result(payload, passed=False)}\n\n"
         f"{payload.get('error', 'No error message was recorded.')}\n"
     )
 
 
 def _build_bug_description(payload: dict[str, object]) -> str:
+    failure_summary = _first_product_failure(payload)
+    if failure_summary is None:
+        raise AssertionError(
+            "bug_description.md should only be written for verified product-visible failures.",
+        )
     annotated_steps = build_annotated_steps(payload, request_steps=REQUEST_STEPS)
     screenshot = payload.get("screenshot", "No screenshot recorded.")
     traceback_text = payload.get("traceback", payload.get("error", "No traceback recorded."))
     expected_priority = payload.get("expected_priority_label", "Highest")
-    expected_summary = payload.get("issue_summary", "")
-    expected_description = payload.get("issue_description", "")
 
     return (
         f"# {TICKET_KEY} bug report\n\n"
@@ -836,26 +850,23 @@ def _build_bug_description(payload: dict[str, object]) -> str:
         + "\n\n## Exact error message or assertion failure\n```text\n"
         + str(traceback_text)
         + "\n```\n\n## Actual vs Expected\n"
-        + f"**Expected:** Opening Edit for `{payload.get('issue_key', 'DEMO-2')}` should show "
-        + f"Summary `{expected_summary}`, Description `{expected_description}`, and Priority "
-        + f"`{expected_priority}` already loaded in the shared Edit surface. On desktop "
-        + "1440px it should appear as a right-side drawer; on compact 390px it should appear "
-        + "as a near full-width sheet.\n\n"
-        + "**Actual:** The shared Edit surface opened correctly from the Board card, desktop "
-        + "Issue Detail, and compact Issue Detail entry points, and the responsive geometry "
-        + "matched the ticket. However, Summary and Description were empty strings across all "
-        + "three entry points while Priority still rendered as Highest. The product therefore "
-        + "shows the correct shell and metadata chrome but fails to preload the editable text "
-        + "fields from the selected issue.\n\n## Environment details\n"
+        + f"**Expected:** {payload.get('expected_result', _expected_result_text())}\n\n"
+        + f"**Actual:** {_build_actual_result(payload, passed=False)}\n\n"
+        + "## Missing or broken production capability\n"
+        + f"The product did not satisfy step {failure_summary['step']}: "
+        + f"{failure_summary['action']}\n\n"
+        + f"Verified failure: {failure_summary['error']}\n\n"
+        + "## Environment details\n"
         + f"- URL: `{payload.get('app_url', 'unknown')}`\n"
         + f"- Browser: `Chromium`\n"
         + f"- OS: `{platform.platform()}`\n"
-        + "- Desktop viewport: `1440x960`\n"
+        + "- Desktop viewport: `1440x900`\n"
         + "- Compact viewport: `390x844`\n"
         + f"- Repository: `{payload.get('repository', 'unknown')}`\n"
         + f"- Ref: `{payload.get('repository_ref', 'unknown')}`\n"
         + f"- Issue under test: `{payload.get('issue_key', 'DEMO-2')}`\n\n"
-        + "## Screenshots or logs\n"
+        + "## Failing command and evidence\n"
+        + "- Command: `python testing/tests/TS-396/test_ts_396.py`\n"
         + f"- Screenshot: `{screenshot}`\n"
         + f"- Error: `{payload.get('error', 'No error message was recorded.')}`\n"
     )
@@ -869,12 +880,110 @@ def _build_actual_result(payload: dict[str, object], *, passed: bool) -> str:
             "were preloaded from DEMO-2."
         )
 
+    observation_summaries = _build_observation_summaries(payload)
+    failure_summaries = _step_failure_summaries(payload)
+    if observation_summaries and failure_summaries:
+        return (
+            f"{' '.join(observation_summaries)} "
+            f"Recorded failure(s): {'; '.join(failure_summaries)}."
+        )
+    if failure_summaries:
+        return f"Recorded failure(s): {'; '.join(failure_summaries)}."
+    if observation_summaries:
+        return " ".join(observation_summaries)
+    return str(payload.get("error", "No failure details were recorded."))
+
+
+def _expected_result_text() -> str:
     return (
-        "Board and Issue Detail both opened the shared Edit surface, the desktop drawer stayed "
-        "right-docked at 620px wide with 24px insets, and the compact sheet stayed near full "
-        "width at 358px with 16px insets. But Summary and Description were empty at every "
-        "entry point while Priority still displayed as Highest."
+        "On desktop, the editor opens as a right-side drawer. On compact layouts, it "
+        "opens as a full-width sheet. In all cases, the editor is preloaded with the "
+        "selected issue's current metadata (Summary, Description, Priority)."
     )
+
+
+def _build_observation_summaries(payload: dict[str, object]) -> list[str]:
+    summaries: list[str] = []
+    for label, key in (
+        ("Board desktop", "desktop_board_observation"),
+        ("Issue Detail desktop", "desktop_issue_detail_observation"),
+        ("Compact Issue Detail", "compact_observation"),
+    ):
+        observation = payload.get(key)
+        if not isinstance(observation, dict):
+            continue
+        summaries.append(
+            f"{label} showed {_format_surface_observation('geometry', observation)}",
+        )
+    return summaries
+
+
+def _step_failures(payload: dict[str, object]) -> list[dict[str, object]]:
+    failures = payload.get("step_failures")
+    if not isinstance(failures, list):
+        return []
+    normalized: list[dict[str, object]] = []
+    for failure in failures:
+        if not isinstance(failure, dict):
+            continue
+        normalized.append(failure)
+    return normalized
+
+
+def _step_failure_summaries(payload: dict[str, object]) -> list[str]:
+    summaries: list[str] = []
+    for failure in _step_failures(payload):
+        step = int(failure.get("step", -1))
+        action = str(failure.get("action", "Unknown action"))
+        error = str(failure.get("error", "Unknown error"))
+        summaries.append(f"step {step} ({action}) failed with `{error}`")
+    return summaries
+
+
+def _build_combined_failure_message(step_failures: list[dict[str, object]]) -> str:
+    messages: list[str] = []
+    for failure in step_failures:
+        step = int(failure.get("step", -1))
+        error = str(failure.get("error", "Unknown error"))
+        if error.lower().startswith(f"step {step} failed"):
+            messages.append(error)
+        else:
+            messages.append(f"Step {step} failed: {error}")
+    return "\n\n".join(messages)
+
+
+def _first_product_failure(payload: dict[str, object]) -> dict[str, object] | None:
+    for failure in _step_failures(payload):
+        step = int(failure.get("step", -1))
+        if step < 3:
+            continue
+        error = str(failure.get("error", ""))
+        lowered = error.lower()
+        if any(
+            marker in lowered
+            for marker in (
+                "requires gh_token",
+                "requires github_token",
+                "api rate limit",
+                "rate limit exceeded",
+                "403",
+                "401",
+                "no module named",
+                "modulenotfounderror",
+                "syntaxerror",
+                "nameerror",
+                "typeerror",
+                "attributeerror",
+                "keyerror",
+                "indexerror",
+                "unboundlocalerror",
+                "filenotfounderror",
+                "permissionerror",
+            )
+        ):
+            continue
+        return failure
+    return None
 
 
 def _write_required_outputs(payload: dict[str, object]) -> None:
@@ -895,7 +1004,7 @@ def _write_required_outputs(payload: dict[str, object]) -> None:
         encoding="utf-8",
     )
 
-    if passed:
+    if passed or _first_product_failure(payload) is None:
         BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
     else:
         BUG_DESCRIPTION_PATH.write_text(

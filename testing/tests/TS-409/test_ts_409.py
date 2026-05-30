@@ -890,9 +890,11 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
 
 def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
     status = "✅ PASSED" if passed else "❌ FAILED"
-    screenshot_path = result.get(
-        "settings_screenshot" if passed else "screenshot",
-        SUCCESS_SCREENSHOT_PATH if passed else FAILURE_SCREENSHOT_PATH,
+    screenshot_path = _resolve_artifact_screenshot_path(result, passed=passed)
+    cli_scope_line = (
+        "* Ran the installed {{trackstate session}} CLI against the same hosted repository and checked the returned {{projectConfig}} block."
+        if result.get("cli_observation") is not None
+        else "* Prepared the final {{trackstate session}} CLI parity check for the same hosted repository, but the CLI step was not reached because the save never persisted to Git."
     )
     cli_scope_line = (
         "* Ran the installed {{trackstate session}} CLI against the same hosted repository and checked the returned {{projectConfig}} block."
@@ -1048,7 +1050,7 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
 
 
 def _bug_description(result: dict[str, object]) -> str:
-    screenshot_path = result.get("screenshot", FAILURE_SCREENSHOT_PATH)
+    screenshot_path = _resolve_artifact_screenshot_path(result, passed=False)
     actual = _actual_result_text(result)
     cli_observation = result.get("cli_observation")
     cli_text = (
@@ -1244,10 +1246,7 @@ def _result_detail_lines(
     passed: bool,
 ) -> list[str]:
     prefix = "*" if jira else "-"
-    screenshot_path = result.get(
-        "settings_screenshot" if passed else "screenshot",
-        SUCCESS_SCREENSHOT_PATH if passed else FAILURE_SCREENSHOT_PATH,
-    )
+    screenshot_path = _resolve_artifact_screenshot_path(result, passed=passed)
     lines = [
         (
             f"{prefix} Environment: URL "
@@ -1302,6 +1301,17 @@ def _failure_repository_notes(failure_state: object) -> list[str]:
         str(failure_state.get("workflows_content", "")),
         "{code}",
     ]
+
+
+def _resolve_artifact_screenshot_path(
+    result: dict[str, object], *, passed: bool
+) -> object:
+    if passed:
+        return result.get("settings_screenshot", SUCCESS_SCREENSHOT_PATH)
+    screenshot_path = result.get("screenshot")
+    if screenshot_path:
+        return screenshot_path
+    return result.get("settings_screenshot", FAILURE_SCREENSHOT_PATH)
 
 
 def _compact_text(value: str, *, limit: int = 500) -> str:

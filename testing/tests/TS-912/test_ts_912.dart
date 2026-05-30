@@ -24,6 +24,7 @@ const List<String> _requestSteps = <String>[
   'Follow the browser prompt to grant file system access to the directory.',
 ];
 const List<String> _linkedBugs = <String>[
+  'TS-1258',
   'TS-1233',
   'TS-1209',
   'TS-1146',
@@ -220,6 +221,7 @@ void main() {
         StackTrace? localIssueLoadStackTrace;
         if (tappedRetry && restoreWaitError == null) {
           try {
+            await screen.openSection('JQL Search');
             await screen.openIssue(
               Ts912ManualReauthFixture.localIssueKey,
               Ts912ManualReauthFixture.localIssueSummary,
@@ -417,7 +419,11 @@ void _writeFailureOutputs(Map<String, Object?> result) {
   _responseFile.writeAsStringSync(_responseSummary(result, passed: false));
   _prBodyFile.writeAsStringSync(_prBody(result, passed: false));
   _reviewRepliesFile.writeAsStringSync(_reviewReplies(result, passed: false));
-  _bugDescriptionFile.writeAsStringSync(_bugDescription(result));
+  if (_shouldWriteBugDescription(result)) {
+    _bugDescriptionFile.writeAsStringSync(_bugDescription(result));
+  } else if (_bugDescriptionFile.existsSync()) {
+    _bugDescriptionFile.deleteSync(recursive: false);
+  }
 }
 
 String _responseSummary(Map<String, Object?> result, {required bool passed}) {
@@ -429,7 +435,7 @@ String _responseSummary(Map<String, Object?> result, {required bool passed}) {
     '',
     passed
         ? 'The Flutter widget harness completed the manual access-grant step and the saved workspace restored to `Local Git`.'
-        : _failureResponseSummary(result),
+        : _failureSummary(result),
     '',
     passed
         ? 'The restored workspace also loaded the seeded local issue detail (`TRACK-1`, `Platform Foundation`, `Loaded from local git.`), so the result covers content loading rather than the state label alone.'
@@ -704,6 +710,11 @@ List<String> _stringList(Object? value) {
       .map((entry) => '$entry'.trim())
       .where((entry) => entry.isNotEmpty)
       .toList(growable: false);
+}
+
+bool _shouldWriteBugDescription(Map<String, Object?> result) {
+  final error = '${result['error'] ?? ''}';
+  return error.contains('AssertionError');
 }
 
 String _formatList(Iterable<Object?> values, {int limit = 16}) {

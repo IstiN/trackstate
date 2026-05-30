@@ -377,6 +377,14 @@ class UrllibWebAppSession(WebAppSession):
             "Download capture is not supported by the urllib web session fallback."
         )
 
+    def start_network_recording(self, *, name: str, url_fragment: str) -> None:
+        del name, url_fragment
+        return None
+
+    def read_network_log(self, *, name: str) -> list[dict[str, object]]:
+        del name
+        return []
+
     def screenshot(self, path: str, *, full_page: bool = True) -> None:
         del path, full_page
         return None

@@ -57,6 +57,57 @@ void main() {
   );
 
   test(
+    'GitHub provider falls back to dataRef when both sourceRef and session branch are commit SHAs (stale write ref)',
+    () async {
+      const staleSha = '59c6bb158aadd5b519207735181ee530eba4fc80';
+      final provider = GitHubTrackStateProvider(
+        client: MockClient((request) async {
+          switch (request.url.path) {
+            case '/repos/owner/current':
+              return http.Response(
+                jsonEncode({
+                  'full_name': 'owner/current',
+                  'permissions': <String, Object?>{
+                    'pull': true,
+                    'push': true,
+                    'admin': false,
+                  },
+                }),
+                200,
+              );
+            case '/user':
+              return http.Response(
+                jsonEncode({
+                  'login': 'workspace-tester',
+                  'name': 'Workspace Tester',
+                }),
+                200,
+              );
+          }
+          throw StateError('Unexpected request: ${request.url}');
+        }),
+        repositoryName: 'owner/current',
+        dataRef: 'main',
+        sourceRef: staleSha,
+      );
+
+      // Unauthenticated: configuredBranch is empty, sourceRef is a SHA → dataRef
+      expect(await provider.resolveWriteBranch(), 'main');
+
+      await provider.authenticate(
+        const RepositoryConnection(
+          repository: 'owner/current',
+          branch: staleSha,
+          token: 'token',
+        ),
+      );
+
+      // Authenticated with SHA branch: sourceRef is also a SHA → dataRef
+      expect(await provider.resolveWriteBranch(), 'main');
+    },
+  );
+
+  test(
     'GitHub provider emits hosted snapshot reload for compare commits with load_snapshot_delta=1',
     () async {
       final provider = await _createAuthenticatedProvider(
@@ -322,6 +373,97 @@ void main() {
           cacheBustTokenFactory: () => 'unused',
         ),
         isNull,
+      );
+    },
+  );
+
+  test(
+    'GitHub provider cache-busts hosted tree and content reads when hosted sync caching is disabled',
+    () async {
+      Uri? treeRequestUri;
+      Uri? contentsRequestUri;
+      final provider = GitHubTrackStateProvider(
+        client: MockClient((request) async {
+          switch (request.url.path) {
+            case '/repos/owner/current':
+              return http.Response(
+                jsonEncode({
+                  'full_name': 'owner/current',
+                  'permissions': <String, Object?>{
+                    'pull': true,
+                    'push': true,
+                    'admin': false,
+                  },
+                }),
+                200,
+              );
+            case '/user':
+              return http.Response(
+                jsonEncode({
+                  'login': 'workspace-tester',
+                  'name': 'Workspace Tester',
+                }),
+                200,
+              );
+            case '/repos/owner/current/git/trees/main':
+              treeRequestUri = request.url;
+              return http.Response(
+                jsonEncode({
+                  'tree': [
+                    <String, Object?>{
+                      'path': 'DEMO/config/fields.json',
+                      'type': 'blob',
+                      'sha': 'tree-fields-sha',
+                    },
+                  ],
+                }),
+                200,
+              );
+            case '/repos/owner/current/contents/DEMO/config/fields.json':
+              contentsRequestUri = request.url;
+              return http.Response(
+                jsonEncode({
+                  'content': base64Encode(
+                    utf8.encode(
+                      '[{"id":"summary","name":"Summary","type":"string","required":true}]',
+                    ),
+                  ),
+                  'sha': 'content-fields-sha',
+                }),
+                200,
+              );
+          }
+          throw StateError('Unexpected request: ${request.url}');
+        }),
+        repositoryName: 'owner/current',
+        dataRef: 'main',
+        sourceRef: 'main',
+        disableHostedSyncRequestCaching: true,
+        hostedSyncCacheBustTokenFactory: () => 'fixed-cache-bust-token',
+      );
+
+      await provider.authenticate(
+        const RepositoryConnection(
+          repository: 'owner/current',
+          branch: 'main',
+          token: 'token',
+        ),
+      );
+
+      await provider.listTree(ref: 'main');
+      await provider.readTextFile('DEMO/config/fields.json', ref: 'main');
+
+      expect(treeRequestUri, isNotNull);
+      expect(treeRequestUri!.queryParameters, containsPair('recursive', '1'));
+      expect(
+        treeRequestUri!.queryParameters['_trackstate_refresh'],
+        'fixed-cache-bust-token',
+      );
+      expect(contentsRequestUri, isNotNull);
+      expect(contentsRequestUri!.queryParameters['ref'], 'main');
+      expect(
+        contentsRequestUri!.queryParameters['_trackstate_refresh'],
+        'fixed-cache-bust-token',
       );
     },
   );

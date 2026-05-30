@@ -13,6 +13,9 @@ The automation:
 4. saves the hosted field catalog and re-opens the saved field editor
 5. verifies the saved **Environment** field applies only to **Bug**
 
+The save verification waits for the hosted field catalog to repopulate so the
+test catches real post-save persistence failures instead of asserting too early.
+
 ## Install dependencies
 
 ```bash

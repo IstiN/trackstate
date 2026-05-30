@@ -414,27 +414,45 @@ def main() -> None:
                     ),
                 )
 
-                repo_after_save = _wait_for_catalog_repo_state(
+                repo_matched, repo_after_save = _poll_for_catalog_repo_state(
                     service=service,
                     expected_component_id=str(target_component["id"]),
                     expected_component_name=target_component_name,
                 )
                 result["repo_after_save"] = repo_after_save
-                _record_step(
-                    result,
-                    step=6,
-                    status="passed",
-                    action=(
-                        "Inspect the repository files config/priorities.json, "
-                        "config/components.json, and config/versions.json."
-                    ),
-                    observed=(
-                        f'priorities.json contains "{PRIORITY_ID}" / "{PRIORITY_NAME}", '
-                        f'components.json keeps ID "{target_component["id"]}" with the '
-                        f'updated name "{target_component_name}", and versions.json no '
-                        f'longer contains "{TEMP_VERSION_ID}".'
-                    ),
-                )
+                repo_failure_message: str | None = None
+                if repo_matched:
+                    _record_step(
+                        result,
+                        step=6,
+                        status="passed",
+                        action=(
+                            "Inspect the repository files config/priorities.json, "
+                            "config/components.json, and config/versions.json."
+                        ),
+                        observed=(
+                            f'priorities.json contains "{PRIORITY_ID}" / "{PRIORITY_NAME}", '
+                            f'components.json keeps ID "{target_component["id"]}" with the '
+                            f'updated name "{target_component_name}", and versions.json no '
+                            f'longer contains "{TEMP_VERSION_ID}".'
+                        ),
+                    )
+                else:
+                    repo_failure_message = (
+                        "Step 6 failed: the hosted save path did not persist the expected "
+                        "catalog state within the timeout.\n"
+                        f"Last observed state: {repo_after_save}"
+                    )
+                    _record_step(
+                        result,
+                        step=6,
+                        status="failed",
+                        action=(
+                            "Inspect the repository files config/priorities.json, "
+                            "config/components.json, and config/versions.json."
+                        ),
+                        observed=repo_failure_message,
+                    )
 
                 priorities_text_saved = page.open_catalog_tab(
                     label="Priorities",
@@ -457,6 +475,7 @@ def main() -> None:
                 result["components_labels_after_save"] = components_labels_saved
                 result["versions_tab_after_save"] = versions_text_saved
                 result["versions_labels_after_save"] = versions_labels_saved
+                post_save_ui_error: str | None = None
                 if (
                     f"{PRIORITY_NAME}\nID: {PRIORITY_ID}" not in priorities_labels_saved
                     or f"Edit priority {PRIORITY_NAME}" not in priorities_labels_saved
@@ -468,7 +487,7 @@ def main() -> None:
                         TEMP_VERSION_NAME in label for label in versions_labels_saved
                     )
                 ):
-                    raise AssertionError(
+                    post_save_ui_error = (
                         "Human verification failed: the saved Settings tabs did not present "
                         "the same visible catalog state a user would expect after saving.\n"
                         f"Priorities text:\n{priorities_text_saved}\n\n"
@@ -476,11 +495,8 @@ def main() -> None:
                         f"Components text:\n{components_text_saved}\n\n"
                         f"Component aria-labels:\n{components_labels_saved}\n\n"
                         f"Versions text:\n{versions_text_saved}\n\n"
-                        f"Version aria-labels:\n{versions_labels_saved}",
+                        f"Version aria-labels:\n{versions_labels_saved}"
                     )
-
-                page.screenshot(str(SUCCESS_SCREENSHOT_PATH))
-                result["screenshot"] = str(SUCCESS_SCREENSHOT_PATH)
                 _record_human_verification(
                     result,
                     check=(
@@ -493,6 +509,7 @@ def main() -> None:
                         f'components={_snippet("\\n".join(components_labels_saved), limit=400)}; '
                         f'versions={_snippet("\\n".join(versions_labels_saved), limit=400)}'
                     ),
+                    status="failed" if post_save_ui_error else "passed",
                 )
                 result["human_verification_summary"] = {
                     "priority_visible_text": priorities_text_saved,
@@ -503,6 +520,17 @@ def main() -> None:
                     "versions_visible_labels": versions_labels_saved,
                     "priority_editor_presentation": _editor_payload(priority_editor),
                 }
+                if repo_failure_message or post_save_ui_error:
+                    raise AssertionError(
+                        "\n\n".join(
+                            message
+                            for message in (repo_failure_message, post_save_ui_error)
+                            if message
+                        )
+                    )
+
+                page.screenshot(str(SUCCESS_SCREENSHOT_PATH))
+                result["screenshot"] = str(SUCCESS_SCREENSHOT_PATH)
             except Exception:
                 page.screenshot(str(SCREENSHOT_PATH))
                 result["screenshot"] = str(SCREENSHOT_PATH)
@@ -700,13 +728,13 @@ def _build_expected_component_name(
     )
 
 
-def _wait_for_catalog_repo_state(
+def _poll_for_catalog_repo_state(
     *,
     service: LiveSetupRepositoryService,
     expected_component_id: str,
     expected_component_name: str,
     timeout_seconds: int = 90,
-) -> dict[str, object]:
+) -> tuple[bool, dict[str, object]]:
     matched, last_observation = poll_until(
         probe=lambda: _observe_catalog_repo_state(
             service=service,
@@ -719,13 +747,7 @@ def _wait_for_catalog_repo_state(
         ),
         timeout_seconds=timeout_seconds,
     )
-    if not matched:
-        raise AssertionError(
-            "Step 6 failed: the hosted save path did not persist the expected catalog "
-            "state within the timeout.\n"
-            f"Last observed state: {last_observation}",
-        )
-    return last_observation
+    return matched, last_observation
 
 
 def _observe_catalog_repo_state(
@@ -898,10 +920,11 @@ def _record_human_verification(
     *,
     check: str,
     observed: str,
+    status: str = "passed",
 ) -> None:
     checks = result.setdefault("human_verification", [])
     assert isinstance(checks, list)
-    checks.append({"check": check, "observed": observed})
+    checks.append({"check": check, "observed": observed, "status": status})
 
 
 def _record_failure_step_from_error(result: dict[str, Any], message: str) -> None:
@@ -984,7 +1007,8 @@ def _build_jira_comment(result: dict[str, Any], *, passed: bool) -> str:
             "",
             "*Real user / human-style verification*",
             *[
-                f"* {entry['check']}\nObserved: {{code}}{entry['observed']}{{code}}"
+                f"* {str(entry.get('status', 'passed')).upper()}: {entry['check']}\n"
+                f"Observed: {{code}}{entry['observed']}{{code}}"
                 for entry in result.get("human_verification", [])
                 if isinstance(entry, dict)
             ],
@@ -1021,7 +1045,8 @@ def _build_pr_body(result: dict[str, Any], *, passed: bool) -> str:
         if isinstance(step, dict)
     ]
     human_lines = [
-        f"- **{entry['check']}** Observed: `{entry['observed']}`"
+        f"- **{str(entry.get('status', 'passed')).upper()}** — **{entry['check']}** "
+        f"Observed: `{entry['observed']}`"
         for entry in result.get("human_verification", [])
         if isinstance(entry, dict)
     ]
@@ -1103,6 +1128,14 @@ def _build_bug_description(result: dict[str, Any]) -> str:
             f"**Expected:** {EXPECTED_RESULT}",
             f"**Actual:** {_bug_actual_summary(result)}",
             "",
+            "## Human-style verification",
+            *[
+                f"- **{str(entry.get('status', 'passed')).upper()}** — {entry.get('check', '')}\n"
+                f"  - Observed: `{entry.get('observed', '')}`"
+                for entry in result.get("human_verification", [])
+                if isinstance(entry, dict)
+            ],
+            "",
             "## Missing or broken production capability",
             _missing_capability_summary(result),
             "",
@@ -1173,6 +1206,17 @@ def _bug_actual_summary(result: dict[str, Any]) -> str:
         return error_text or "The automation failed before a step-specific result was recorded."
 
     step_number = int(failure["step"])
+    if (
+        step_number == 6
+        and "hosted save path did not persist" in error_text
+        and any(signature in error_text for signature in POST_SAVE_PRODUCT_FAILURE_SIGNATURES)
+    ):
+        return (
+            "After `Save settings`, the repository JSON stayed on the original Priorities, "
+            "Components, and Versions values within the supported polling window, and the "
+            "saved Settings tabs also did not keep showing the new priority, renamed "
+            "component, and deleted version state a user had just submitted."
+        )
     if step_number == 3 and (
         "canonical component ID" in error_text or "retain the new component name" in error_text
     ):
@@ -1203,6 +1247,16 @@ def _missing_capability_summary(result: dict[str, Any]) -> str:
         return "The automation did not record a product-visible failure step."
 
     step_number = int(failure["step"])
+    if (
+        step_number == 6
+        and "hosted save path did not persist" in error_text
+        and any(signature in error_text for signature in POST_SAVE_PRODUCT_FAILURE_SIGNATURES)
+    ):
+        return (
+            "The hosted `Save settings` flow neither persists the visible catalog edits back "
+            "to the repository JSON within the expected commit/persistence window nor keeps "
+            "the saved Settings tabs aligned with the edits the user just committed."
+        )
     if step_number == 3 and (
         "canonical component ID" in error_text or "retain the new component name" in error_text
     ):
