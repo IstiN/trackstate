@@ -43,6 +43,7 @@ CUSTOM_FIELD_TYPE = "option"
 CUSTOM_FIELD_OPTIONS = ("Production", "Staging", "Development")
 CUSTOM_FIELD_OPTIONS_TEXT = ", ".join(CUSTOM_FIELD_OPTIONS)
 CUSTOM_FIELD_ISSUE_TYPES = {"Bug"}
+POST_SAVE_PERSISTENCE_WAIT_MS = 20_000
 
 
 @dataclass(frozen=True)
@@ -322,8 +323,12 @@ def main() -> None:
                     result["fields_tab_body_text_after_environment_save"] = (
                         refreshed_fields_text
                     )
-                    environment_row = settings_page.field_row_observation(
+                    result["visible_field_rows_after_environment_save"] = (
+                        settings_page.visible_field_rows()
+                    )
+                    environment_row = settings_page.wait_for_field_row(
                         CUSTOM_FIELD_NAME,
+                        timeout_ms=POST_SAVE_PERSISTENCE_WAIT_MS,
                     )
                     result["environment_row"] = _row_payload(environment_row)
                     _assert_custom_field_row(environment_row)
