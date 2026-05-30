@@ -27,8 +27,7 @@ import '../services/browser_focusable_control_stub.dart'
     if (dart.library.js_interop) '../services/browser_focusable_control_web.dart'
     as browser_focusable_control;
 import '../services/browser_text_field_value_sync_stub.dart'
-    if (dart.library.js_interop)
-        '../services/browser_text_field_value_sync_web.dart'
+    if (dart.library.js_interop) '../services/browser_text_field_value_sync_web.dart'
     as browser_text_field_value_sync;
 import '../services/browser_workspace_switcher_focus_matcher.dart';
 import '../services/browser_workspace_switcher_focus_monitor_stub.dart'
@@ -4974,46 +4973,49 @@ class _TrackerMainPane extends StatelessWidget {
         key: workspaceSwitcherOverlayHostKey,
         clipBehavior: Clip.none,
         children: [
-          Column(
-            children: [
-              _TopBar(
-                viewModel: viewModel,
-                workspaces: workspaces,
-                localWorkspaceAvailability: localWorkspaceAvailability,
-                compact: compact,
-                isDesktopWorkspaceSwitcherVisible:
-                    isDesktopWorkspaceSwitcherVisible,
-                workspaceSwitcherTriggerKey: workspaceSwitcherTriggerKey,
-                workspaceSwitcherTriggerFocusNode:
-                    workspaceSwitcherTriggerFocusNode,
-                desktopSearchFocusNode: desktopSearchFocusNode,
-                desktopSettingsFocusNode: desktopSettingsFocusNode,
-                onOpenCreateIssue: onOpenCreateIssue,
-                onOpenWorkspaceSwitcher: onOpenWorkspaceSwitcher,
-                onMoveWorkspaceSelection: onMoveWorkspaceSelection,
-                onFocusActiveWorkspaceSwitcherRow:
-                    onFocusActiveWorkspaceSwitcherRow,
-                onOpenWorkspaceOnboarding: onOpenWorkspaceOnboarding,
-                canOpenWorkspaceOnboarding: canOpenWorkspaceOnboarding,
-              ),
-              _RepositoryAccessBanner(viewModel: viewModel),
-              Expanded(
-                child: _SectionBody(
+          ExcludeSemantics(
+            excluding: isCreateIssueVisible,
+            child: Column(
+              children: [
+                _TopBar(
                   viewModel: viewModel,
-                  compact: compact,
-                  onOpenCreateIssue: onOpenCreateIssue,
-                  onApplyLocalGitConfiguration: onApplyLocalGitConfiguration,
                   workspaces: workspaces,
-                  authenticatedWorkspaceIds: authenticatedWorkspaceIds,
-                  onSelectWorkspace: onSelectWorkspace,
-                  onDeleteWorkspace: onDeleteWorkspace,
-                  workspaceRestoreFailure: workspaceRestoreFailure,
-                  onRetryStartupRecovery: onRetryStartupRecovery,
-                  onRetryWorkspaceRestore: onRetryWorkspaceRestore,
-                  attachmentPicker: attachmentPicker,
+                  localWorkspaceAvailability: localWorkspaceAvailability,
+                  compact: compact,
+                  isDesktopWorkspaceSwitcherVisible:
+                      isDesktopWorkspaceSwitcherVisible,
+                  workspaceSwitcherTriggerKey: workspaceSwitcherTriggerKey,
+                  workspaceSwitcherTriggerFocusNode:
+                      workspaceSwitcherTriggerFocusNode,
+                  desktopSearchFocusNode: desktopSearchFocusNode,
+                  desktopSettingsFocusNode: desktopSettingsFocusNode,
+                  onOpenCreateIssue: onOpenCreateIssue,
+                  onOpenWorkspaceSwitcher: onOpenWorkspaceSwitcher,
+                  onMoveWorkspaceSelection: onMoveWorkspaceSelection,
+                  onFocusActiveWorkspaceSwitcherRow:
+                      onFocusActiveWorkspaceSwitcherRow,
+                  onOpenWorkspaceOnboarding: onOpenWorkspaceOnboarding,
+                  canOpenWorkspaceOnboarding: canOpenWorkspaceOnboarding,
                 ),
-              ),
-            ],
+                _RepositoryAccessBanner(viewModel: viewModel),
+                Expanded(
+                  child: _SectionBody(
+                    viewModel: viewModel,
+                    compact: compact,
+                    onOpenCreateIssue: onOpenCreateIssue,
+                    onApplyLocalGitConfiguration: onApplyLocalGitConfiguration,
+                    workspaces: workspaces,
+                    authenticatedWorkspaceIds: authenticatedWorkspaceIds,
+                    onSelectWorkspace: onSelectWorkspace,
+                    onDeleteWorkspace: onDeleteWorkspace,
+                    workspaceRestoreFailure: workspaceRestoreFailure,
+                    onRetryStartupRecovery: onRetryStartupRecovery,
+                    onRetryWorkspaceRestore: onRetryWorkspaceRestore,
+                    attachmentPicker: attachmentPicker,
+                  ),
+                ),
+              ],
+            ),
           ),
           if (!compact && desktopWorkspaceSwitcherContent != null)
             _DesktopWorkspaceSwitcherOverlay(
@@ -5024,14 +5026,16 @@ class _TrackerMainPane extends StatelessWidget {
             ),
           if (isCreateIssueVisible)
             Positioned.fill(
-              child: _CreateIssueOverlay(
-                compact: compact,
-                child: _CreateIssueDialog(
-                  viewModel: viewModel,
-                  onDismiss: onCloseCreateIssue,
-                  prefill:
-                      createIssuePrefill ??
-                      _CreateIssuePrefill(originSection: viewModel.section),
+              child: BlockSemantics(
+                child: _CreateIssueOverlay(
+                  compact: compact,
+                  child: _CreateIssueDialog(
+                    viewModel: viewModel,
+                    onDismiss: onCloseCreateIssue,
+                    prefill:
+                        createIssuePrefill ??
+                        _CreateIssuePrefill(originSection: viewModel.section),
+                  ),
                 ),
               ),
             ),
@@ -12135,27 +12139,38 @@ class _IssueDetailState extends State<_IssueDetail> {
         !hasBlockedWriteAccess && !widget.viewModel.isSaving;
     final actions = [
       if (widget.viewModel.issueDetailReturnSection case final returnSection?)
-        _IssueDetailActionButton(
-          label: '${l10n.back} ${_trackerSectionLabel(l10n, returnSection)}',
-          onPressed: widget.viewModel.returnFromIssueDetail,
+        FocusTraversalOrder(
+          order: const NumericFocusOrder(1),
+          child: _IssueDetailActionButton(
+            label: '${l10n.back} ${_trackerSectionLabel(l10n, returnSection)}',
+            sortOrder: 1,
+            onPressed: widget.viewModel.returnFromIssueDetail,
+          ),
         ),
-      _PrimaryButton(
-        label: l10n.transition,
-        icon: TrackStateIconGlyph.gitBranch,
-        onPressed: canUseWriteActions
-            ? () => _openEditDialog(workflowOnly: true)
-            : null,
+      FocusTraversalOrder(
+        order: const NumericFocusOrder(2),
+        child: _PrimaryButton(
+          label: l10n.transition,
+          icon: TrackStateIconGlyph.gitBranch,
+          semanticsSortOrder: 2,
+          onPressed: canUseWriteActions
+              ? () => _openEditDialog(workflowOnly: true)
+              : null,
+        ),
       ),
       _IssueDetailActionButton(
         label: l10n.createChildIssue,
+        sortOrder: 3,
         onPressed: widget.viewModel.isSaving ? null : widget.onCreateChildIssue,
       ),
       _IssueDetailActionButton(
         label: l10n.comment,
+        sortOrder: 4,
         onPressed: canUseWriteActions ? () => _selectCollaborationTab(1) : null,
       ),
       _IssueDetailActionButton(
         label: l10n.edit,
+        sortOrder: 5,
         onPressed: canUseWriteActions
             ? () => _openEditDialog(workflowOnly: false)
             : null,
@@ -15193,6 +15208,7 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
                       );
                 return _SurfaceCard(
                   semanticLabel: l10n.createIssue,
+                  explicitChildNodes: true,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -17110,6 +17126,8 @@ class _AttachmentRow extends StatelessWidget {
     final colors = context.ts;
     final l10n = AppLocalizations.of(context)!;
     final downloadLabel = l10n.downloadAttachment(attachment.name);
+    final downloadFocusTargetId =
+        'issue-detail-attachment-download-${Uri.encodeComponent(attachment.name)}';
     final summaryLabel =
         '${attachment.name} ${attachment.author} ${attachment.createdAt}';
     return Container(
@@ -17143,9 +17161,7 @@ class _AttachmentRow extends StatelessWidget {
                     ),
                     Text(
                       '${attachment.author} · ${attachment.createdAt}',
-                      style: Theme.of(
-                        context,
-                      ).textTheme.labelSmall?.copyWith(color: colors.text),
+                      style: _collaborationMetadataTextStyle(context),
                     ),
                   ],
                 ),
@@ -17161,28 +17177,52 @@ class _AttachmentRow extends StatelessWidget {
                 style: Theme.of(context).textTheme.labelSmall,
               ),
               const SizedBox(height: 4),
-              Semantics(
-                button: true,
-                label: downloadLabel,
-                child: IconButton(
-                  onPressed: () => onDownload(attachment),
-                  tooltip: downloadLabel,
-                  iconSize: 18,
-                  visualDensity: VisualDensity.compact,
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(
-                    minWidth: 32,
-                    minHeight: 32,
-                  ),
-                  icon: ExcludeSemantics(
-                    child: TrackStateIcon(
-                      TrackStateIconGlyph.attachment,
-                      size: 18,
-                      color: colors.text,
+              kIsWeb
+                  ? MergeSemantics(
+                      child: Semantics(
+                        identifier: downloadFocusTargetId,
+                        label: downloadLabel,
+                        child: SizedBox(
+                          width: 32,
+                          height: 32,
+                          child:
+                              browser_focusable_control.BrowserFocusableControl(
+                                label: downloadLabel,
+                                onPressed: () => onDownload(attachment),
+                                focusTargetId: downloadFocusTargetId,
+                                child: Center(
+                                  child: TrackStateIcon(
+                                    TrackStateIconGlyph.attachment,
+                                    size: 18,
+                                    color: colors.text,
+                                  ),
+                                ),
+                              ),
+                        ),
+                      ),
+                    )
+                  : Semantics(
+                      button: true,
+                      label: downloadLabel,
+                      child: IconButton(
+                        onPressed: () => onDownload(attachment),
+                        tooltip: downloadLabel,
+                        iconSize: 18,
+                        visualDensity: VisualDensity.compact,
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(
+                          minWidth: 32,
+                          minHeight: 32,
+                        ),
+                        icon: ExcludeSemantics(
+                          child: TrackStateIcon(
+                            TrackStateIconGlyph.attachment,
+                            size: 18,
+                            color: colors.text,
+                          ),
+                        ),
+                      ),
                     ),
-                  ),
-                ),
-              ),
             ],
           ),
         ],
@@ -17416,13 +17456,20 @@ class _CommentBubble extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      comment.author,
-                      style: Theme.of(context).textTheme.labelLarge,
-                    ),
-                    Text(
-                      metadata,
-                      style: _collaborationMetadataTextStyle(context),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 2,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        Text(
+                          comment.author,
+                          style: Theme.of(context).textTheme.labelLarge,
+                        ),
+                        Text(
+                          metadata,
+                          style: _collaborationMetadataTextStyle(context),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 6),
                     Text(comment.body),
@@ -17448,12 +17495,12 @@ String _commentMetadata(IssueComment comment, AppLocalizations l10n) {
 
 TextStyle? _collaborationMetadataTextStyle(BuildContext context) {
   final theme = Theme.of(context);
-  return theme.textTheme.labelSmall?.copyWith(
+  return theme.textTheme.labelLarge?.copyWith(
     color: context.ts.text,
-    fontSize: 12,
-    fontWeight: FontWeight.w500,
-    height: 1.2,
-    letterSpacing: .24,
+    fontSize: 14,
+    fontWeight: FontWeight.w700,
+    height: 1.25,
+    letterSpacing: 0,
   );
 }
 

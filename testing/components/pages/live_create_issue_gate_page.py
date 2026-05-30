@@ -17,6 +17,7 @@ class CreateIssueGateObservation:
     callout_semantics_label: str
     create_heading_visible: bool
     summary_field_count: int
+    description_field_count: int
     create_button_count: int
     save_button_count: int
     open_settings_button_count: int
@@ -84,6 +85,21 @@ class LiveCreateIssueGatePage:
               );
               const pointInRect = (x, y, rect) =>
                 x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+              const candidateSort = (left, right) => {
+                if (left.role === 'dialog' && right.role !== 'dialog') {
+                  return -1;
+                }
+                if (left.role !== 'dialog' && right.role === 'dialog') {
+                  return 1;
+                }
+                if (left.label === createLabel && right.label !== createLabel) {
+                  return -1;
+                }
+                if (left.label !== createLabel && right.label === createLabel) {
+                  return 1;
+                }
+                return right.area - left.area;
+              };
               const buttons = Array.from(
                 document.querySelectorAll('flt-semantics[role="button"]'),
               )
@@ -116,6 +132,8 @@ class LiveCreateIssueGatePage:
                     right: rect.right,
                     top: rect.top,
                     bottom: rect.bottom,
+                    role: candidate.getAttribute('role'),
+                    label: candidate.getAttribute('aria-label') ?? '',
                   };
                 })
                 .sort((left, right) => left.area - right.area);
@@ -124,7 +142,14 @@ class LiveCreateIssueGatePage:
                   pointInRect(button.centerX, button.centerY, container),
                 ),
               );
-              return bodyText.includes(createLabel) && !!gateButton;
+              const createSurface = gateButton
+                ? containers
+                    .filter((candidate) =>
+                      pointInRect(gateButton.centerX, gateButton.centerY, candidate),
+                    )
+                    .sort(candidateSort)[0] ?? null
+                : null;
+              return bodyText.includes(createLabel) && !!gateButton && !!createSurface;
             }
             """,
             arg={"actionLabel": primary_action_label},
@@ -159,11 +184,35 @@ class LiveCreateIssueGatePage:
               );
               const pointInRect = (x, y, rect) =>
                 x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
-              const buttonCount = (label) => Array.from(
+              const candidateSort = (left, right) => {
+                if (left.role === 'dialog' && right.role !== 'dialog') {
+                  return -1;
+                }
+                if (left.role !== 'dialog' && right.role === 'dialog') {
+                  return 1;
+                }
+                if (left.label === createLabel && right.label !== createLabel) {
+                  return -1;
+                }
+                if (left.label !== createLabel && right.label === createLabel) {
+                  return 1;
+                }
+                return right.area - left.area;
+              };
+              const buttonMatches = (label, scope, visibleOnly) => Array.from(
                 document.querySelectorAll('flt-semantics[role="button"]'),
               ).filter((candidate) => {
                 const text = elementText(candidate);
-                return isVisible(candidate) && text.includes(label);
+                if (!text.includes(label)) {
+                  return false;
+                }
+                if (visibleOnly && !isVisible(candidate)) {
+                  return false;
+                }
+                const rect = candidate.getBoundingClientRect();
+                const centerX = rect.left + (rect.width / 2);
+                const centerY = rect.top + (rect.height / 2);
+                return scope === null || pointInRect(centerX, centerY, scope);
               }).length;
               const buttons = Array.from(
                 document.querySelectorAll('flt-semantics[role="button"]'),
@@ -198,6 +247,7 @@ class LiveCreateIssueGatePage:
                     right: rect.right,
                     top: rect.top,
                     bottom: rect.bottom,
+                    role: candidate.getAttribute('role'),
                     label: candidate.getAttribute('aria-label') ?? '',
                     text,
                   };
@@ -219,6 +269,13 @@ class LiveCreateIssueGatePage:
                 })
                 .find((candidate) => candidate !== null);
               const gateContainer = gateMatch?.container ?? null;
+              const createSurface = gateMatch
+                ? containers
+                    .filter((candidate) =>
+                      pointInRect(gateMatch.centerX, gateMatch.centerY, candidate),
+                    )
+                    .sort(candidateSort)[0] ?? null
+                : null;
               const gateOpenSettingsButtonCount = gateContainer
                 ? buttons.filter((button) =>
                     pointInRect(button.centerX, button.centerY, gateContainer),
@@ -230,9 +287,10 @@ class LiveCreateIssueGatePage:
                 calloutSemanticsLabel: gateContainer?.label ?? '',
                 createHeadingVisible: bodyText.includes(createLabel),
                 summaryFieldCount: document.querySelectorAll('input[aria-label="Summary"]').length,
-                createButtonCount: buttonCount('Create'),
-                saveButtonCount: buttonCount('Save'),
-                openSettingsButtonCount: buttonCount(actionLabel),
+                descriptionFieldCount: document.querySelectorAll('textarea[aria-label="Description"]').length,
+                createButtonCount: buttonMatches('Create', createSurface, true),
+                saveButtonCount: buttonMatches('Save', createSurface, true),
+                openSettingsButtonCount: buttonMatches(actionLabel, null, true),
                 gateOpenSettingsButtonCount,
                 gateCtaCenterX: gateMatch?.centerX ?? null,
                 gateCtaCenterY: gateMatch?.centerY ?? null,
@@ -252,6 +310,7 @@ class LiveCreateIssueGatePage:
             callout_semantics_label=str(payload["calloutSemanticsLabel"]),
             create_heading_visible=bool(payload["createHeadingVisible"]),
             summary_field_count=int(payload["summaryFieldCount"]),
+            description_field_count=int(payload["descriptionFieldCount"]),
             create_button_count=int(payload["createButtonCount"]),
             save_button_count=int(payload["saveButtonCount"]),
             open_settings_button_count=int(payload["openSettingsButtonCount"]),

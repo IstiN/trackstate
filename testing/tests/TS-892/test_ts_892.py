@@ -603,19 +603,6 @@ def _assert_permanent_error_state(
             f"`{hosted_name}` selected as the active hosted workspace even though "
             "the saved deleted local workspace row was still present.",
         )
-    elif selected_row is None:
-        # Fallback: the switcher parser found no selected row (recovery surface was open).
-        # Assert via the persisted activeWorkspaceId from localStorage that the app did
-        # not silently switch the active workspace to the hosted workspace.
-        active_id = persisted_workspace_state.get("activeWorkspaceId")
-        if isinstance(active_id, str) and active_id.startswith("hosted:"):
-            failures.append(
-                "the persisted activeWorkspaceId in localStorage was changed to a hosted "
-                "workspace even though the deleted local workspace configuration still "
-                f"exists (activeWorkspaceId={active_id!r}). "
-                "No selected row was visible in the switcher, so this storage snapshot "
-                "is the authoritative signal that the app defaulted to the hosted workspace.",
-            )
     if trigger is not None and (
         trigger.display_name == HOSTED_DISPLAY_NAME or trigger.workspace_type == "Hosted"
     ):

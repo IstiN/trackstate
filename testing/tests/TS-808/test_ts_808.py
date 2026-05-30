@@ -23,6 +23,9 @@ from testing.components.pages.live_workspace_switcher_page import (  # noqa: E40
 from testing.components.pages.live_project_settings_page import (  # noqa: E402
     LiveProjectSettingsPage,
 )
+from testing.components.pages.trackstate_tracker_page import (  # noqa: E402
+    TrackStateTrackerPage,
+)
 from testing.components.services.live_setup_repository_service import (  # noqa: E402
     LiveSetupRepositoryService,
 )
@@ -98,6 +101,9 @@ def main() -> None:
         "desktop_viewport": DESKTOP_VIEWPORT,
         "user_login": user.login,
         "preloaded_workspace_state": workspace_state,
+        "workspace_token_profile_ids": list(
+            _workspace_token_profile_ids(workspace_state),
+        ),
         "prepared_local_workspace": prepared_local_workspace,
         "trigger_wait_seconds": TRIGGER_WAIT_SECONDS,
         "steps": [],
@@ -111,6 +117,7 @@ def main() -> None:
             repository=config.repository,
             token=token,
             workspace_state=workspace_state,
+            workspace_token_profile_ids=_workspace_token_profile_ids(workspace_state),
         )
         with create_live_tracker_app(
             config,
@@ -346,6 +353,19 @@ def _workspace_state(repository: str) -> dict[str, object]:
     }
 
 
+def _workspace_token_profile_ids(workspace_state: dict[str, object]) -> tuple[str, ...]:
+    raw_profiles = workspace_state.get("profiles", [])
+    if not isinstance(raw_profiles, list):
+        return ()
+    return tuple(
+        workspace_id
+        for profile in raw_profiles
+        if isinstance(profile, dict)
+        for workspace_id in [str(profile.get("id", "")).strip()]
+        if workspace_id
+    )
+
+
 def _prepare_local_workspace_repository() -> dict[str, object]:
     local_path = Path(LOCAL_TARGET)
     local_path.mkdir(parents=True, exist_ok=True)
@@ -556,7 +576,11 @@ def _ensure_active_local_precondition(
 ) -> WorkspaceSwitcherTriggerObservation:
     trigger = initial_trigger
     current_body_text = page.current_body_text()
-    if "Connect GitHub" in current_body_text:
+    if _session_requires_connect(
+        body_text=current_body_text,
+        user_login=user_login,
+        repository=repository,
+    ):
         connection_body_text = settings_page.ensure_connected(
             token=token,
             repository=repository,
@@ -663,7 +687,17 @@ def _ensure_active_local_precondition(
         f"Observed switcher text:\n{switcher.switcher_text}"
     )
 
-
+def _session_requires_connect(
+    *,
+    body_text: str,
+    user_login: str,
+    repository: str,
+) -> bool:
+    return not TrackStateTrackerPage.body_has_authenticated_session(
+        body_text,
+        user_login=user_login,
+        repository=repository,
+    )
 def _restore_unavailable_local_workspace(
     *,
     tracker_page,
@@ -823,50 +857,12 @@ def _find_active_local_row(
             and row.state_label == "Local Git"
         ):
             return row
-    fallback_row = _active_local_row_from_visible_switcher_text(
-        switcher=switcher,
-        trigger=trigger,
-    )
-    if fallback_row is not None:
-        return fallback_row
     raise AssertionError(
         "Step 2 failed: the workspace switcher did not show a selected active local "
         "workspace row in the `Local Git` state after startup.\n"
         f"Observed trigger label: {trigger.semantic_label!r}\n"
         f"Observed rows: {[row.visible_text for row in switcher.rows]!r}\n"
         f"Observed switcher text:\n{switcher.switcher_text}"
-    )
-
-
-def _active_local_row_from_visible_switcher_text(
-    *,
-    switcher: WorkspaceSwitcherObservation,
-    trigger: WorkspaceSwitcherTriggerObservation,
-) -> WorkspaceSwitcherRowObservation | None:
-    if not _trigger_matches_active_local_precondition(trigger):
-        return None
-    summary = (
-        f"{LOCAL_DISPLAY_NAME}, Local, Local Git, {LOCAL_TARGET} • Branch: {DEFAULT_BRANCH}"
-    )
-    if summary not in switcher.switcher_text:
-        return None
-    tail = switcher.switcher_text.split(summary, 1)[1]
-    hosted_summary_prefix = f"{HOSTED_DISPLAY_NAME}, Hosted,"
-    row_region = tail.split(hosted_summary_prefix, 1)[0]
-    visible_actions: list[str] = []
-    if "Connect GitHub" in row_region:
-        visible_actions.append("Connect GitHub")
-    return WorkspaceSwitcherRowObservation(
-        display_name=LOCAL_DISPLAY_NAME,
-        target_type_label="Local",
-        state_label="Local Git",
-        detail_text=f"{LOCAL_TARGET} • Branch: {DEFAULT_BRANCH}",
-        visible_text=" ".join([summary, *visible_actions]).strip(),
-        selected=True,
-        semantics_label=summary,
-        icon_accessibility_label=None,
-        action_labels=tuple(visible_actions),
-        button_labels=tuple(visible_actions),
     )
 
 
