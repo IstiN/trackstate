@@ -203,6 +203,12 @@ def main() -> None:
                 )
 
                 switcher = page.open_and_observe()
+                switcher = _ensure_active_local_row_observable(
+                    page=page,
+                    switcher=switcher,
+                    trigger=trigger,
+                    result=result,
+                )
                 result["switcher_observation"] = _switcher_payload(switcher)
                 _record_step(
                     result,
@@ -765,6 +771,57 @@ def _wait_for_signed_in_active_local_precondition(
     )
 
 
+def _ensure_active_local_row_observable(
+    *,
+    page: LiveWorkspaceSwitcherPage,
+    switcher: WorkspaceSwitcherObservation,
+    trigger: WorkspaceSwitcherTriggerObservation,
+    result: dict[str, object],
+) -> WorkspaceSwitcherObservation:
+    if switcher.rows:
+        return switcher
+    if not _switcher_text_mentions_active_local_row(
+        switcher_text=switcher.switcher_text,
+        trigger=trigger,
+    ):
+        return switcher
+    rows_materialized, reprobed_switcher = poll_until(
+        probe=lambda: page.observe_open_switcher(timeout_ms=5_000),
+        is_satisfied=lambda observation: bool(observation.rows),
+        timeout_seconds=10,
+        interval_seconds=1,
+    )
+    result["switcher_row_reprobe_observation"] = _switcher_payload(reprobed_switcher)
+    if rows_materialized:
+        return reprobed_switcher
+    raise AssertionError(
+        "Step 2 could not inspect the active local workspace row because the visible "
+        "workspace switcher text already showed the active Local Git row, but the "
+        "observation layer kept returning zero parsed rows after retrying. This is an "
+        "instrumentation failure, not valid product evidence for TS-808.\n"
+        f"Observed trigger label: {trigger.semantic_label!r}\n"
+        f"Observed initial switcher text:\n{switcher.switcher_text}\n"
+        "Observed switcher text after reprobe:\n"
+        f"{reprobed_switcher.switcher_text}"
+    )
+
+
+def _switcher_text_mentions_active_local_row(
+    *,
+    switcher_text: str,
+    trigger: WorkspaceSwitcherTriggerObservation,
+) -> bool:
+    normalized_switcher_text = " ".join(switcher_text.split()).casefold()
+    if not normalized_switcher_text:
+        return False
+    row_fragments = [
+        trigger.display_name,
+        trigger.workspace_type,
+        trigger.state_label,
+    ]
+    return all(fragment.casefold() in normalized_switcher_text for fragment in row_fragments)
+
+
 def _observe_signed_in_active_local_precondition(
     *,
     page: LiveWorkspaceSwitcherPage,
@@ -818,6 +875,8 @@ def _signed_in_active_local_precondition(
         user_login=user_login,
         repository=repository,
     )
+
+
 def _session_requires_connect(
     *,
     body_text: str,
@@ -1018,6 +1077,8 @@ def _row_has_visible_workspace_actions(row: WorkspaceSwitcherRowObservation) -> 
     return any(
         label != row.visible_text and label.startswith(action_prefixes) for label in labels
     )
+
+
 def _saved_workspace_action_label(
     row: WorkspaceSwitcherSavedWorkspaceRowObservation | None,
 ) -> str:
