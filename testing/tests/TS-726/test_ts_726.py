@@ -287,17 +287,22 @@ def main() -> None:
             )
             result["desktop_surface_observation"] = _surface_payload(surface)
 
+            sheet_sequence = page.collect_tab_sequence(tab_count=SHEET_TAB_COUNT)
+            result["desktop_sheet_focus_sequence"] = [
+                asdict(step) for step in sheet_sequence
+            ]
             panel = page.observe_open_panel(timeout_ms=30_000)
             result["desktop_open_panel_observation"] = asdict(panel)
             sheet_tab_stops = page.observe_internal_tab_stops(
                 panel=panel,
                 timeout_ms=30_000,
             )
-            result["desktop_sheet_focus_sequence"] = [
+            result["desktop_internal_tab_stops"] = [
                 asdict(tab_stop) for tab_stop in sheet_tab_stops
             ]
             try:
                 sheet_summary = _assert_sheet_accessibility(
+                    sequence=sheet_sequence,
                     tab_stops=sheet_tab_stops,
                     surface=surface,
                 )
@@ -495,6 +500,7 @@ def _workspace_state() -> dict[str, object]:
 
 def _assert_sheet_accessibility(
     *,
+    sequence: tuple[FocusNavigationStep, ...],
     tab_stops: tuple[WorkspaceSwitcherTabStopObservation, ...],
     surface: WorkspaceSwitcherSurfaceObservation,
 ) -> str:
@@ -532,26 +538,25 @@ def _assert_sheet_accessibility(
             f"Missing semantics labels: {list(surface.missing_semantics_labels)!r}\n"
             f"Observed semantics labels: {_semantics_summary(surface.semantics_nodes)}",
         )
-    labels = [_tab_stop_label(tab_stop) for tab_stop in tab_stops]
+    labels = [step.after_label or "" for step in sequence]
     has_workspace_list_control = any(
         _is_workspace_list_control_label(label) for label in labels
     )
-    has_add_workspace_control = any(
-        _is_add_workspace_control_label(label) or label == "Save and switch"
-        for label in labels
-    )
+    has_add_workspace_control = any(_is_add_workspace_control_label(label) for label in labels)
     has_remove_control = any(_is_remove_control_label(label) for label in labels)
     if not has_workspace_list_control or not has_add_workspace_control or not has_remove_control:
         raise AssertionError(
-            "Step 3 failed: the workspace switcher surface did not expose keyboard-reachable "
-            "tab stops for the expected list, add-workspace, and remove controls.\n"
+            "Step 3 failed: real keyboard Tab navigation through the workspace switcher "
+            "surface did not reach the expected list, add-workspace, and remove controls.\n"
+            f"Observed focus sequence: {_focus_sequence_summary(sequence)}\n"
             f"Observed keyboard tab stops: {_tab_stop_summary(tab_stops)}\n"
             f"Observed interactive labels: {[item.label for item in surface.interactive_elements]!r}",
         )
-    _assert_logical_sheet_tab_stop_order(tab_stops)
+    _assert_logical_sheet_focus_order(sequence, tab_stops)
     return (
+        f"focus_sequence={_focus_sequence_summary(sequence)}; "
+        f"focus_groups={_focus_group_summary(sequence)}; "
         f"keyboard_tab_stops={_tab_stop_summary(tab_stops)}; "
-        f"focus_groups={_tab_stop_group_summary(tab_stops)}; "
         f"interactive_labels={[item.label for item in surface.interactive_elements]!r}; "
         f"semantics_labels={_semantics_summary(surface.semantics_nodes)}"
     )
@@ -849,22 +854,25 @@ def _focus_sequence_summary(sequence: tuple[FocusNavigationStep, ...]) -> str:
     )
 
 
-def _assert_logical_sheet_tab_stop_order(
+def _assert_logical_sheet_focus_order(
+    sequence: tuple[FocusNavigationStep, ...],
     tab_stops: tuple[WorkspaceSwitcherTabStopObservation, ...],
 ) -> None:
     ranked_groups: list[tuple[int, str, str]] = []
     last_rank = -1
-    for tab_stop in tab_stops:
-        label = _tab_stop_label(tab_stop)
-        group = _sheet_tab_stop_group(label)
+    for step in sequence:
+        label = step.after_label or ""
+        group = _sheet_focus_group(label)
         if group is None:
             continue
         rank = _sheet_focus_group_rank(group)
-        ranked_groups.append((tab_stop.dom_index, label, group))
+        ranked_groups.append((step.step, label, group))
         if rank < last_rank:
             raise AssertionError(
-                "Step 3 failed: the keyboard tab stops inside the workspace switcher did "
+                "Step 3 failed: keyboard Tab navigation inside the workspace switcher did "
                 "not keep a logical focus order across the major control groups.\n"
+                f"Observed focus sequence: {_focus_sequence_summary(sequence)}\n"
+                f"Observed focus groups: {_focus_group_summary(sequence)}\n"
                 f"Observed keyboard tab stops: {_tab_stop_summary(tab_stops)}\n"
                 f"Observed focus groups: {_tab_stop_group_summary(tab_stops)}"
             )
@@ -872,9 +880,22 @@ def _assert_logical_sheet_tab_stop_order(
     if not ranked_groups:
         raise AssertionError(
             "Step 3 failed: the workspace switcher surface did not expose enough labeled "
-            "keyboard tab stops to verify logical group order.\n"
+            "keyboard focus targets to verify logical group order.\n"
+            f"Observed focus sequence: {_focus_sequence_summary(sequence)}\n"
             f"Observed keyboard tab stops: {_tab_stop_summary(tab_stops)}"
         )
+
+
+def _focus_group_summary(sequence: tuple[FocusNavigationStep, ...]) -> str:
+    grouped_steps = []
+    for step in sequence:
+        label = step.after_label or "<none>"
+        group = _sheet_focus_group(step.after_label or "")
+        if group is None:
+            grouped_steps.append(f"{step.step}:{label}[other]")
+            continue
+        grouped_steps.append(f"{step.step}:{label}[{group}]")
+    return " -> ".join(grouped_steps)
 
 
 def _tab_stop_group_summary(tab_stops: tuple[WorkspaceSwitcherTabStopObservation, ...]) -> str:
@@ -887,6 +908,10 @@ def _tab_stop_group_summary(tab_stops: tuple[WorkspaceSwitcherTabStopObservation
             continue
         grouped_steps.append(f"{tab_stop.dom_index}:{label}[{group}]")
     return " -> ".join(grouped_steps)
+
+
+def _sheet_focus_group(label: str) -> str | None:
+    return _sheet_tab_stop_group(label)
 
 
 def _sheet_tab_stop_group(label: str) -> str | None:
