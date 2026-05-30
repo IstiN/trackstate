@@ -39,20 +39,35 @@ class TrackStateTrackerAppContext(AbstractContextManager[TrackStateTrackerPage])
 def create_live_tracker_app(
     config: LiveSetupTestConfig,
     *,
-    runtime_factory: WebAppRuntimeFactory = PlaywrightWebAppRuntime,
+    runtime_factory: WebAppRuntimeFactory | None = None,
+    viewport_width: int = 1440,
+    viewport_height: int = 960,
 ) -> TrackStateTrackerAppContext:
-    return TrackStateTrackerAppContext(config=config, runtime_factory=runtime_factory)
+    return TrackStateTrackerAppContext(
+        config=config,
+        runtime_factory=runtime_factory
+        or (
+            lambda: PlaywrightWebAppRuntime(
+                viewport_width=viewport_width,
+                viewport_height=viewport_height,
+            )
+        ),
+    )
 
 
 def create_live_tracker_app_with_stored_token(
     config: LiveSetupTestConfig,
     *,
     token: str,
+    viewport_width: int = 1440,
+    viewport_height: int = 960,
 ) -> TrackStateTrackerAppContext:
     return TrackStateTrackerAppContext(
         config=config,
         runtime_factory=lambda: PlaywrightStoredTokenWebAppRuntime(
             repository=config.repository,
             token=token,
+            viewport_width=viewport_width,
+            viewport_height=viewport_height,
         ),
     )

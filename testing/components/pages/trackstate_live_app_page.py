@@ -64,8 +64,32 @@ class TrackStateLiveAppPage:
         return self.session.body_text()
 
     def open_connect_dialog(self) -> None:
-        self.session.click('flt-semantics[aria-label="Connect GitHub"]')
-        self.session.wait_for_selector(self.TOKEN_INPUT_SELECTOR, timeout_ms=30_000)
+        errors: list[str] = []
+        for selector, has_text in (
+            (self.CONNECT_BUTTON_SELECTOR, "Connect GitHub"),
+            ('flt-semantics[aria-label="Connect GitHub"]', None),
+            ('[aria-label="Connect GitHub"]', None),
+        ):
+            if self.session.count(selector, has_text=has_text) == 0:
+                continue
+            try:
+                self.session.click(
+                    selector,
+                    has_text=has_text,
+                    timeout_ms=30_000,
+                )
+                self.session.wait_for_selector(
+                    self.TOKEN_INPUT_SELECTOR,
+                    timeout_ms=30_000,
+                )
+                return
+            except WebAppTimeoutError as error:
+                errors.append(str(error))
+
+        raise AssertionError(
+            "Step 2 failed: the hosted app did not expose a working Connect GitHub "
+            f"action.\nVisible body text: {self.body_text()}\nSelector attempts: {errors}",
+        )
 
     def read_connect_dialog_state(self) -> ConnectDialogState:
         return ConnectDialogState(

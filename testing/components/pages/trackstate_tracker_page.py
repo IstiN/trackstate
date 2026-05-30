@@ -38,12 +38,13 @@ class TrackStateTrackerPage:
     SAVE_LABEL = "Save"
     CANCEL_LABEL = "Cancel"
     BACK_TO_BOARD_LABEL = "Back to Board"
+    CONNECTED_BANNER_PREFIX = "Connected as "
     CONNECTED_BANNER_TEMPLATE = (
         "Connected as {user_login} to {repository}. Drag cards to commit status changes."
     )
     SAVE_FAILED_PREFIX = "Save failed:"
     BUTTON_SELECTOR = 'flt-semantics[role="button"]'
-    CONNECT_BUTTON_SELECTOR = 'flt-semantics[role="button"][aria-label="Connect GitHub"]'
+    CONNECT_BUTTON_SELECTOR = BUTTON_SELECTOR
 
     def __init__(self, session: WebAppSession, app_url: str) -> None:
         self.session = session
@@ -76,10 +77,18 @@ class TrackStateTrackerPage:
         repository: str,
         user_login: str,
     ) -> ConnectionObservation:
-        if self.session.count(self.CONNECT_BUTTON_SELECTOR) == 0:
+        body_text = self.body_text()
+        if (
+            self.CONNECTED_BANNER_TEMPLATE.format(
+                user_login=user_login,
+                repository=repository,
+            )
+            in body_text
+            or f"Connected as {user_login} to {repository}." in body_text
+        ):
             return ConnectionObservation(
                 dialog_text="",
-                body_text=self.body_text(),
+                body_text=body_text,
             )
 
         self._live_page.open_connect_dialog()
@@ -114,14 +123,25 @@ class TrackStateTrackerPage:
             repository=repository,
         )
         wait_match = self.session.wait_for_any_text(
-            [connected_banner, "GitHub connection failed:"],
+            [
+                connected_banner,
+                f"Connected as {user_login} to {repository}.",
+                self.CONNECTED_BANNER_PREFIX,
+                "GitHub connection failed:",
+            ],
             timeout_ms=120_000,
         )
         if wait_match.matched_text != connected_banner:
-            raise AssertionError(
-                "Step 2 failed: the token connect flow did not reach the connected state. "
-                f"Observed body text: {wait_match.body_text}",
-            )
+            if wait_match.matched_text == "GitHub connection failed:":
+                raise AssertionError(
+                    "Step 2 failed: the token connect flow did not reach the connected "
+                    f"state. Observed body text: {wait_match.body_text}",
+                )
+            if f"Connected as {user_login} to {repository}." not in wait_match.body_text:
+                raise AssertionError(
+                    "Step 2 failed: the token connect flow did not expose the connected "
+                    f"banner. Observed body text: {wait_match.body_text}",
+                )
         return ConnectionObservation(
             dialog_text=dialog_text,
             body_text=wait_match.body_text,
