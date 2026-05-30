@@ -46,14 +46,18 @@ class FlutterLocalWorkspaceOnboardingDriver
     'Enter the local Git folder path.',
     'main',
     'Folder',
+    'Selected folder',
     'Change folder',
     'Details',
+    'Workspace details',
     'Workspace name',
     'Write Branch',
     'Initialize TrackState here',
     'Open workspace',
     'Use a short display name. It will be used in the folder name and starter project key.',
     'TrackState uses this branch for commits in the local repository.',
+    'Defaults to the selected folder name. You can rename it before saving the workspace profile.',
+    'TrackState opens and writes to this local branch. Existing repositories must stay on their current branch during onboarding.',
   };
 
   static const Duration _defaultTimeout = Duration(seconds: 15);

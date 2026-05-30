@@ -121,6 +121,39 @@ class Ts1154ReviewRegressionTest(unittest.TestCase):
 
         self.assertIn("selected active local workspace row", str(error.exception))
 
+    def test_workspace_token_profile_ids_include_local_and_hosted_profiles(self) -> None:
+        workspace_state = self.module._workspace_state("IstiN/trackstate-setup")  # type: ignore[attr-defined]
+
+        profile_ids = self.module._workspace_token_profile_ids(  # type: ignore[attr-defined]
+            workspace_state,
+        )
+
+        self.assertEqual(
+            profile_ids,
+            (
+                "local:/tmp/trackstate-demo@main",
+                "hosted:istin/trackstate-setup@main",
+            ),
+        )
+
+    def test_authenticated_session_skips_reconnect_even_with_connect_copy(self) -> None:
+        body_text = "\n".join(
+            [
+                "Workspace switcher: Active local workspace, Local, Local Git, /tmp/trackstate-demo, Branch: main",
+                "Connected as octocat to IstiN/trackstate-setup.",
+                "Manage GitHub access",
+                "Connect GitHub",
+            ],
+        )
+
+        requires_connect = self.module._session_requires_connect(  # type: ignore[attr-defined]
+            body_text=body_text,
+            user_login="octocat",
+            repository="IstiN/trackstate-setup",
+        )
+
+        self.assertFalse(requires_connect)
+
 
 if __name__ == "__main__":
     unittest.main()
