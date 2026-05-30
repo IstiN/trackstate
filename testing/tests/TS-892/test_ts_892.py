@@ -596,14 +596,12 @@ def _assert_permanent_error_state(
             "the deleted local workspace row recovered to `Local Git` instead of "
             "remaining unavailable.",
         )
-    if selected_row is not None and (
-        selected_row.display_name == HOSTED_DISPLAY_NAME
-        or selected_row.target_type_label == "Hosted"
-    ):
+    if selected_row is not None and _is_hosted_workspace_selection(selected_row):
+        hosted_name = _workspace_display_name(selected_row)
         failures.append(
-            "the application kept `Hosted setup workspace` selected as the active "
-            "workspace even though the saved deleted local workspace row was still "
-            "present.",
+            "the application kept "
+            f"`{hosted_name}` selected as the active hosted workspace even though "
+            "the saved deleted local workspace row was still present.",
         )
     elif selected_row is None:
         # Fallback: the switcher parser found no selected row (recovery surface was open).
@@ -621,9 +619,10 @@ def _assert_permanent_error_state(
     if trigger is not None and (
         trigger.display_name == HOSTED_DISPLAY_NAME or trigger.workspace_type == "Hosted"
     ):
+        hosted_name = trigger.display_name or HOSTED_DISPLAY_NAME
         failures.append(
-            "the header trigger still defaulted to the hosted setup workspace after "
-            "the permanent local failure.",
+            "the header trigger still defaulted to the hosted workspace "
+            f"`{hosted_name}` after the permanent local failure.",
         )
     if failures:
         details = [
@@ -965,6 +964,9 @@ def _failed_step_summary(result: dict[str, object]) -> str:
 
 
 def _actual_behavior_summary(result: dict[str, object]) -> str:
+    selected_row = result.get("selected_row")
+    if isinstance(selected_row, dict) and _is_hosted_workspace_result(selected_row):
+        return "Permanent local workspace failure falls back to hosted selection"
     local_row = result.get("local_row")
     if isinstance(local_row, dict):
         state_label = str(local_row.get("state_label") or "").strip()
@@ -975,15 +977,18 @@ def _actual_behavior_summary(result: dict[str, object]) -> str:
                 "Permanent local workspace failure leaves deleted workspace in "
                 f"unexpected state {state_label}"
             )
-    selected_row = result.get("selected_row")
-    if isinstance(selected_row, dict):
-        display_name = str(selected_row.get("display_name") or "").strip()
-        if display_name == HOSTED_DISPLAY_NAME:
-            return "Permanent local workspace failure falls back to hosted selection"
     return "Permanent local workspace failure does not match the expected unavailable state"
 
 
 def _actual_behavior_detail(result: dict[str, object]) -> str:
+    selected_row = result.get("selected_row")
+    if isinstance(selected_row, dict) and _is_hosted_workspace_result(selected_row):
+        display_name = _workspace_display_name_from_result(selected_row)
+        return (
+            f"The application kept hosted workspace `{display_name}` selected as "
+            "the active workspace instead of leaving the deleted local workspace "
+            "unavailable."
+        )
     local_row = result.get("local_row")
     if isinstance(local_row, dict):
         state_label = str(local_row.get("state_label") or "").strip()
@@ -1000,15 +1005,30 @@ def _actual_behavior_detail(result: dict[str, object]) -> str:
                 f"`{state_label}` instead of `Local Unavailable` after startup retries "
                 "were exhausted."
             )
-    selected_row = result.get("selected_row")
-    if isinstance(selected_row, dict):
-        display_name = str(selected_row.get("display_name") or "").strip()
-        if display_name:
-            return (
-                f"The application kept `{display_name}` selected as the active workspace "
-                "instead of leaving the deleted local workspace unavailable."
-            )
     return str(result.get("error", "The observed behavior did not match the expected unavailable state."))
+
+
+def _is_hosted_workspace_selection(
+    row: WorkspaceSwitcherRowObservation,
+) -> bool:
+    return row.target_type_label == "Hosted" or row.display_name == HOSTED_DISPLAY_NAME
+
+
+def _is_hosted_workspace_result(row: dict[str, object]) -> bool:
+    return (
+        str(row.get("target_type_label") or "").strip() == "Hosted"
+        or str(row.get("display_name") or "").strip() == HOSTED_DISPLAY_NAME
+    )
+
+
+def _workspace_display_name(row: WorkspaceSwitcherRowObservation) -> str:
+    display_name = (row.display_name or "").strip()
+    return display_name or HOSTED_DISPLAY_NAME
+
+
+def _workspace_display_name_from_result(row: dict[str, object]) -> str:
+    display_name = str(row.get("display_name") or "").strip()
+    return display_name or HOSTED_DISPLAY_NAME
 def _human_lines(result: dict[str, object], *, jira: bool) -> list[str]:
     prefix = "*" if jira else "-"
     checks = result.get("human_verification", [])
