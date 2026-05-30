@@ -164,6 +164,48 @@ jobs:
           git config --global user.name "trackstate-ai"
           git config --global user.email "trackstate-ai@users.noreply.github.com"
 
+      - name: Prepare agent config
+        env:
+          RAW_ENCODED_CONFIG: ${{ inputs.encoded_config }}
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+
+          const raw = process.env.RAW_ENCODED_CONFIG || '';
+          let config = {};
+
+          if (raw.trim()) {
+            const candidates = [raw];
+            try {
+              candidates.push(decodeURIComponent(raw));
+            } catch (error) {
+              // Keep raw-only candidates when the input is already JSON.
+            }
+
+            const parsed = candidates
+              .map((candidate) => {
+                try { return JSON.parse(candidate); } catch (error) { return null; }
+              })
+              .find(Boolean);
+
+            if (!parsed) {
+              throw new Error('encoded_config is neither JSON nor URL-encoded JSON');
+            }
+            config = parsed;
+          }
+
+          config.params = config.params || {};
+          const prompts = Array.isArray(config.params.cliPrompts)
+            ? config.params.cliPrompts.slice()
+            : [];
+          ['./agents/prompts/bash_tools.md', './agents/prompts/codegraph_tools.md'].forEach((prompt) => {
+            if (!prompts.includes(prompt)) prompts.push(prompt);
+          });
+          config.params.cliPrompts = prompts;
+
+          fs.appendFileSync(process.env.GITHUB_ENV, `EFFECTIVE_ENCODED_CONFIG=${encodeURIComponent(JSON.stringify(config))}\n`);
+          NODE
+
       - name: Run AI Teammate
         env:
           JIRA_EMAIL: ${{ secrets.JIRA_EMAIL }}
@@ -201,11 +243,11 @@ jobs:
           AI_AGENT_PROVIDER: ${{ vars.AI_AGENT_PROVIDER }}
 
           DMTOOLS_INTEGRATIONS: "jira,confluence,figma,ai,cli,file,github"
-          ENCODED_CONFIG: ${{ inputs.encoded_config }}
           PROMPT_CHUNK_TOKEN_LIMIT: ${{ vars.PROMPT_CHUNK_TOKEN_LIMIT }}
           CLI_ALLOWED_COMMANDS: "find,ls,cat,mkdir,bash,git,gh,flutter,dart,python3,pytest,run-agent.sh,codegraph"
 
         run: |
+          ENCODED_CONFIG="${EFFECTIVE_ENCODED_CONFIG}"
           echo "Using configuration: ${{ inputs.config_file }}"
           CI_RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           INPUT_JQL="key = ${{ inputs.concurrency_key }}"
