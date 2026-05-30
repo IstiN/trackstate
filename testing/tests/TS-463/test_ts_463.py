@@ -75,9 +75,9 @@ SCREENSHOT_PATH = OUTPUTS_DIR / "ts463_failure.png"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts463_success.png"
 DISCUSSIONS_RAW_PATH = INPUTS_DIR / "pr_discussions_raw.json"
 REWORK_SUMMARY = (
-    "Kept the visible Save settings synchronization fix and updated Step 6 reporting so "
-    "post-save UI validation failures are recorded as explicit Step 6 failures before "
-    "raising."
+    "Kept the visible Save settings synchronization fix, preserved explicit Step 6 "
+    "failure reporting for post-save UI validation, and restored the review-thread "
+    "ID guard so reply payloads skip automation-only entries."
 )
 PRODUCT_FAILURE_SIGNATURES: dict[int, tuple[str, ...]] = {
     2: (
@@ -1359,6 +1359,8 @@ def _discussion_threads() -> list[dict[str, Any]]:
         for thread in threads
         if isinstance(thread, dict)
         and thread.get("resolved") is False
+        and thread.get("rootCommentId") is not None
+        and thread.get("threadId") is not None
     ]
 
 
@@ -1395,6 +1397,13 @@ def _review_reply_text(
             "post-save Settings-tab validations complete, and the post-save UI branch is "
             "raised with a `Step 6 failed:` prefix so the failure context is preserved in "
             "the result and bug description. "
+            + rerun_summary
+        )
+    if "rootCommentId` / `threadId` guard" in body or "reply payloads with `inReplyToId: null`" in body:
+        return (
+            "Fixed: `_discussion_threads()` now filters back to unresolved review threads "
+            "with real `rootCommentId` and `threadId` values, so "
+            "`outputs/review_replies.json` skips automation-only entries with null IDs. "
             + rerun_summary
         )
     return "Fixed: addressed the requested TS-463 reporting changes. " + rerun_summary
