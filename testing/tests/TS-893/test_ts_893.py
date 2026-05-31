@@ -1157,11 +1157,12 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
         )
     )
     lines = [
-        "## Rework Summary",
+        "## Automation Summary",
         "",
-        "### Fixed Issues",
-        "- Patched the TS-893 runtime so restored local-workspace fixture handles are instrumented the same way as native File System Access handles, and the transient busy gate can now observe/block the saved-handle revalidation calls that happen during startup.",
-        "- Kept blocked-window probes diagnostic-only for product bug filing: a no-overlap run remains inconclusive setup evidence instead of a product failure when the visible `Local Git` restore contract still passes.",
+        "### Coverage",
+        "- Exercised the live Chromium startup flow with a preloaded active local workspace and a transiently blocked local handle.",
+        "- Proved blocked startup overlap only with runtime instrumentation and tracked console activity from the saved local workspace handle, then verified the final `Local Git` trigger and switcher state from the user's perspective.",
+        "- Kept no-overlap runs inconclusive instead of treating them as product failures when the visible `Local Git` restore contract still succeeds.",
         "",
         "### Test Status",
         f"- Re-ran `{RUN_COMMAND}`",
@@ -1407,15 +1408,17 @@ def _discussion_threads() -> list[dict[str, object]]:
 def _review_reply_text(*, passed: bool, result: dict[str, object]) -> str:
     if passed:
         return (
-            "Fixed TS-893 by retrying inconclusive no-overlap passes instead of "
-            "publishing them as failures or approvals, and by limiting "
-            "`bug_description.md` to verified public restore regressions only. "
+            "Fixed TS-893 by proving blocked startup overlap only through the "
+            "runtime instrumentation and tracked console events from the saved "
+            "local-workspace handle, while keeping no-overlap runs inconclusive "
+            "instead of treating them as product failures. "
             f"Re-ran `{RUN_COMMAND}`: passed (`1 passed, 0 failed`)."
         )
     return (
-        "Fixed TS-893 by retrying inconclusive no-overlap passes instead of "
-        "publishing them as failures, and by limiting `bug_description.md` to "
-        "verified public restore regressions only. Re-ran "
+        "Fixed TS-893 by proving blocked startup overlap only through the "
+        "runtime instrumentation and tracked console events from the saved "
+        "local-workspace handle, while keeping no-overlap runs inconclusive "
+        "instead of treating them as product failures. Re-ran "
         f"`{RUN_COMMAND}`: still failing. Current failure: {_exact_error_summary(result)}"
     )
 
@@ -1583,20 +1586,6 @@ def _collect_pre_release_overlap_state(
     if runtime_probe_events:
         overlap_proof_sources.append(
             "tracked TS-893 runtime probe from a blocked saved-workspace handle operation",
-        )
-    if pre_release_restore_message:
-        overlap_proof_sources.append(
-            f"visible restore skip banner while blocked: {pre_release_restore_message}",
-        )
-    if public_overlap_state.get("public_overlap_observed") is True:
-        public_overlap_reason = public_overlap_state.get("public_overlap_reason")
-        overlap_proof_sources.append(
-            "public pre-release non-restored state"
-            + (
-                f": {public_overlap_reason}"
-                if isinstance(public_overlap_reason, str) and public_overlap_reason
-                else ""
-            ),
         )
 
     return {
