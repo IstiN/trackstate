@@ -204,6 +204,46 @@ def main() -> None:
                         timeout_ms=30_000,
                     )
                     result["selected_attachment_summary"] = selected_summary
+                    attachments_body_text_after_selection = page.current_body_text()
+                    upload_controls_after_selection = (
+                        page.observe_attachment_upload_controls()
+                    )
+                    result["attachments_body_text_after_selection"] = (
+                        attachments_body_text_after_selection
+                    )
+                    result["upload_attachment_button_count_after_selection"] = (
+                        upload_controls_after_selection.upload_button_count
+                    )
+                    result["upload_attachment_button_enabled_after_selection"] = (
+                        upload_controls_after_selection.upload_button_enabled
+                    )
+                    if (
+                        upload_controls_after_selection.upload_button_count < 1
+                        or not upload_controls_after_selection.upload_button_enabled
+                    ):
+                        failure_observation = (
+                            f"{selected_summary}\n"
+                            + _attachment_upload_controls_failure_observation(
+                                upload_controls=upload_controls_after_selection,
+                                attachments_body_text=attachments_body_text_after_selection,
+                            )
+                        )
+                        _record_step(
+                            result,
+                            step=2,
+                            status="failed",
+                            action="Select a new file named `design_doc.pdf` for upload.",
+                            observed=failure_observation,
+                        )
+                        _record_human_verification(
+                            result,
+                            check=(
+                                "Verified the Attachments panel showed the selected file, but "
+                                "the duplicate-upload action still was not visibly enabled."
+                            ),
+                            observed=failure_observation,
+                        )
+                        raise AssertionError(f"Step 2 failed: {failure_observation}")
                     _record_step(
                         result,
                         step=2,
@@ -227,10 +267,17 @@ def main() -> None:
                             timeout_ms=REPLACE_DIALOG_TIMEOUT_MS,
                         )
                     except WebAppTimeoutError as error:
-                        repo_text_without_confirmation = service.fetch_repo_text(
+                        (
+                            repo_attachment_present_before_confirm,
+                            repo_text_without_confirmation,
+                        ) = _fetch_repo_text_observation(
+                            service,
                             attachment_path,
                         )
                         body_text_after_upload_click = page.current_body_text()
+                        result["repo_attachment_present_before_confirm"] = (
+                            repo_attachment_present_before_confirm
+                        )
                         result["repo_text_before_confirm"] = repo_text_without_confirmation
                         result["attachments_body_text_after_upload_click"] = (
                             body_text_after_upload_click
@@ -267,8 +314,20 @@ def main() -> None:
                         raise AssertionError(f"Step 3 failed: {failure_observation}") from error
 
                     result["replace_dialog_text"] = dialog_text
-                    repo_text_before_confirm = service.fetch_repo_text(attachment_path)
+                    (
+                        repo_attachment_present_before_confirm,
+                        repo_text_before_confirm,
+                    ) = _fetch_repo_text_observation(service, attachment_path)
+                    result["repo_attachment_present_before_confirm"] = (
+                        repo_attachment_present_before_confirm
+                    )
                     result["repo_text_before_confirm"] = repo_text_before_confirm
+                    if not repo_attachment_present_before_confirm:
+                        raise AssertionError(
+                            "Step 3 failed: the replacement preflight removed the seeded "
+                            "repository attachment before the user confirmed the dialog.\n"
+                            f"Observed repository state before confirmation:\n{repo_text_before_confirm}",
+                        )
                     if repo_text_before_confirm != seeded_attachment_text:
                         raise AssertionError(
                             "Step 3 failed: the replacement preflight changed the repository "
@@ -535,6 +594,16 @@ def _restore_attachment(
 
 def _attachment_size_label(payload: bytes) -> str:
     return f"{len(payload)} B"
+
+
+def _fetch_repo_text_observation(
+    service: LiveSetupRepositoryService,
+    path: str,
+) -> tuple[bool, str]:
+    repo_file = _fetch_repo_file_if_exists(service, path)
+    if repo_file is None:
+        return False, f"<missing repository attachment at {path}>"
+    return True, repo_file.content
 
 
 def _attachment_upload_controls_failure_observation(
@@ -892,7 +961,16 @@ def _is_product_failure(result: dict[str, object]) -> bool:
         return True
     if _step_status(result, 1) != "passed":
         return False
-    return not _attachments_body_shows_upload_controls(result)
+    return _upload_controls_were_visible(result) or _attachments_body_shows_upload_controls(
+        result,
+    )
+
+
+def _upload_controls_were_visible(result: dict[str, object]) -> bool:
+    return (
+        int(result.get("choose_attachment_button_count", 0)) > 0
+        and int(result.get("upload_attachment_button_count", 0)) > 0
+    )
 
 
 def _attachments_body_shows_upload_controls(result: dict[str, object]) -> bool:
