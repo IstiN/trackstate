@@ -191,6 +191,7 @@ def main() -> None:
         "linked_bugs": LINKED_BUGS,
         "user_login": user.login,
         "preloaded_workspace_state": workspace_state,
+        "workspace_token_profile_ids": list(_workspace_token_profile_ids(workspace_state)),
         "prepared_local_workspace": prepared_local_workspace,
         "trigger_wait_seconds": TRIGGER_WAIT_SECONDS,
         "pre_release_trigger_timeout_seconds": PRE_RELEASE_TRIGGER_TIMEOUT_SECONDS,
@@ -207,6 +208,7 @@ def main() -> None:
             repository=config.repository,
             token=token,
             workspace_state=workspace_state,
+            workspace_token_profile_ids=_workspace_token_profile_ids(workspace_state),
         )
         with blocker:
             result["busy_blocker_initial"] = blocker.snapshot()
@@ -249,8 +251,7 @@ def main() -> None:
                             f"Observed startup surface={runtime_observation.surface!r}."
                         ),
                     )
-                    pre_release_trigger = _observe_trigger_state(
-                        page,
+                    pre_release_trigger = page.observe_trigger(
                         timeout_ms=int(PRE_RELEASE_TRIGGER_TIMEOUT_SECONDS * 1000),
                     )
                     result["pre_release_trigger_observation"] = _trigger_payload(
@@ -384,7 +385,10 @@ def main() -> None:
                     result["restore_message"] = restore_message
                     restored, trigger = poll_until(
                         probe=lambda: _observe_trigger_state(page, timeout_ms=10_000),
-                        is_satisfied=_trigger_matches_expected_restore,
+                        is_satisfied=lambda candidate: (
+                            candidate is not None
+                            and _trigger_matches_expected_restore(candidate)
+                        ),
                         timeout_seconds=TRIGGER_WAIT_SECONDS,
                         interval_seconds=5,
                     )
@@ -413,8 +417,8 @@ def main() -> None:
                                 f"{result['pre_release_restore_message']!r}; "
                                 f"Observed pre_release_trigger={pre_release_trigger.semantic_label!r}; "
                                 f"restore_message={restore_message!r}; "
-                                f"trigger label={trigger.semantic_label!r}; "
-                                f"trigger_text={trigger.visible_text!r}"
+                                f"trigger label={_trigger_label(trigger)!r}; "
+                                f"trigger_text={_trigger_text(trigger)!r}"
                             ),
                         )
                     else:
@@ -440,8 +444,8 @@ def main() -> None:
                                 f"{result['pre_release_restore_message']!r}; "
                                 f"Observed pre_release_trigger={pre_release_trigger.semantic_label!r}; "
                                 f"restore_message={restore_message!r}; "
-                                f"trigger label={trigger.semantic_label!r}; "
-                                f"trigger_text={trigger.visible_text!r}"
+                                f"trigger label={_trigger_label(trigger)!r}; "
+                                f"trigger_text={_trigger_text(trigger)!r}"
                             ),
                         )
 
@@ -466,8 +470,10 @@ def main() -> None:
 
                     result["switcher_observation"] = _switcher_payload(switcher)
                     local_row = _find_named_local_row(switcher)
-                    selected_row = _find_selected_row(switcher) or _selected_row_from_trigger(
-                        trigger,
+                    selected_row = _find_selected_row(switcher) or (
+                        _selected_row_from_trigger(trigger)
+                        if trigger is not None
+                        else None
                     )
                     result["active_local_row"] = (
                         _row_payload(local_row) if local_row is not None else None
@@ -511,8 +517,8 @@ def main() -> None:
                             "user would after the busy-state release and startup recovery window."
                         ),
                         observed=(
-                            f"trigger_label={trigger.semantic_label!r}; "
-                            f"trigger_text={trigger.visible_text!r}"
+                            f"trigger_label={_trigger_label(trigger)!r}; "
+                            f"trigger_text={_trigger_text(trigger)!r}"
                         ),
                     )
                     _record_human_verification(
@@ -584,7 +590,7 @@ def main() -> None:
                             "active local workspace into the trigger after the "
                             "temporary busy state was released within the allowed "
                             "wait window.\n"
-                            f"Observed trigger label: {trigger.semantic_label!r}\n"
+                            f"Observed trigger label: {_trigger_label(trigger)!r}\n"
                             "Observed selected row: "
                             f"{json.dumps(_row_payload(selected_row), indent=2)}\n"
                             "Observed active local row: "
@@ -669,6 +675,19 @@ def _workspace_state(repository: str) -> dict[str, object]:
             },
         ],
     }
+
+
+def _workspace_token_profile_ids(workspace_state: dict[str, object]) -> tuple[str, ...]:
+    raw_profiles = workspace_state.get("profiles", [])
+    if not isinstance(raw_profiles, list):
+        return ()
+    return tuple(
+        workspace_id
+        for profile in raw_profiles
+        if isinstance(profile, dict)
+        for workspace_id in [str(profile.get("id", "")).strip()]
+        if workspace_id
+    )
 
 
 def _prepare_local_workspace_repository() -> dict[str, object]:
@@ -853,7 +872,7 @@ def _fallback_local_row_from_switcher_text(
 
 def _assert_active_local_restore(
     *,
-    trigger: WorkspaceSwitcherTriggerObservation,
+    trigger: WorkspaceSwitcherTriggerObservation | None,
     switcher: WorkspaceSwitcherObservation,
     local_row: WorkspaceSwitcherRowObservation | None,
     selected_row: WorkspaceSwitcherRowObservation | None,
@@ -862,7 +881,7 @@ def _assert_active_local_restore(
         raise AssertionError(
             "Step 4 failed: Workspace switcher did not show the prepared local "
             "workspace row after the busy-state release.\n"
-            f"Observed trigger label: {trigger.semantic_label!r}\n"
+            f"Observed trigger label: {_trigger_label(trigger)!r}\n"
             f"Observed rows: {[row.visible_text for row in switcher.rows]!r}\n"
             f"Observed switcher text:\n{switcher.switcher_text}"
         )
@@ -872,7 +891,7 @@ def _assert_active_local_restore(
             "busy-state release but rendered as `Local Unavailable` instead of "
             "`Local Git`.\n"
             f"Observed local row: {json.dumps(_row_payload(local_row), indent=2)}\n"
-            f"Observed trigger label: {trigger.semantic_label!r}"
+            f"Observed trigger label: {_trigger_label(trigger)!r}"
         )
     if local_row.state_label != "Local Git":
         raise AssertionError(
@@ -892,12 +911,17 @@ def _assert_active_local_restore(
             f"Observed selected row: {json.dumps(_row_payload(selected_row), indent=2)}\n"
             f"Observed local row: {json.dumps(_row_payload(local_row), indent=2)}"
         )
+    if trigger is None:
+        raise AssertionError(
+            "Step 4 failed: the workspace switcher recovered, but the header trigger "
+            "never became observable again after the busy-state release."
+        )
     if trigger.display_name == HOSTED_DISPLAY_NAME or trigger.workspace_type == "Hosted":
         raise AssertionError(
             "Step 4 failed: the header trigger still defaulted to the hosted setup "
             "workspace instead of the prepared active local workspace after the "
             "busy-state release.\n"
-            f"Observed trigger label: {trigger.semantic_label!r}"
+            f"Observed trigger label: {_trigger_label(trigger)!r}"
         )
 
 
@@ -1473,12 +1497,11 @@ def _observe_trigger_state(
     page: LiveWorkspaceSwitcherPage,
     *,
     timeout_ms: int,
-) -> WorkspaceSwitcherTriggerObservation:
+) -> WorkspaceSwitcherTriggerObservation | None:
     try:
         return page.observe_trigger(timeout_ms=timeout_ms)
     except (AssertionError, WebAppTimeoutError):
-        switcher = _observe_switcher_surface(page, timeout_ms=timeout_ms)
-        return _synthesized_trigger_from_switcher(switcher)
+        return None
 def _collect_pre_release_overlap_state(
     *,
     page: LiveWorkspaceSwitcherPage,
@@ -1700,6 +1723,9 @@ def _observe_pre_release_public_overlap(
     page: LiveWorkspaceSwitcherPage,
 ) -> dict[str, object]:
     trigger = _observe_trigger_state(page, timeout_ms=5_000)
+    trigger_error: str | None = None
+    if trigger is None:
+        trigger_error = "Workspace switcher trigger was not observable while blocked."
     switcher: WorkspaceSwitcherObservation | None = None
     local_row: WorkspaceSwitcherRowObservation | None = None
     selected_row: WorkspaceSwitcherRowObservation | None = None
@@ -1732,6 +1758,7 @@ def _observe_pre_release_public_overlap(
         "public_overlap_observed": public_overlap_reason is not None,
         "public_overlap_reason": public_overlap_reason,
         "trigger": _trigger_payload(trigger),
+        "trigger_error": trigger_error,
         "switcher": _switcher_payload(switcher) if switcher is not None else None,
         "local_row": _row_payload(local_row),
         "selected_row": _row_payload(selected_row),
@@ -1750,53 +1777,6 @@ def _observe_switcher_surface(
         return page.open_and_observe(timeout_ms=timeout_ms)
 
 
-def _synthesized_trigger_from_switcher(
-    switcher: WorkspaceSwitcherObservation,
-) -> WorkspaceSwitcherTriggerObservation:
-    selected_row = _find_selected_row(switcher)
-    fallback_row = (
-        selected_row
-        or _find_named_local_row(switcher)
-        or (switcher.rows[0] if switcher.rows else None)
-    )
-    display_name = (
-        fallback_row.display_name
-        if fallback_row is not None and fallback_row.display_name is not None
-        else "Workspace switcher"
-    )
-    workspace_type = (
-        fallback_row.target_type_label
-        if fallback_row is not None and fallback_row.target_type_label is not None
-        else ""
-    )
-    state_label = (
-        fallback_row.state_label
-        if fallback_row is not None and fallback_row.state_label is not None
-        else ""
-    )
-    semantic_label = (
-        f"Workspace switcher: {display_name}, {workspace_type}, {state_label}"
-        if workspace_type and state_label
-        else "Workspace switcher"
-    )
-    return WorkspaceSwitcherTriggerObservation(
-        viewport_width=float(DESKTOP_VIEWPORT["width"]),
-        viewport_height=float(DESKTOP_VIEWPORT["height"]),
-        semantic_label=semantic_label,
-        visible_text=semantic_label,
-        raw_text_lines=(semantic_label,),
-        display_name=display_name,
-        workspace_type=workspace_type,
-        state_label=state_label,
-        icon_count=0,
-        left=0.0,
-        top=0.0,
-        width=0.0,
-        height=0.0,
-        top_button_labels=(),
-    )
-
-
 def _workspace_switcher_surface_visible(body_text: str) -> bool:
     normalized = " ".join(body_text.split())
     return (
@@ -1806,11 +1786,14 @@ def _workspace_switcher_surface_visible(body_text: str) -> bool:
     )
 def _pre_release_public_overlap_reason(
     *,
-    trigger: WorkspaceSwitcherTriggerObservation,
+    trigger: WorkspaceSwitcherTriggerObservation | None,
     local_row: WorkspaceSwitcherRowObservation | None,
     selected_row: WorkspaceSwitcherRowObservation | None,
 ) -> str | None:
-    if trigger.display_name == HOSTED_DISPLAY_NAME or trigger.workspace_type == "Hosted":
+    if trigger is not None and (
+        trigger.display_name == HOSTED_DISPLAY_NAME
+        or trigger.workspace_type == "Hosted"
+    ):
         return "header trigger showed the hosted fallback while the local workspace was blocked"
     if local_row is not None and (
         local_row.state_label != "Local Git" or "Local Unavailable" in local_row.visible_text
@@ -1827,7 +1810,11 @@ def _pre_release_public_overlap_reason(
     return None
 
 
-def _trigger_payload(observation: WorkspaceSwitcherTriggerObservation) -> dict[str, object]:
+def _trigger_payload(
+    observation: WorkspaceSwitcherTriggerObservation | None,
+) -> dict[str, object] | None:
+    if observation is None:
+        return None
     return {
         "semantic_label": observation.semantic_label,
         "visible_text": observation.visible_text,
@@ -1837,6 +1824,14 @@ def _trigger_payload(observation: WorkspaceSwitcherTriggerObservation) -> dict[s
         "state_label": observation.state_label,
         "top_button_labels": list(observation.top_button_labels),
     }
+
+
+def _trigger_label(observation: WorkspaceSwitcherTriggerObservation | None) -> str | None:
+    return None if observation is None else observation.semantic_label
+
+
+def _trigger_text(observation: WorkspaceSwitcherTriggerObservation | None) -> str | None:
+    return None if observation is None else observation.visible_text
 
 
 def _row_payload(
