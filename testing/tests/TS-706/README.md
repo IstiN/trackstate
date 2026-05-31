@@ -12,8 +12,15 @@ Chromium for human-style verification.
 TS-706 does not rely on the repository self-hosted runners inventory API.
 Instead, it treats the live workflow itself as the supported precondition
 signal: the expected path is a failing preflight job with the configured
-runner-availability message, while a successful preflight plus queued macOS job
-means the runner-offline precondition was not met.
+runner-availability message.
+
+If the preflight job succeeds, the ticket precondition was not met. That
+precondition-not-met outcome covers both of the live paths the automation can
+observe from GitHub Actions:
+
+- the downstream macOS job stays queued or waiting through the configured
+  observation window
+- the downstream macOS job proceeds and completes instead of being suppressed
 
 ## Dependencies
 
@@ -25,6 +32,14 @@ means the runner-offline precondition was not met.
 
 ```bash
 mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-706/test_ts_706.py
+```
+
+Targeted regression coverage:
+
+```bash
+PYTHONPATH=. python3 -m unittest \
+  testing.tests.TS-706.test_github_actions_preflight_gate_probe_regressions \
+  testing.tests.TS-706.test_ts_706_output_regressions
 ```
 
 ## Config
