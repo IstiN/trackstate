@@ -90,11 +90,23 @@ def main() -> None:
             verification=verification,
             config=config,
         )
-        _evaluate_repository_template(
+        repository_template_available = _evaluate_repository_template(
             result=result,
             verification=verification,
             config=config,
         )
+        if repository_template_available:
+            _evaluate_pull_request_compose_surface(
+                result=result,
+                probe=probe,
+                verification=verification,
+                config=config,
+            )
+            _evaluate_template_body(
+                result=result,
+                verification=verification,
+                config=config,
+            )
         _perform_human_template_verification(
             result=result,
             config=config,
@@ -542,7 +554,7 @@ def _evaluate_repository_template(
     result: dict[str, object],
     verification: PullRequestTemplateChecklistVerificationResult,
     config: PullRequestTemplateChecklistConfig,
-) -> None:
+) -> bool:
     body_source_name, body_source_path, body_source_text = _selected_template_body_source(
         verification=verification
     )
@@ -595,101 +607,9 @@ def _evaluate_repository_template(
                 f"Required item: {config.required_checklist_item}"
             ),
         )
-        return
+        return False
 
-    _record_step(
-        result,
-        step=1,
-        status="passed",
-        action=TICKET_STEPS[0],
-        observed=(
-            "GitHub exposes a pull-request template body that can be used to seed "
-            "a new PR description.\n"
-            f"Repository: {verification.target_repository}\n"
-            f"Default branch: {verification.default_branch or config.expected_default_branch or 'main'}\n"
-            f"Body source: {body_source_name}\n"
-            f"Template path: {body_source_path}"
-        ),
-    )
-
-    matched_marker = _first_accessibility_marker(
-        body_source_text,
-        config.accessibility_section_markers,
-    )
-    if matched_marker is None:
-        _record_step(
-            result,
-            step=2,
-            status="failed",
-            action=TICKET_STEPS[1],
-            observed=(
-                "The selected PR template body did not include an accessibility "
-                "checklist marker.\n"
-                f"Body source: {body_source_name}\n"
-                f"Template path: {body_source_path}\n"
-                f"Expected markers: {list(config.accessibility_section_markers)}\n"
-                f"Observed body text:\n{body_source_text}"
-            ),
-        )
-    else:
-        result["matched_accessibility_marker"] = matched_marker
-        _record_step(
-            result,
-            step=2,
-            status="passed",
-            action=TICKET_STEPS[1],
-            observed=(
-                "The selected PR template body includes an accessibility "
-                "checklist marker.\n"
-                f"Body source: {body_source_name}\n"
-                f"Template path: {body_source_path}\n"
-                f"Matched marker: {matched_marker}"
-            ),
-        )
-
-    if config.required_checklist_item not in body_source_text:
-        _record_step(
-            result,
-            step=3,
-            status="failed",
-            action=TICKET_STEPS[2],
-            observed=(
-                "The selected PR template body did not contain the exact required "
-                "checklist item.\n"
-                f"Body source: {body_source_name}\n"
-                f"Template path: {body_source_path}\n"
-                f"Required item: {config.required_checklist_item}\n"
-                f"Observed body text:\n{body_source_text}"
-            ),
-        )
-        return
-
-    if matched_marker is None:
-        _record_step(
-            result,
-            step=3,
-            status="failed",
-            action=TICKET_STEPS[2],
-            observed=(
-                "The exact checklist item was found, but it was not inside a "
-                "recognizable accessibility checklist section."
-            ),
-        )
-        return
-
-    _record_step(
-        result,
-        step=3,
-        status="passed",
-        action=TICKET_STEPS[2],
-        observed=(
-            "The selected PR template body contains the exact required checklist "
-            "item.\n"
-            f"Body source: {body_source_name}\n"
-            f"Template path: {body_source_path}\n"
-            f"Required item: {config.required_checklist_item}"
-        ),
-    )
+    return True
 
 
 def _selected_template_body_source(
@@ -726,6 +646,11 @@ def _perform_human_template_verification(
     result: dict[str, object],
     config: PullRequestTemplateChecklistConfig,
 ) -> None:
+    if _step_status(result, 1) == "passed":
+        return
+    if result.get("failure_kind") != "product":
+        return
+
     default_branch = str(
         result.get("default_branch", result.get("expected_default_branch", "main"))
     )
@@ -755,30 +680,27 @@ def _perform_human_template_verification(
                 screenshot_path=screenshot_path,
             )
     except GitHubPullRequestComposeRuntimeUnavailableError as error:
-        result["failure_kind"] = "setup"
-        raise AssertionError(str(error)) from error
+        _record_human_verification(
+            result,
+            check=(
+                "Attempted to open the live GitHub PR template file page for "
+                "human-style confirmation."
+            ),
+            observed=(
+                "The browser runtime required for reviewer-visible evidence was "
+                f"unavailable, but the repository checks had already proved the "
+                f"product defect.\nRuntime error: {error}"
+            ),
+        )
+        return
 
     result["screenshot"] = observation.screenshot_path
     result["evidence_url"] = observation.url
     result["evidence_body_text"] = observation.body_text
     result["evidence_matched_text"] = observation.matched_text
 
-    step_one_passed = _step_status(result, 1) == "passed"
     visible_body_text = observation.body_text
-    if step_one_passed and config.required_checklist_item not in visible_body_text:
-        raise AssertionError(
-            "Human-style verification could not confirm that the live GitHub file "
-            "page visibly shows the required DOM-order accessibility checklist "
-            "item.\n"
-            f"URL: {observation.url}\n"
-            f"Matched text: {observation.matched_text}\n"
-            f"Visible body text:\n{visible_body_text}"
-        )
-    if (
-        not step_one_passed
-        and "404" not in visible_body_text
-        and "page not found" not in visible_body_text.lower()
-    ):
+    if "404" not in visible_body_text and "page not found" not in visible_body_text.lower():
         raise AssertionError(
             "Human-style verification expected GitHub to show a missing-template "
             "page, but the visible file page did not show a 404.\n"
@@ -985,9 +907,11 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
             "default-branch tree, conventional "
             f"template paths, and GitHub `pullRequestTemplates` diagnostics for {{{{{result['repository']}}}}}."
         ),
-        "* Resolved the effective PR-template body from GitHub's recognized templates or the live repository file contents.",
         (
-            "* Opened the live GitHub file page for the selected PR-template path (or the canonical missing-template path) and checked the reviewer-visible content."
+            "* When repository evidence showed a usable PR template body, opened a live GitHub compare page that reached {{Open a pull request}} and inspected the actual PR description field value."
+        ),
+        (
+            "* When repository evidence already proved the template was missing, opened the live GitHub file page for the canonical template path and checked the reviewer-visible content."
         ),
         "",
         "*Observed result*",
@@ -1030,8 +954,8 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
             f"default-branch tree, conventional "
             f"template paths, and GitHub `pullRequestTemplates` diagnostics for `{result['repository']}`."
         ),
-        "- Resolved the effective PR-template body from GitHub's recognized templates or the live repository file contents.",
-        "- Opened the live GitHub file page for the selected PR-template path (or the canonical missing-template path) and checked the reviewer-visible content.",
+        "- When repository evidence showed a usable PR template body, opened a live GitHub compare page that reached `Open a pull request` and inspected the actual PR description field value.",
+        "- When repository evidence already proved the template was missing, opened the live GitHub file page for the canonical template path and checked the reviewer-visible content.",
         "",
         "### Observed result",
         "- Matched the expected result." if passed else "- Did not match the expected result.",
@@ -1070,10 +994,10 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
         "",
         f"- Repository: `{result['repository']}`",
         (
-            "- Result: GitHub exposed the required PR-template checklist item in the live PR-template source."
+            "- Result: GitHub exposed the required PR-template checklist item in the live PR compose description field."
             if passed
             else (
-                "- Result: the runner could not launch the browser verification runtime needed for human-style confirmation, so this run is a setup limitation rather than a proven product defect."
+                "- Result: the runner could not reach or inspect the live GitHub PR compose flow needed to verify the generated PR description body, so this run is a setup limitation rather than a proven product defect."
                 if failure_kind == "setup"
                 else (
                 "- Result: GitHub did not expose any PR-template body with the required checklist item, so the repository currently misses the expected accessibility verification step."
@@ -1103,7 +1027,7 @@ def _bug_description(result: dict[str, object]) -> str:
         "",
         "## Summary",
         (
-            "The live GitHub PR template configuration for `IstiN/trackstate` does not expose a PR template body that contains the required manual "
+            "The live GitHub PR creation flow for `IstiN/trackstate` does not expose a PR template body that contains the required manual "
             "accessibility DOM-order checklist item."
         ),
         "",

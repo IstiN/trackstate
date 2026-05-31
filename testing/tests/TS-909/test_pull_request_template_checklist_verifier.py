@@ -251,6 +251,17 @@ class _ComposePageContextStub:
         return None
 
 
+class _ErroringContextManager:
+    def __init__(self, error: Exception) -> None:
+        self._error = error
+
+    def __enter__(self):
+        raise self._error
+
+    def __exit__(self, exc_type, exc, exc_tb) -> None:
+        return None
+
+
 class PullRequestTemplateChecklistVerifierTest(unittest.TestCase):
     def setUp(self) -> None:
         self.verifier = PullRequestTemplateChecklistVerifier(_FakeProbe())
@@ -558,12 +569,13 @@ class Ts909ReviewRegressionTest(unittest.TestCase):
             selected_candidate=None,
         )
 
-        self.module._evaluate_repository_template(  # type: ignore[attr-defined]
+        repository_template_available = self.module._evaluate_repository_template(  # type: ignore[attr-defined]
             result=result,
             verification=verification,
             config=self.config,
         )
 
+        self.assertFalse(repository_template_available)
         self.assertEqual(result["failure_kind"], "product")
         self.assertEqual(result["steps"][0]["status"], "failed")
         self.assertIn(
@@ -587,15 +599,50 @@ class Ts909ReviewRegressionTest(unittest.TestCase):
             selected_candidate=None,
         )
 
-        self.module._evaluate_repository_template(  # type: ignore[attr-defined]
+        repository_template_available = self.module._evaluate_repository_template(  # type: ignore[attr-defined]
             result=result,
             verification=verification,
             config=self.config,
         )
 
+        self.assertTrue(repository_template_available)
+        self.assertEqual(result["steps"], [])
         self.assertEqual(
-            [step["status"] for step in result["steps"]],
-            ["passed", "passed", "passed"],
+            result["selected_template_source"],
+            "GitHub pullRequestTemplates GraphQL response",
+        )
+
+    def test_human_template_verification_preserves_product_failure_when_runtime_missing(
+        self,
+    ) -> None:
+        result = self._result()
+        result["steps"] = [
+            {
+                "step": 1,
+                "status": "failed",
+                "action": "Create a new Pull Request for a UI layout change.",
+                "observed": "GitHub does not expose any pull-request template body.",
+            }
+        ]
+        result["failure_kind"] = "product"
+
+        with patch.object(
+            self.module,
+            "create_github_repository_blob_page",
+            return_value=_ErroringContextManager(
+                GitHubPullRequestComposeRuntimeUnavailableError("playwright required")
+            ),
+        ):
+            self.module._perform_human_template_verification(  # type: ignore[attr-defined]
+                result=result,
+                config=self.config,
+            )
+
+        self.assertEqual(result["failure_kind"], "product")
+        self.assertEqual(len(result["human_verification"]), 1)
+        self.assertIn(
+            "product defect",
+            result["human_verification"][0]["observed"],
         )
 
 
