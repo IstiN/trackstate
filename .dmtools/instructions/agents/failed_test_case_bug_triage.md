@@ -52,3 +52,11 @@ When a test review says:
 
 the correct decision is also Bug creation/linking, even if historical linked
 Bugs are Done.
+
+Concrete TrackState examples observed in monitoring:
+
+- `TS-715`: latest run failed hosted workspace sync backoff timing on current
+  `main`; all linked Bugs were Done; correct action is to create/reopen/link a
+  Bug for the current backoff regression, not move the Test Case to Backlog.
+- `TS-732` / `TS-887`: latest run or review evidence said the product failure
+  still reproduces; historical Done Bugs must not suppress Bug creation.
