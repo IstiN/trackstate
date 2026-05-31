@@ -1703,9 +1703,14 @@ class LiveMultiViewRefreshPage:
               if (!root) {
                 return false;
               }
+              const hasLabeledField = (label) => [
+                `input[aria-label="${label}"]`,
+                `textarea[aria-label="${label}"]`,
+                `[role="textbox"][aria-label="${label}"]`,
+              ].some((selector) => root.querySelector(selector) !== null);
               return (
-                root.querySelector('input[aria-label="Summary"]') !== null
-                && root.querySelector('textarea[aria-label="Description"]') !== null
+                hasLabeledField('Summary')
+                && hasLabeledField('Description')
                 && (document.body?.innerText ?? '').includes('Edit issue')
               );
             }

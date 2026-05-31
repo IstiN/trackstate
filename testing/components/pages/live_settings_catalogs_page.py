@@ -31,6 +31,7 @@ class CatalogEditorObservation:
 
 class LiveSettingsCatalogsPage:
     _button_selector = 'flt-semantics[role="button"]'
+    _visible_button_selector = 'flt-semantics[role="button"]:visible'
     _tab_selector = 'flt-semantics[role="tab"]'
     _settings_admin_heading = "Project settings administration"
 
@@ -181,28 +182,77 @@ class LiveSettingsCatalogsPage:
             )
 
     def save_settings(self) -> None:
-        if (
-            self._session.count(self._button_by_aria_label("Save settings")) > 0
-            or self._session.count(self._nested_button_by_aria_label("Save settings")) > 0
-        ):
-            self._click_button_by_aria_label("Save settings")
-        else:
-            rect = self._session.bounding_box(
-                self._button_selector,
-                has_text="Save settings",
-                timeout_ms=30_000,
-            )
-            self._session.mouse_click(rect.x + (rect.width / 2), rect.y + (rect.height / 2))
-        self._session.wait_for_function(
-            """
-            () => Array.from(document.querySelectorAll('flt-semantics')).some((candidate) => {
-              const ariaLabel = (candidate.getAttribute('aria-label') ?? '').trim();
-              const text = (candidate.innerText ?? '').trim();
-              return ariaLabel === 'Save settings' || text === 'Save settings';
-            })
-            """,
+        self._session.click(
+            self._visible_button_selector,
+            has_text="Save settings",
             timeout_ms=30_000,
         )
+        self._session.wait_for_function(
+            """
+            (saveSettingsLabel) => {
+              const bodyText = document.body?.innerText ?? '';
+              const button = Array.from(
+                document.querySelectorAll('flt-semantics[role="button"]'),
+              ).find((candidate) => {
+                const text = (candidate.innerText ?? '').trim();
+                const aria = (candidate.getAttribute('aria-label') ?? '').trim();
+                return text === saveSettingsLabel || aria === saveSettingsLabel;
+              });
+              if (bodyText.includes('Save failed:') || bodyText.includes('Syncing')) {
+                return bodyText;
+              }
+              if (button && button.getAttribute('aria-disabled') === 'true') {
+                return bodyText;
+              }
+              return null;
+            }
+            """,
+            arg="Save settings",
+            timeout_ms=30_000,
+        )
+        body_text = self._session.wait_for_function(
+            """
+            (saveSettingsLabel) => {
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
+              const bodyText = document.body?.innerText ?? '';
+              const button = Array.from(
+                document.querySelectorAll('flt-semantics[role="button"]'),
+              ).find((candidate) => {
+                const text = (candidate.innerText ?? '').trim();
+                const aria = (candidate.getAttribute('aria-label') ?? '').trim();
+                return isVisible(candidate)
+                  && (text === saveSettingsLabel || aria === saveSettingsLabel);
+              });
+              if (bodyText.includes('Save failed:')) {
+                return bodyText;
+              }
+              const saveButtonEnabled = !!button && button.getAttribute('aria-disabled') !== 'true';
+              if (saveButtonEnabled && !bodyText.includes('Syncing')) {
+                return bodyText;
+              }
+              return null;
+            }
+            """,
+            arg="Save settings",
+            timeout_ms=120_000,
+        )
+        if not isinstance(body_text, str):
+            body_text = self.current_body_text()
+        if "Save failed:" in body_text:
+            raise AssertionError(
+                "Saving catalog settings failed in the hosted app.\n"
+                f"Observed body text:\n{body_text}",
+            )
 
     def action_label_exists(self, label: str) -> bool:
         return self._session.count(self._button_by_aria_label(label)) > 0

@@ -4,14 +4,11 @@ import json
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 
-from playwright.sync_api import sync_playwright
-
 from testing.frameworks.python.playwright_web_app_session import (
-    PlaywrightStoredTokenWebAppRuntime,
     PlaywrightWebAppSession,
 )
 from testing.tests.support.stored_workspace_profiles_runtime import (
-    _workspace_token_storage_keys,
+    StoredWorkspaceProfilesRuntime,
 )
 
 
@@ -21,9 +18,10 @@ class WorkspaceRestoreConsoleEvent:
     text: str
 
 
-class Ts723WorkspaceRestoreRuntime(PlaywrightStoredTokenWebAppRuntime):
+class Ts893WorkspaceRestoreRuntime(StoredWorkspaceProfilesRuntime):
     RUNTIME_PROBE_PREFIX = "[TS-893][local-revalidation]"
     RUNTIME_ACTIVITY_PREFIX = "[TS-893][local-revalidation-activity]"
+    BUSY_STATE_PREFIX = "[TS-893][busy-state]"
 
     def __init__(
         self,
@@ -34,85 +32,138 @@ class Ts723WorkspaceRestoreRuntime(PlaywrightStoredTokenWebAppRuntime):
         workspace_token_profile_ids: tuple[str, ...] = (),
         viewport: dict[str, int] | None = None,
     ) -> None:
-        super().__init__(repository=repository, token=token)
+        resolved_viewport = viewport or {"width": 1440, "height": 900}
+        super().__init__(
+            repository=repository,
+            token=token,
+            viewport_width=int(resolved_viewport["width"]),
+            viewport_height=int(resolved_viewport["height"]),
+            workspace_state=workspace_state,
+            workspace_token_profile_ids=tuple(workspace_token_profile_ids),
+            restore_local_workspace_handles=True,
+        )
         self._workspace_state = workspace_state
-        self._workspace_token_profile_ids = tuple(workspace_token_profile_ids)
-        self._viewport = viewport or {"width": 1440, "height": 900}
         self._active_local_handle_name = _active_local_handle_name(workspace_state)
         self.console_events: list[WorkspaceRestoreConsoleEvent] = []
         self.page_errors: list[str] = []
 
     def __enter__(self) -> PlaywrightWebAppSession:
-        self._playwright = sync_playwright().start()
-        self._browser = self._playwright.chromium.launch(headless=True)
-        self._context = self._browser.new_context(viewport=self._viewport)
-        self._context.route("https://api.github.com/**", self._handle_github_api_route)
-        self._context.add_init_script(script=self._build_preload_script())
-        self._page = self._context.new_page()
+        session = super().__enter__()
+        if self._context is None or self._page is None:
+            raise RuntimeError(
+                "TS-893 workspace restore runtime expected a browser context and page.",
+            )
+        script = self._build_instrumentation_script()
+        self._context.add_init_script(script=script)
+        self._page.add_init_script(script=script)
         self._page.on("console", self._record_console_event)
         self._page.on("pageerror", self._record_page_error)
-        return PlaywrightWebAppSession(self._page)
+        return session
 
-    def storage_snapshot(self) -> dict[str, str | None]:
+    def transient_busy_state_snapshot(self) -> dict[str, object] | None:
         if self._page is None:
             raise RuntimeError(
-                "TS-723 storage snapshot requested before the page was created.",
+                "TS-893 busy-state snapshot requested before the page was created.",
             )
         payload = self._page.evaluate(
             """
-            (keys) => {
-              const snapshot = {};
-              for (const key of keys) {
-                snapshot[key] = window.localStorage.getItem(key);
+            () => {
+              const snapshot = globalThis.__trackstateTs893BusyStateSnapshot;
+              if (typeof snapshot !== 'function') {
+                return null;
               }
-              return snapshot;
+              return snapshot();
             }
             """,
-            [
-                "trackstate.workspaceProfiles.state",
-                "flutter.trackstate.workspaceProfiles.state",
-                f"trackstate.githubToken.{self._repository_storage_key}",
-                f"flutter.trackstate.githubToken.{self._repository_storage_key}",
-            ],
         )
-        if not isinstance(payload, dict):
-            raise AssertionError(f"TS-723 expected a storage snapshot map, got: {payload!r}")
-        return {
-            str(key): (None if value is None else str(value))
-            for key, value in payload.items()
-        }
+        return payload if isinstance(payload, dict) else None
 
-    def _build_preload_script(self) -> str:
-        serialized_workspace_state = json.dumps(self._workspace_state)
-        workspace_token_storage_keys = _workspace_token_storage_keys(
-            self._workspace_state,
-            workspace_token_profile_ids=self._workspace_token_profile_ids,
+    def release_transient_busy_handle(self) -> dict[str, object] | None:
+        if self._page is None:
+            raise RuntimeError(
+                "TS-893 busy-state release requested before the page was created.",
+            )
+        payload = self._page.evaluate(
+            """
+            () => {
+              const release = globalThis.__trackstateTs893ReleaseBusyHandle;
+              if (typeof release !== 'function') {
+                return null;
+              }
+              return release();
+            }
+            """,
         )
+        return payload if isinstance(payload, dict) else None
+
+    def _build_instrumentation_script(self) -> str:
         return f"""
 (() => {{
-  const repositoryStorageKey = {json.dumps(self._repository_storage_key)};
-  const token = {json.dumps(self._token)};
-  const workspaceState = {json.dumps(serialized_workspace_state)};
-  const workspaceTokenStorageKeys = {json.dumps(workspace_token_storage_keys)};
   const trackedHandleName = {json.dumps(self._active_local_handle_name)};
   const probePrefix = {json.dumps(self.RUNTIME_PROBE_PREFIX)};
   const activityPrefix = {json.dumps(self.RUNTIME_ACTIVITY_PREFIX)};
+  const busyStatePrefix = {json.dumps(self.BUSY_STATE_PREFIX)};
   const trackedHandleLineage = new WeakMap();
+  const wrappedMethodsKey = Symbol('trackstateTs893WrappedMethods');
+  const blockableMethods = new Set([
+    'queryPermission',
+    'requestPermission',
+    'entries',
+    'keys',
+    'values',
+    'getDirectoryHandle',
+    'getFileHandle',
+    'resolve',
+    'getFile',
+    'createWritable',
+  ]);
+  const busyState =
+    globalThis.__trackstateTs893BusyState &&
+    typeof globalThis.__trackstateTs893BusyState === 'object'
+      ? globalThis.__trackstateTs893BusyState
+      : {{
+          blocked: true,
+          blockedAtEpochMs: Date.now(),
+          releasedAtEpochMs: null,
+          releaseCalls: 0,
+          gateHits: 0,
+          blockedMethods: [],
+        }};
+  globalThis.__trackstateTs893BusyState = busyState;
 
-  for (const key of [
-    'trackstate.workspaceProfiles.state',
-    'flutter.trackstate.workspaceProfiles.state',
-  ]) {{
-    window.localStorage.setItem(key, workspaceState);
-  }}
+  const snapshotBusyState = () => ({{
+    blocked: busyState.blocked === true,
+    blockedAtEpochMs:
+      typeof busyState.blockedAtEpochMs === 'number'
+        ? busyState.blockedAtEpochMs
+        : null,
+    releasedAtEpochMs:
+      typeof busyState.releasedAtEpochMs === 'number'
+        ? busyState.releasedAtEpochMs
+        : null,
+    releaseCalls:
+      typeof busyState.releaseCalls === 'number' ? busyState.releaseCalls : 0,
+    gateHits: typeof busyState.gateHits === 'number' ? busyState.gateHits : 0,
+    blockedMethods: Array.isArray(busyState.blockedMethods)
+      ? [...busyState.blockedMethods]
+      : [],
+  }});
 
-  for (const key of [
-    `trackstate.githubToken.${{repositoryStorageKey}}`,
-    `flutter.trackstate.githubToken.${{repositoryStorageKey}}`,
-    ...workspaceTokenStorageKeys,
-  ]) {{
-    window.localStorage.setItem(key, token);
-  }}
+  globalThis.__trackstateTs893BusyStateSnapshot = () => snapshotBusyState();
+  globalThis.__trackstateTs893ReleaseBusyHandle = () => {{
+    busyState.blocked = false;
+    busyState.releaseCalls =
+      typeof busyState.releaseCalls === 'number' ? busyState.releaseCalls + 1 : 1;
+    if (typeof busyState.releasedAtEpochMs !== 'number') {{
+      busyState.releasedAtEpochMs = Date.now();
+    }}
+    const payload = {{
+      event: 'released',
+      ...snapshotBusyState(),
+    }};
+    console.debug(`${{busyStatePrefix}} ${{JSON.stringify(payload)}}`);
+    return payload;
+  }};
 
   const handleName = (handle) => {{
     if (!handle || typeof handle !== 'object' || !('name' in handle)) {{
@@ -140,12 +191,60 @@ class Ts723WorkspaceRestoreRuntime(PlaywrightStoredTokenWebAppRuntime):
     return [...lineage, normalizedChildName];
   }};
 
+  const isNativeFileSystemHandle = (handle) => {{
+    return (
+      typeof globalThis.FileSystemHandle === 'function' &&
+      handle instanceof globalThis.FileSystemHandle
+    );
+  }};
+
+  const decoratePlainHandleMethods = (handle) => {{
+    if (
+      !handle ||
+      typeof handle !== 'object' ||
+      isNativeFileSystemHandle(handle)
+    ) {{
+      return handle;
+    }}
+    wrapHandleMethod(handle, 'queryPermission');
+    wrapHandleMethod(handle, 'requestPermission');
+    wrapHandleMethod(
+      handle,
+      'entries',
+      (result, details) => wrapAsyncIterable(result, details),
+    );
+    wrapHandleMethod(
+      handle,
+      'keys',
+      (result, details) => wrapAsyncIterable(result, details),
+    );
+    wrapHandleMethod(
+      handle,
+      'values',
+      (result, details) => wrapAsyncIterable(result, details),
+    );
+    wrapHandleMethod(
+      handle,
+      'getDirectoryHandle',
+      (result, details, args) => trackReturnedValue(result, details.handleLineage, args),
+    );
+    wrapHandleMethod(
+      handle,
+      'getFileHandle',
+      (result, details, args) => trackReturnedValue(result, details.handleLineage, args),
+    );
+    wrapHandleMethod(handle, 'resolve');
+    wrapHandleMethod(handle, 'getFile');
+    wrapHandleMethod(handle, 'createWritable');
+    return handle;
+  }};
+
   const trackHandle = (handle, lineage) => {{
     if (!handle || typeof handle !== 'object' || !Array.isArray(lineage) || lineage.length === 0) {{
       return handle;
     }}
     trackedHandleLineage.set(handle, [...lineage]);
-    return handle;
+    return decoratePlainHandleMethods(handle);
   }};
 
   const trackedLineageForHandle = (handle) => {{
@@ -163,10 +262,6 @@ class Ts723WorkspaceRestoreRuntime(PlaywrightStoredTokenWebAppRuntime):
       return [...rootLineage];
     }}
     return null;
-  }};
-
-  const isTrackedHandle = (handle) => {{
-    return Array.isArray(trackedLineageForHandle(handle));
   }};
 
   const trackDescendantHandle = (parentLineage, handle, childName) => {{
@@ -223,6 +318,16 @@ class Ts723WorkspaceRestoreRuntime(PlaywrightStoredTokenWebAppRuntime):
     console.debug(`${{activityPrefix}} ${{JSON.stringify(details)}}`);
   }};
 
+  const recordBlockedMethod = (methodName) => {{
+    if (!Array.isArray(busyState.blockedMethods)) {{
+      busyState.blockedMethods = [];
+    }}
+    busyState.blockedMethods.push(methodName);
+    if (busyState.blockedMethods.length > 25) {{
+      busyState.blockedMethods = busyState.blockedMethods.slice(-25);
+    }}
+  }};
+
   const wrapAsyncIterable = (iterable, details) => {{
     if (!iterable || typeof iterable[Symbol.asyncIterator] !== 'function') {{
       return iterable;
@@ -270,6 +375,21 @@ class Ts723WorkspaceRestoreRuntime(PlaywrightStoredTokenWebAppRuntime):
     if (typeof original !== 'function') {{
       return;
     }}
+    const wrappedMethods =
+      prototype?.[wrappedMethodsKey] instanceof Set
+        ? prototype[wrappedMethodsKey]
+        : new Set();
+    if (!(prototype?.[wrappedMethodsKey] instanceof Set)) {{
+      Object.defineProperty(prototype, wrappedMethodsKey, {{
+        configurable: true,
+        enumerable: false,
+        value: wrappedMethods,
+      }});
+    }}
+    if (wrappedMethods.has(methodName)) {{
+      return;
+    }}
+    wrappedMethods.add(methodName);
     prototype[methodName] = function (...args) {{
       const handleLineage = trackedLineageForHandle(this);
       const tracked = Array.isArray(handleLineage);
@@ -280,12 +400,28 @@ class Ts723WorkspaceRestoreRuntime(PlaywrightStoredTokenWebAppRuntime):
         handleLineage: tracked ? handleLineage : null,
         tracked,
       }};
+      emitActivity({{
+        ...details,
+        stage: 'invoke',
+      }});
+      if (tracked && busyState.blocked === true && blockableMethods.has(methodName)) {{
+        busyState.gateHits =
+          typeof busyState.gateHits === 'number' ? busyState.gateHits + 1 : 1;
+        recordBlockedMethod(methodName);
+        const error = new DOMException(
+          `TS-893 simulated transient busy handle for ${{details.handleName || 'saved local workspace'}}.`,
+          'InvalidStateError',
+        );
+        emitProbe({{
+          ...details,
+          stage: 'blocked',
+          error: normalizeError(error),
+          busyState: snapshotBusyState(),
+        }});
+        throw error;
+      }}
       let result;
       try {{
-        emitActivity({{
-          ...details,
-          stage: 'invoke',
-        }});
         result = original.apply(this, args);
       }} catch (error) {{
         if (tracked) {{
@@ -360,6 +496,18 @@ class Ts723WorkspaceRestoreRuntime(PlaywrightStoredTokenWebAppRuntime):
   wrapHandleMethod(globalThis.FileSystemDirectoryHandle?.prototype, 'resolve');
   wrapHandleMethod(globalThis.FileSystemFileHandle?.prototype, 'getFile');
   wrapHandleMethod(globalThis.FileSystemFileHandle?.prototype, 'createWritable');
+
+  const fixtureHandles = globalThis.__trackstateStoredWorkspaceRuntimeFixtureHandles;
+  if (fixtureHandles instanceof Map) {{
+    for (const fixtureHandle of fixtureHandles.values()) {{
+      decoratePlainHandleMethods(fixtureHandle);
+    }}
+  }}
+
+  console.debug(`${{busyStatePrefix}} ${{JSON.stringify({{
+    event: 'initialized',
+    ...snapshotBusyState(),
+  }})}}`);
 }})();
 """
 
@@ -373,10 +521,6 @@ class Ts723WorkspaceRestoreRuntime(PlaywrightStoredTokenWebAppRuntime):
 
     def _record_page_error(self, error: object) -> None:
         self.page_errors.append(str(error))
-
-    @property
-    def _repository_storage_key(self) -> str:
-        return self._repository.replace("/", ".")
 
     @property
     def probe_console_events(self) -> tuple[WorkspaceRestoreConsoleEvent, ...]:

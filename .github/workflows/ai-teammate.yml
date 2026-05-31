@@ -275,11 +275,13 @@ jobs:
           INPUT_JQL="key = ${{ inputs.concurrency_key }}"
           echo "CI Run URL: ${CI_RUN_URL}"
           echo "Input JQL: ${INPUT_JQL}"
+          mkdir -p "${GITHUB_WORKSPACE}/.dmtools"
+          set -o pipefail
 
           if [ -n "${ENCODED_CONFIG}" ]; then
-            dmtools --debug run "${{ inputs.config_file }}" "${ENCODED_CONFIG}" --inputJql "${INPUT_JQL}" --ciRunUrl "${CI_RUN_URL}"
+            dmtools --debug run "${{ inputs.config_file }}" "${ENCODED_CONFIG}" --inputJql "${INPUT_JQL}" --ciRunUrl "${CI_RUN_URL}" 2>&1 | tee "${GITHUB_WORKSPACE}/.dmtools/ai-run.log"
           else
-            dmtools --debug run "${{ inputs.config_file }}" --inputJql "${INPUT_JQL}" --ciRunUrl "${CI_RUN_URL}"
+            dmtools --debug run "${{ inputs.config_file }}" --inputJql "${INPUT_JQL}" --ciRunUrl "${CI_RUN_URL}" 2>&1 | tee "${GITHUB_WORKSPACE}/.dmtools/ai-run.log"
           fi
 
       - name: Verify CodeGraph usage
@@ -297,6 +299,10 @@ jobs:
           esac
 
           if [ ! -s "${CODEGRAPH_USAGE_LOG}" ]; then
+            if grep -q "outputs/response.md missing — CLI agent was interrupted\\|outputs/response.md missing - CLI agent was interrupted\\|\"path\":\"interrupted\"\\|CLI command executed but did not produce output file\\|No review data found\\|No review data found in pr_review.json" "${GITHUB_WORKSPACE}/.dmtools/ai-run.log" 2>/dev/null; then
+              echo "CodeGraph usage not recorded because the CLI agent did not complete review/development output generation. Post-action reset the ticket for retry."
+              exit 0
+            fi
             echo "::error::${CONFIG_FILE} completed without invoking codegraph. Source-code agents must use CodeGraph for code navigation."
             exit 1
           fi
