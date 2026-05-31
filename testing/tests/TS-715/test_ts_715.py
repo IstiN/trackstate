@@ -41,9 +41,10 @@ MIN_DISTINCT_RETRY_GAP_SECONDS = (
 )
 # Keep waiting long enough to capture the real follow-up retry even when the
 # hosted implementation regresses to a much slower backoff than the expected
-# one-minute step. This avoids timing out just before the distinct second
-# repository-scoped request arrives and produces stronger product evidence.
-FOLLOW_UP_FAILED_REQUEST_TIMEOUT_SECONDS = 960
+# one-minute step. The ticket history already captured a delayed retry at
+# 962.1 seconds, so keep a clear buffer above that documented regression window
+# instead of timing out on the same harness failure mode.
+FOLLOW_UP_FAILED_REQUEST_TIMEOUT_SECONDS = 18 * 60
 DEFAULT_BRANCH = "main"
 AUTH_ERROR_FRAGMENT_PATTERN = re.compile(
     r"(401|bad credentials|gitHub api request failed|gitHub connection failed)",
