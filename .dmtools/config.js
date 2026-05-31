@@ -54,8 +54,8 @@ module.exports = {
     globalAdditionalInstructions: [
         './agents/prompts/codegraph_tools.md'
     ],
-    // SM parallelism: keep one slot for normal automation and one for recovery/bug triage.
-    smMaxWorkflows: 2,
+    // SM parallelism: keep capacity for normal automation plus Failed TC bug triage.
+    smMaxWorkflows: 3,
 
     repository: {
         owner: 'IstiN',
