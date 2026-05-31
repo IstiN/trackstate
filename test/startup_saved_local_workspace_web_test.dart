@@ -137,7 +137,7 @@ void main() {
   );
 
   testWidgets(
-    'web startup switches to the hosted fallback workspace when the browser handle is missing and opens the shell fallback',
+    'web startup preserves the unavailable local workspace selection when the browser handle is missing while opening the shell fallback',
     (tester) async {
       const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
       const authStore = SharedPreferencesTrackStateAuthStore();
@@ -197,10 +197,13 @@ void main() {
         authPending: delayedRepository.userProbePending,
       );
       _expectRestrictedFallbackShell(delayedRepository);
-      _expectHostedFallbackTrigger();
-      await _expectHostedFallbackWorkspaceRow(tester);
+      _expectUnavailableLocalWorkspaceTrigger();
+      await _expectUnavailableLocalWorkspaceRow(
+        tester,
+        workspaceId: activeLocalWorkspaceId,
+      );
       final savedStateAfterStartup = await workspaceProfiles.loadState();
-      _expectHostedFallbackWorkspaceState(savedStateAfterStartup);
+      expect(savedStateAfterStartup.activeWorkspaceId, activeLocalWorkspaceId);
       expect(
         savedStateAfterStartup.unavailableLocalWorkspaceIds,
         contains(activeLocalWorkspaceId),
@@ -2116,6 +2119,21 @@ void _expectHostedFallbackTrigger() {
   );
 }
 
+void _expectUnavailableLocalWorkspaceTrigger() {
+  expect(
+    find.bySemanticsLabel(
+      RegExp(r'Workspace switcher: Active local workspace, .*Unavailable'),
+    ),
+    findsWidgets,
+  );
+  expect(
+    find.bySemanticsLabel(
+      RegExp(r'Workspace switcher: Hosted setup workspace, .*Needs sign-in'),
+    ),
+    findsNothing,
+  );
+}
+
 void _expectBrowserObservedShellReady({
   required bool authPending,
   Iterable<String>? consoleMessages,
@@ -2436,6 +2454,32 @@ Future<void> _expectHostedFallbackWorkspaceRow(WidgetTester tester) async {
   expect(
     find.descendant(of: hostedRow, matching: find.text('Needs sign-in')),
     findsWidgets,
+  );
+  await tester.tapAt(const Offset(8, 8));
+  await tester.pumpAndSettle();
+}
+
+Future<void> _expectUnavailableLocalWorkspaceRow(
+  WidgetTester tester, {
+  required String workspaceId,
+}) async {
+  await tester.tap(find.byKey(const ValueKey('workspace-switcher-trigger')));
+  await tester.pumpAndSettle();
+  final localRow = find.byKey(ValueKey('workspace-$workspaceId'));
+  expect(localRow, findsOneWidget);
+  expect(
+    find.descendant(of: localRow, matching: find.text('Active')),
+    findsOneWidget,
+  );
+  expect(
+    find.descendant(of: localRow, matching: find.text('Unavailable')),
+    findsWidgets,
+  );
+  final hostedRow = find.byKey(const ValueKey('workspace-$_hostedWorkspaceId'));
+  expect(hostedRow, findsOneWidget);
+  expect(
+    find.descendant(of: hostedRow, matching: find.text('Active')),
+    findsNothing,
   );
   await tester.tapAt(const Offset(8, 8));
   await tester.pumpAndSettle();
