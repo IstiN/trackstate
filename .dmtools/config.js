@@ -54,8 +54,8 @@ module.exports = {
     globalAdditionalInstructions: [
         './agents/prompts/codegraph_tools.md'
     ],
-    // SM parallelism: number of workflows SM dispatches per run (overrides sm.json default)
-    smMaxWorkflows: 1,
+    // SM parallelism: keep capacity for normal automation plus Failed TC bug triage.
+    smMaxWorkflows: 3,
 
     repository: {
         owner: 'IstiN',

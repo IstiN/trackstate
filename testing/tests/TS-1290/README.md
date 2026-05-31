@@ -14,7 +14,7 @@ python -m playwright install chromium
 ## Run this test
 
 ```bash
-python testing/tests/TS-1290/test_ts_389.py
+python testing/tests/TS-1290/test_ts_1290.py
 ```
 
 ## Required environment and config

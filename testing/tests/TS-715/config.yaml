@@ -9,6 +9,7 @@ notes:
   - Opens the deployed hosted TrackState app and reuses the real live hosted workspace.
   - Simulates a revoked GitHub PAT by forcing repository-scoped GitHub API checks to return HTTP 401 after the session is connected.
   - Verifies the top-bar sync pill, the visible Workspace sync Settings card, the surfaced authentication error, and the logged retry cadence.
+  - Keeps the run alive long enough to capture the distinct follow-up failed repository-scoped retry when backoff regresses.
 runtime_inputs:
   expected_sync_label: Sync unavailable
   expected_settings_section: Workspace sync

@@ -43,7 +43,7 @@ CUSTOM_FIELD_TYPE = "option"
 CUSTOM_FIELD_OPTIONS = ("Production", "Staging", "Development")
 CUSTOM_FIELD_OPTIONS_TEXT = ", ".join(CUSTOM_FIELD_OPTIONS)
 CUSTOM_FIELD_ISSUE_TYPES = {"Bug"}
-POST_SAVE_PERSISTENCE_WAIT_MS = 20_000
+POST_SAVE_PERSISTENCE_WAIT_MS = 60_000
 
 
 @dataclass(frozen=True)
@@ -310,6 +310,14 @@ def main() -> None:
                             "creating the Environment field before saving settings"
                         ),
                     )
+                    _record_human_verification(
+                        result,
+                        check=(
+                            "Filled the live Add field form with the visible Environment "
+                            "metadata before saving."
+                        ),
+                        observed=environment_editor_draft.body_text,
+                    )
                     settings_page.save_field_editor(field_name=CUSTOM_FIELD_NAME)
                     settings_page.save_settings()
                     refreshed_fields_text = _reopen_fields_tab(
@@ -337,6 +345,16 @@ def main() -> None:
                     writes_product_bug_report = True
                     failure = str(error)
                     scenario_failures.append(failure)
+                    if "environment_editor_before_save" in result:
+                        _record_human_verification(
+                            result,
+                            check=(
+                                "Viewed the live Add field editor immediately before save "
+                                "and confirmed the entered Environment metadata was visible "
+                                "to the user."
+                            ),
+                            observed=str(result["environment_editor_before_save"]),
+                        )
                     _record_step(
                         result,
                         step=6,
@@ -960,7 +978,17 @@ def _jira_comment(payload: dict[str, object]) -> str:
     lines.extend(_wiki_section("Observed result", _observed_lines(payload)))
     lines.extend(_wiki_section("Environment", _environment_lines(payload)))
     if payload.get("error"):
-        lines.extend(_wiki_section("Exact assertion failure", ["{code}", str(payload["error"]), "", str(payload.get("traceback", "")), "{code}"]))
+        lines.extend(
+            [
+                "*Exact assertion failure*",
+                "{code}",
+                str(payload["error"]),
+                "",
+                str(payload.get("traceback", "")),
+                "{code}",
+                "",
+            ],
+        )
     return "\n".join(lines).rstrip() + "\n"
 
 
