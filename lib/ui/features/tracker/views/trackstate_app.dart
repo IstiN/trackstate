@@ -13627,6 +13627,7 @@ class _SettingsTextField extends StatelessWidget {
           WidgetsBinding.instance.addPostFrameCallback((_) {
             browser_text_field_value_sync.syncBrowserTextFieldValue(
               label: label,
+              controller: textController,
               value: value.text,
               enabled: enabled,
               readOnly: !enabled,
@@ -15906,7 +15907,9 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
                                     enabled: canEditFields,
                                     errorText:
                                         _didAttemptSubmit &&
-                                            _summaryController.text.trim().isEmpty
+                                            _summaryController.text
+                                                .trim()
+                                                .isEmpty
                                         ? l10n.summaryRequired
                                         : null,
                                     onChanged: (_) {
