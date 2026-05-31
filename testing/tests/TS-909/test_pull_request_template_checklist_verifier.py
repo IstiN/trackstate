@@ -26,6 +26,13 @@ from testing.tests.support.github_pull_request_compose_page_factory import (
     GitHubPullRequestComposeRuntimeUnavailableError,
 )
 
+REPO_ROOT = Path(__file__).resolve().parents[3]
+PR_TEMPLATE_PATH = REPO_ROOT / ".github" / "PULL_REQUEST_TEMPLATE.md"
+REQUIRED_DOM_ORDER_CHECKLIST_ITEM = (
+    "Manual verification: DOM order matches visual hierarchy for "
+    "keyboard-accessible elements."
+)
+
 
 def _load_ts_909_module():
     module_path = Path(__file__).with_name("test_ts_909.py")
@@ -407,6 +414,18 @@ class PullRequestTemplateChecklistVerifierTest(unittest.TestCase):
 
         self.assertIn(".github/PULL_REQUEST_TEMPLATE.md", observation.url)
         self.assertEqual(observation.matched_text, "Accessibility checklist")
+
+
+class PullRequestTemplateRepositoryRegressionTest(unittest.TestCase):
+    def test_repository_template_contains_required_dom_order_checklist_item(self) -> None:
+        self.assertTrue(
+            PR_TEMPLATE_PATH.is_file(),
+            f"Expected pull request template at {PR_TEMPLATE_PATH}.",
+        )
+        contents = PR_TEMPLATE_PATH.read_text(encoding="utf-8")
+
+        self.assertIn("Accessibility checklist", contents)
+        self.assertIn(REQUIRED_DOM_ORDER_CHECKLIST_ITEM, contents)
 
 
 class Ts909ReviewRegressionTest(unittest.TestCase):
