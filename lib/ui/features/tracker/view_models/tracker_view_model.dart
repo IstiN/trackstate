@@ -359,6 +359,7 @@ class TrackerViewModel extends ChangeNotifier {
   bool _isLoadingMoreSearchResults = false;
   bool _didAutoResumeStartupRecoveryAfterAuthentication = false;
   bool _hasLoadedInitialSearchResults = false;
+  bool _isRestoringLocalHostedAccess = false;
   bool _startupTimeoutFallbackAwaitingShellReady = false;
   HostedRepositoryAccessMode? _startupHostedAccessModeOverride;
   WorkspaceSyncService? _workspaceSyncService;
@@ -422,6 +423,7 @@ class TrackerViewModel extends ChangeNotifier {
   bool get hasLocalHostedAccessSession => _hasLocalHostedAccessSession;
   bool get usesLocalPersistence => _repository.usesLocalPersistence;
   bool get supportsGitHubAuth => _repository.supportsGitHubAuth;
+  bool get isRestoringLocalHostedAccess => _isRestoringLocalHostedAccess;
   bool get supportsProjectSettingsAdmin =>
       _repository is ProjectSettingsRepository;
   ProviderSession? get providerSession => switch (_repository) {
@@ -569,6 +571,7 @@ class TrackerViewModel extends ChangeNotifier {
     _message = null;
     _startupRecovery = retainedStartupRecovery;
     _didAutoResumeStartupRecoveryAfterAuthentication = false;
+    _isRestoringLocalHostedAccess = false;
     _startupTimeoutFallbackAwaitingShellReady = false;
     _startupHostedAccessModeOverride = null;
     notifyListeners();
@@ -2022,10 +2025,14 @@ class TrackerViewModel extends ChangeNotifier {
     if (storedToken == null || storedToken.trim().isEmpty) {
       return;
     }
+    _isRestoringLocalHostedAccess = true;
+    if (!_disposed) {
+      notifyListeners();
+    }
     try {
       await _runAutomaticRepositoryConnectionRestore(
         connect: () => _repository.connect(
-          RepositoryConnection(
+          GitHubConnection(
             repository: target.repository,
             branch: target.branch,
             token: storedToken,
@@ -2047,6 +2054,11 @@ class TrackerViewModel extends ChangeNotifier {
       _hasLocalHostedAccessSession = false;
       _bindProviderSession();
       rethrow;
+    } finally {
+      _isRestoringLocalHostedAccess = false;
+      if (!_disposed) {
+        notifyListeners();
+      }
     }
   }
 

@@ -5818,6 +5818,10 @@ String _activeWorkspaceStateLabel(
         localWorkspaceAvailability[activeWorkspace.id] == false) {
       return l10n.workspaceStateUnavailable;
     }
+    if (viewModel.isRestoringLocalHostedAccess &&
+        !viewModel.hasLocalHostedAccessSession) {
+      return l10n.workspaceStateLocal;
+    }
     return l10n.workspaceStateLocalGit;
   }
   if (_shouldShowHostedWorkspaceSyncIssue(
@@ -15906,7 +15910,9 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
                                     enabled: canEditFields,
                                     errorText:
                                         _didAttemptSubmit &&
-                                            _summaryController.text.trim().isEmpty
+                                            _summaryController.text
+                                                .trim()
+                                                .isEmpty
                                         ? l10n.summaryRequired
                                         : null,
                                     onChanged: (_) {

@@ -1439,18 +1439,24 @@ void main() {
       final observedTriggerLabels = <String>{};
       for (var sample = 0; sample < 20; sample += 1) {
         await tester.pump(const Duration(milliseconds: 500));
-        if (find.bySemanticsLabel(
+        if (find
+            .bySemanticsLabel(
               RegExp(
                 r'Workspace switcher: Hosted setup workspace, .*Needs sign-in',
               ),
-            ).evaluate().isNotEmpty) {
+            )
+            .evaluate()
+            .isNotEmpty) {
           observedTriggerLabels.add('Needs sign-in');
         }
-        if (find.bySemanticsLabel(
+        if (find
+            .bySemanticsLabel(
               RegExp(
                 r'Workspace switcher: Hosted setup workspace, .*Attachments limited',
               ),
-            ).evaluate().isNotEmpty) {
+            )
+            .evaluate()
+            .isNotEmpty) {
           observedTriggerLabels.add('Attachments limited');
         }
       }
@@ -1467,7 +1473,10 @@ void main() {
         reason:
             'The late /user resolution must not flip the visible trigger into the post-auth attachment-restricted state until the user explicitly reconnects.',
       );
-      expect(find.text('Git-native. Jira-compatible. Team-proven.'), findsWidgets);
+      expect(
+        find.text('Git-native. Jira-compatible. Team-proven.'),
+        findsWidgets,
+      );
       for (final label in _shellNavigationLabels) {
         expect(find.text(label), findsWidgets);
       }
@@ -1475,7 +1484,7 @@ void main() {
   );
 
   testWidgets(
-    'web startup keeps a signed-in saved local workspace in Local Git state while deferred local auth restore is still pending',
+    'web startup keeps a signed-in saved local workspace in the pending Local state while deferred local auth restore is still pending',
     (tester) async {
       const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
       const authStore = SharedPreferencesTrackStateAuthStore();
@@ -1546,6 +1555,10 @@ void main() {
       );
       expect(
         find.descendant(of: activeRow, matching: find.text('Local Git')),
+        findsNothing,
+      );
+      expect(
+        find.descendant(of: activeRow, matching: find.text('Local')),
         findsWidgets,
       );
       expect(
@@ -1563,6 +1576,14 @@ void main() {
       localRepository.completeConnect();
       await tester.pump();
       await tester.pumpAndSettle();
+
+      expect(
+        find.descendant(of: activeRow, matching: find.text('Local Git')),
+        findsWidgets,
+      );
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump(const Duration(milliseconds: 20));
     },
   );
 }
