@@ -54,7 +54,7 @@ module.exports = {
     globalAdditionalInstructions: [
         './agents/prompts/codegraph_tools.md'
     ],
-    // SM parallelism: number of workflows SM dispatches per run (overrides sm.json default)
+    // SM parallelism: one dispatch at a time to avoid Copilot rate-limit lockups.
     smMaxWorkflows: 1,
 
     repository: {

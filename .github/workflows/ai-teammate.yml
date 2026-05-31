@@ -14,6 +14,9 @@ on:
       concurrency_key:
         description: "Ticket key for concurrency grouping (e.g., TS-1)"
         required: true
+      input_jql:
+        description: "Optional Jira input JQL; defaults to key = concurrency_key"
+        required: false
       project_key:
         description: "Project key for multi-project config selection"
         required: false
@@ -272,7 +275,10 @@ jobs:
           ENCODED_CONFIG="${EFFECTIVE_ENCODED_CONFIG}"
           echo "Using configuration: ${{ inputs.config_file }}"
           CI_RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          INPUT_JQL="key = ${{ inputs.concurrency_key }}"
+          INPUT_JQL="${{ inputs.input_jql }}"
+          if [ -z "${INPUT_JQL}" ]; then
+            INPUT_JQL="key = ${{ inputs.concurrency_key }}"
+          fi
           echo "CI Run URL: ${CI_RUN_URL}"
           echo "Input JQL: ${INPUT_JQL}"
           mkdir -p "${GITHUB_WORKSPACE}/.dmtools"
@@ -299,8 +305,8 @@ jobs:
           esac
 
           if [ ! -s "${CODEGRAPH_USAGE_LOG}" ]; then
-            if grep -q "outputs/response.md missing — CLI agent was interrupted\\|outputs/response.md missing - CLI agent was interrupted\\|\"path\":\"interrupted\"" "${GITHUB_WORKSPACE}/.dmtools/ai-run.log" 2>/dev/null; then
-              echo "CodeGraph usage not recorded because the CLI agent was interrupted before completing. Post-action reset the ticket for retry."
+            if grep -q "outputs/response.md missing — CLI agent was interrupted\\|outputs/response.md missing - CLI agent was interrupted\\|\"path\":\"interrupted\"\\|\"path\":\"already_fixed_without_codegraph\"\\|\"path\":\"blocked_without_codegraph\"\\|CLI command executed but did not produce output file\\|No review data found\\|No review data found in pr_review.json" "${GITHUB_WORKSPACE}/.dmtools/ai-run.log" 2>/dev/null; then
+              echo "CodeGraph usage not recorded because the CLI agent did not complete acceptable source-code output generation. Post-action reset the ticket for retry."
               exit 0
             fi
             echo "::error::${CONFIG_FILE} completed without invoking codegraph. Source-code agents must use CodeGraph for code navigation."
