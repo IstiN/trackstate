@@ -1,6 +1,6 @@
 name: AI Teammate
 
-run-name: "${{ inputs.config_file }} : ${{ inputs.concurrency_key }}"
+run-name: "${{ inputs.config_file }} : ${{ inputs.display_key || inputs.concurrency_key }} : ${{ inputs.concurrency_key }}"
 
 on:
   workflow_dispatch:
@@ -14,6 +14,9 @@ on:
       concurrency_key:
         description: "Ticket key for concurrency grouping (e.g., TS-1)"
         required: true
+      display_key:
+        description: "Ticket key to show in the workflow run name"
+        required: false
       input_jql:
         description: "Optional Jira input JQL; defaults to key = concurrency_key"
         required: false
@@ -38,6 +41,7 @@ jobs:
         run: |
           echo "Config file: ${{ inputs.config_file }}"
           echo "Concurrency key: ${{ inputs.concurrency_key }}"
+          echo "Display key: ${{ inputs.display_key || inputs.concurrency_key }}"
           if [ -n "${{ inputs.encoded_config }}" ]; then
             echo "Encoded config: provided"
           else
@@ -165,7 +169,7 @@ jobs:
       - name: Install CodeGraph usage guard
         run: |
           real_codegraph="$(command -v codegraph)"
-          guard_dir="${GITHUB_WORKSPACE}/.agent-bin"
+          guard_dir="${RUNNER_TEMP}/agent-bin"
           mkdir -p "${guard_dir}" "${GITHUB_WORKSPACE}/.dmtools"
           cat > "${guard_dir}/codegraph" <<EOF
           #!/usr/bin/env bash
