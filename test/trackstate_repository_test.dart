@@ -2554,6 +2554,66 @@ size 6
   );
 
   test(
+    'github provider allows replacing an existing LFS-tracked attachment when the current revision is provided',
+    () async {
+      var putAttempted = false;
+      Map<String, Object?>? uploadBody;
+      final provider = GitHubTrackStateProvider(
+        repositoryName: 'IstiN/trackstate',
+        dataRef: 'main',
+        client: MockClient((request) async {
+          final path = request.url.path;
+          if (path.endsWith('/repos/IstiN/trackstate') &&
+              request.method == 'GET') {
+            return http.Response(
+              '{"permissions":{"pull":true,"push":true,"admin":false}}',
+              200,
+            );
+          }
+          if (path.endsWith('/user') && request.method == 'GET') {
+            return http.Response('{"login":"octocat","name":"Mona"}', 200);
+          }
+          if (path.endsWith('/contents/.gitattributes') &&
+              request.method == 'GET') {
+            return _contentResponse(
+              '*.pdf filter=lfs diff=lfs merge=lfs -text\n',
+            );
+          }
+          if (path.endsWith('/contents/attachments/manual.pdf') &&
+              request.method == 'PUT') {
+            putAttempted = true;
+            uploadBody = jsonDecode(request.body) as Map<String, Object?>;
+            return http.Response('{"content":{"sha":"uploaded-sha"}}', 201);
+          }
+          return http.Response('', 404);
+        }),
+      );
+
+      await provider.authenticate(
+        const RepositoryConnection(
+          repository: 'IstiN/trackstate',
+          branch: 'main',
+          token: 'token',
+        ),
+      );
+
+      final result = await provider.writeAttachment(
+        RepositoryAttachmentWriteRequest(
+          path: 'attachments/manual.pdf',
+          bytes: Uint8List.fromList(utf8.encode('replacement attachment')),
+          message: 'Replace attachment',
+          branch: 'main',
+          expectedRevision: 'existing-sha',
+        ),
+      );
+
+      expect(putAttempted, isTrue);
+      expect(uploadBody?['sha'], 'existing-sha');
+      expect(result.revision, 'uploaded-sha');
+    },
+  );
+
+  test(
     'github provider evaluates LFS upload rules against the target branch',
     () async {
       var putAttempted = false;
@@ -2990,6 +3050,129 @@ Nested release-backed attachment issue.
       expect(
         updated.attachments.single.repositoryPath,
         'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
+      );
+    },
+  );
+
+  test(
+    'provider-backed repository overwrites existing LFS-tracked repository-path attachments in hosted no-LFS sessions',
+    () async {
+      final provider = _FakeReleaseAttachmentProvider(
+        permission: const RepositoryPermission(
+          canRead: true,
+          canWrite: true,
+          isAdmin: false,
+          canCreateBranch: true,
+          canManageAttachments: true,
+          attachmentUploadMode: AttachmentUploadMode.noLfs,
+          canCheckCollaborators: false,
+        ),
+        enforceExistingRevisionOnWrite: true,
+        lfsTrackedPaths: {'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf'},
+        files: {
+          'DEMO/project.json': jsonEncode({
+            'key': 'DEMO',
+            'name': 'Demo Project',
+            'attachmentStorage': {'mode': 'repository-path'},
+          }),
+          'DEMO/config/statuses.json': jsonEncode([
+            {'id': 'todo', 'name': 'To Do'},
+          ]),
+          'DEMO/config/issue-types.json': jsonEncode([
+            {'id': 'story', 'name': 'Story'},
+          ]),
+          'DEMO/config/fields.json': jsonEncode([
+            {
+              'id': 'summary',
+              'name': 'Summary',
+              'type': 'string',
+              'required': true,
+            },
+          ]),
+          'DEMO/.trackstate/index/issues.json': jsonEncode([
+            {
+              'key': 'DEMO-2',
+              'path': 'DEMO/DEMO-1/DEMO-2/main.md',
+              'parent': null,
+              'epic': null,
+              'summary': 'Hosted repository-path attachment issue',
+              'issueType': 'story',
+              'status': 'todo',
+              'labels': [],
+              'updated': '2026-05-12T20:31:06Z',
+              'children': [],
+              'archived': false,
+            },
+          ]),
+          'DEMO/DEMO-1/DEMO-2/main.md': '''
+---
+key: DEMO-2
+project: DEMO
+issueType: story
+status: todo
+summary: Hosted repository-path attachment issue
+updated: 2026-05-12T20:31:06Z
+---
+
+# Description
+
+Hosted repository-path attachment issue.
+''',
+          'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf':
+              '%PDF-1.4\nlegacy repository attachment\n',
+          'DEMO/DEMO-1/DEMO-2/attachments.json': jsonEncode([
+            {
+              'id': 'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
+              'name': 'manual.pdf',
+              'mediaType': 'application/pdf',
+              'sizeBytes': 59,
+              'author': 'legacy-user',
+              'createdAt': '2026-05-12T20:31:06Z',
+              'storagePath': 'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
+              'revisionOrOid': '',
+              'storageBackend': 'repository-path',
+              'repositoryPath': 'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
+            },
+          ]),
+        },
+      );
+      final repository = ProviderBackedTrackStateRepository(provider: provider);
+
+      final snapshot = await repository.loadSnapshot();
+      await repository.connect(
+        const RepositoryConnection(
+          repository: 'IstiN/trackstate',
+          branch: 'main',
+          token: 'token',
+        ),
+      );
+      final issue = await repository.hydrateIssue(
+        snapshot.issues.single,
+        scopes: const {IssueHydrationScope.attachments},
+      );
+
+      final updated = await repository.uploadIssueAttachment(
+        issue: issue,
+        name: 'manual.pdf',
+        bytes: Uint8List.fromList(utf8.encode('replacement attachment')),
+      );
+
+      expect(
+        provider.lastAttachmentWriteRequest?.path,
+        'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
+      );
+      expect(
+        provider.lastAttachmentWriteRequest?.expectedRevision,
+        'attachment-sha',
+      );
+      expect(
+        provider.binaryFiles['DEMO/DEMO-1/DEMO-2/attachments/manual.pdf'],
+        Uint8List.fromList(utf8.encode('replacement attachment')),
+      );
+      expect(updated.attachments, hasLength(1));
+      expect(
+        updated.attachments.single.storageBackend,
+        AttachmentStorageMode.repositoryPath,
       );
     },
   );
@@ -4436,12 +4619,14 @@ class _FakeReleaseAttachmentProvider
     required this.permission,
     required Map<String, String> files,
     this.enforceExistingRevisionOnWrite = false,
+    this.lfsTrackedPaths = const <String>{},
   }) : files = {...files};
 
   final RepositoryPermission permission;
   final Map<String, String> files;
   final Map<String, Uint8List> binaryFiles = <String, Uint8List>{};
   final bool enforceExistingRevisionOnWrite;
+  final Set<String> lfsTrackedPaths;
   final List<String> readTextFilePaths = <String>[];
   RepositoryAttachmentWriteRequest? lastAttachmentWriteRequest;
   RepositoryFileChangeRequest? lastFileChangeRequest;
@@ -4610,7 +4795,7 @@ class _FakeReleaseAttachmentProvider
   }
 
   @override
-  Future<bool> isLfsTracked(String path) async => false;
+  Future<bool> isLfsTracked(String path) async => lfsTrackedPaths.contains(path);
 
   @override
   Future<RepositoryAttachment> readReleaseAttachment(

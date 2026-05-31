@@ -1321,15 +1321,24 @@ class ProviderBackedTrackStateRepository
     final attachmentMetadataPath = _attachmentMetadataPath(
       _issueRoot(currentIssue.storagePath),
     );
-    final existingRevision = _snapshotArtifactRevisions[attachmentPath];
+    final existingRevision = await _existingArtifactRevision(
+      path: attachmentPath,
+      ref: writeBranch,
+      blobPaths: _snapshotBlobPaths,
+    );
     final metadataRevision = await _existingRevision(
       path: attachmentMetadataPath,
       ref: writeBranch,
       blobPaths: _snapshotBlobPaths,
     );
     final lfsTracked = await _provider.isLfsTracked(attachmentPath);
+    final hostedLfsReplacementAllowed =
+        lfsTracked &&
+        permission.attachmentUploadMode == AttachmentUploadMode.noLfs &&
+        existingAttachment != null;
     if (lfsTracked &&
-        permission.attachmentUploadMode == AttachmentUploadMode.noLfs) {
+        permission.attachmentUploadMode == AttachmentUploadMode.noLfs &&
+        !hostedLfsReplacementAllowed) {
       throw const TrackStateRepositoryException(
         'This repository session is download-only for Git LFS attachments.',
       );

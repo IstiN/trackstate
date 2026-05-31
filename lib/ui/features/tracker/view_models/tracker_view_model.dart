@@ -1809,7 +1809,8 @@ class TrackerViewModel extends ChangeNotifier {
       requiresLocalGitUpload:
           !usesGitHubReleasesAttachmentStorage &&
           hasAttachmentUploadRestriction &&
-          isLfsTracked,
+          isLfsTracked &&
+          existingAttachment == null,
       existingAttachment: existingAttachment,
     );
   }
