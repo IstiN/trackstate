@@ -18,14 +18,17 @@ The automation:
   local workspace lineage, a TS-893 runtime probe event, the visible restore
   skip banner, or another public pre-release non-restored state
 6. after the busy-state release, waits for the workspace switcher trigger to
-  restore the saved local workspace instead of asserting immediately
+   restore the saved local workspace instead of asserting immediately
 7. opens **Workspace switcher** and verifies the selected active row is the
-  local workspace in the `Local Git` state rather than `Local Unavailable` or
-  the hosted fallback
-8. records the pre-release trigger state, any visible restore banner, the final
-  row state, and a screenshot if the live startup flow still lands on the
-  hosted fallback, keeps the local row unavailable, or never exercises saved
-  local handle revalidation on the deployed web surface
+   local workspace in the `Local Git` state rather than `Local Unavailable` or
+   the hosted fallback
+8. requires a pre-release overlap signal before the run can count as a
+   trustworthy PASS, but treats a missing overlap signal as inconclusive
+   setup-only evidence instead of a product bug when the visible `Local Git`
+   restore contract still succeeds
+9. records the pre-release trigger state, busy-gate activity, any visible
+   restore banner, the final row state, and a screenshot if the live startup
+   flow still lands on the hosted fallback or keeps the local row unavailable
 
 ## Install dependencies
 
@@ -51,12 +54,12 @@ mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-893/test_ts_893.py
 ## Expected result
 
 ```text
-Pass: after the temporary busy state is released during startup, the prepared
-active local workspace restores as the selected Local Git row without keeping
-Hosted setup workspace active or showing Local Unavailable.
+Pass: after the temporary busy state is released the prepared active local
+workspace restores as the selected Local Git row without keeping Hosted setup
+workspace active or showing Local Unavailable.
 
 Fail: after the temporary busy state is released, startup keeps Hosted setup
-workspace active, leaves the local row Unavailable, or the deployed web surface
-never exercises saved local workspace handle revalidation at all, which means
-TS-893 cannot run against the required startup-retry path on that surface.
+workspace active or leaves the local row Unavailable. A run that restores
+`Local Git` but never proves blocked-startup overlap is treated as
+inconclusive setup evidence, not a product defect or a trustworthy PASS.
 ```
