@@ -61,5 +61,8 @@ Concrete TrackState examples observed in monitoring:
 - `TS-893`: PR review approved the test and explicitly said the current FAILED
   execution is a valid product-visible restore failure; correct action is
   Bug creation/linking, even when many historical restore Bugs are Done.
+- `TS-726`: latest automation still fails keyboard/focus accessibility checks
+  on the switcher surface after previous linked Bugs were Done; correct action
+  is Bug creation/linking for the current accessibility regression.
 - `TS-732` / `TS-887`: latest run or review evidence said the product failure
   still reproduces; historical Done Bugs must not suppress Bug creation.
