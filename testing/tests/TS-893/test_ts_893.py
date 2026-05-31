@@ -22,10 +22,12 @@ from testing.components.pages.live_workspace_switcher_page import (  # noqa: E40
     WorkspaceSwitcherRowObservation,
     WorkspaceSwitcherTriggerObservation,
 )
+from testing.components.pages.trackstate_tracker_page import TrackStateTrackerPage  # noqa: E402
 from testing.components.services.live_setup_repository_service import (  # noqa: E402
     LiveSetupRepositoryService,
 )
 from testing.core.config.live_setup_test_config import load_live_setup_test_config  # noqa: E402
+from testing.core.interfaces.web_app_session import WebAppTimeoutError  # noqa: E402
 from testing.core.utils.polling import poll_until  # noqa: E402
 from testing.tests.support.live_tracker_app_factory import create_live_tracker_app  # noqa: E402
 from testing.tests.support.ts723_workspace_restore_runtime import (  # noqa: E402
@@ -49,6 +51,7 @@ STARTUP_RETRY_OVERLAP_WINDOW_SECONDS = 12
 PRE_RELEASE_RESTORE_MESSAGE_TIMEOUT_MS = 250
 LINKED_BUGS = ["TS-882", "TS-896"]
 RESTORE_MESSAGE_WAIT_SECONDS = 20
+STARTUP_SURFACE_WAIT_SECONDS = 120
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
@@ -148,6 +151,13 @@ class _TransientBusyWorkspaceBlocker:
         }
 
 
+@dataclass(frozen=True)
+class _StartupSurfaceObservation:
+    kind: str
+    body_text: str
+    surface: str
+
+
 def main() -> None:
     OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
     SUCCESS_SCREENSHOT_PATH.unlink(missing_ok=True)
@@ -181,6 +191,7 @@ def main() -> None:
         "linked_bugs": LINKED_BUGS,
         "user_login": user.login,
         "preloaded_workspace_state": workspace_state,
+        "workspace_token_profile_ids": list(_workspace_token_profile_ids(workspace_state)),
         "prepared_local_workspace": prepared_local_workspace,
         "trigger_wait_seconds": TRIGGER_WAIT_SECONDS,
         "pre_release_trigger_timeout_seconds": PRE_RELEASE_TRIGGER_TIMEOUT_SECONDS,
@@ -197,6 +208,7 @@ def main() -> None:
             repository=config.repository,
             token=token,
             workspace_state=workspace_state,
+            workspace_token_profile_ids=_workspace_token_profile_ids(workspace_state),
         )
         with blocker:
             result["busy_blocker_initial"] = blocker.snapshot()
@@ -207,8 +219,13 @@ def main() -> None:
                 page = LiveWorkspaceSwitcherPage(tracker_page)
                 try:
                     failure_message: str | None = None
-                    runtime_observation = tracker_page.open()
+                    runtime_observation = _open_startup_surface(
+                        tracker_page=tracker_page,
+                        page=page,
+                        timeout_seconds=STARTUP_SURFACE_WAIT_SECONDS,
+                    )
                     result["runtime_state"] = runtime_observation.kind
+                    result["startup_surface"] = runtime_observation.surface
                     result["runtime_body_text"] = runtime_observation.body_text
                     if runtime_observation.kind != "ready":
                         raise AssertionError(
@@ -230,10 +247,10 @@ def main() -> None:
                             "Opened the deployed app in Chromium with a stored signed-in "
                             "GitHub session, preloaded the active local workspace in "
                             "browser storage, and kept access revoked for the "
-                            f"prepared local git folder at {LOCAL_TARGET!r} to simulate a transient busy state."
+                            f"prepared local git folder at {LOCAL_TARGET!r} to simulate a transient busy state. "
+                            f"Observed startup surface={runtime_observation.surface!r}."
                         ),
                     )
-
                     pre_release_trigger = page.observe_trigger(
                         timeout_ms=int(PRE_RELEASE_TRIGGER_TIMEOUT_SECONDS * 1000),
                     )
@@ -367,8 +384,11 @@ def main() -> None:
                     )
                     result["restore_message"] = restore_message
                     restored, trigger = poll_until(
-                        probe=lambda: page.observe_trigger(timeout_ms=10_000),
-                        is_satisfied=_trigger_matches_expected_restore,
+                        probe=lambda: _observe_trigger_state(page, timeout_ms=10_000),
+                        is_satisfied=lambda candidate: (
+                            candidate is not None
+                            and _trigger_matches_expected_restore(candidate)
+                        ),
                         timeout_seconds=TRIGGER_WAIT_SECONDS,
                         interval_seconds=5,
                     )
@@ -397,8 +417,8 @@ def main() -> None:
                                 f"{result['pre_release_restore_message']!r}; "
                                 f"Observed pre_release_trigger={pre_release_trigger.semantic_label!r}; "
                                 f"restore_message={restore_message!r}; "
-                                f"trigger label={trigger.semantic_label!r}; "
-                                f"trigger_text={trigger.visible_text!r}"
+                                f"trigger label={_trigger_label(trigger)!r}; "
+                                f"trigger_text={_trigger_text(trigger)!r}"
                             ),
                         )
                     else:
@@ -424,14 +444,14 @@ def main() -> None:
                                 f"{result['pre_release_restore_message']!r}; "
                                 f"Observed pre_release_trigger={pre_release_trigger.semantic_label!r}; "
                                 f"restore_message={restore_message!r}; "
-                                f"trigger label={trigger.semantic_label!r}; "
-                                f"trigger_text={trigger.visible_text!r}"
+                                f"trigger label={_trigger_label(trigger)!r}; "
+                                f"trigger_text={_trigger_text(trigger)!r}"
                             ),
                         )
 
                     switcher_opened = False
                     try:
-                        switcher = page.open_and_observe(timeout_ms=15_000)
+                        switcher = _observe_switcher_surface(page, timeout_ms=15_000)
                         switcher_opened = True
                     except Exception as error:
                         result["switcher_open_error"] = f"{type(error).__name__}: {error}"
@@ -450,8 +470,10 @@ def main() -> None:
 
                     result["switcher_observation"] = _switcher_payload(switcher)
                     local_row = _find_named_local_row(switcher)
-                    selected_row = _find_selected_row(switcher) or _selected_row_from_trigger(
-                        trigger,
+                    selected_row = _find_selected_row(switcher) or (
+                        _selected_row_from_trigger(trigger)
+                        if trigger is not None
+                        else None
                     )
                     result["active_local_row"] = (
                         _row_payload(local_row) if local_row is not None else None
@@ -495,8 +517,8 @@ def main() -> None:
                             "user would after the busy-state release and startup recovery window."
                         ),
                         observed=(
-                            f"trigger_label={trigger.semantic_label!r}; "
-                            f"trigger_text={trigger.visible_text!r}"
+                            f"trigger_label={_trigger_label(trigger)!r}; "
+                            f"trigger_text={_trigger_text(trigger)!r}"
                         ),
                     )
                     _record_human_verification(
@@ -568,7 +590,7 @@ def main() -> None:
                             "active local workspace into the trigger after the "
                             "temporary busy state was released within the allowed "
                             "wait window.\n"
-                            f"Observed trigger label: {trigger.semantic_label!r}\n"
+                            f"Observed trigger label: {_trigger_label(trigger)!r}\n"
                             "Observed selected row: "
                             f"{json.dumps(_row_payload(selected_row), indent=2)}\n"
                             "Observed active local row: "
@@ -653,6 +675,19 @@ def _workspace_state(repository: str) -> dict[str, object]:
             },
         ],
     }
+
+
+def _workspace_token_profile_ids(workspace_state: dict[str, object]) -> tuple[str, ...]:
+    raw_profiles = workspace_state.get("profiles", [])
+    if not isinstance(raw_profiles, list):
+        return ()
+    return tuple(
+        workspace_id
+        for profile in raw_profiles
+        if isinstance(profile, dict)
+        for workspace_id in [str(profile.get("id", "")).strip()]
+        if workspace_id
+    )
 
 
 def _prepare_local_workspace_repository() -> dict[str, object]:
@@ -837,7 +872,7 @@ def _fallback_local_row_from_switcher_text(
 
 def _assert_active_local_restore(
     *,
-    trigger: WorkspaceSwitcherTriggerObservation,
+    trigger: WorkspaceSwitcherTriggerObservation | None,
     switcher: WorkspaceSwitcherObservation,
     local_row: WorkspaceSwitcherRowObservation | None,
     selected_row: WorkspaceSwitcherRowObservation | None,
@@ -846,7 +881,7 @@ def _assert_active_local_restore(
         raise AssertionError(
             "Step 4 failed: Workspace switcher did not show the prepared local "
             "workspace row after the busy-state release.\n"
-            f"Observed trigger label: {trigger.semantic_label!r}\n"
+            f"Observed trigger label: {_trigger_label(trigger)!r}\n"
             f"Observed rows: {[row.visible_text for row in switcher.rows]!r}\n"
             f"Observed switcher text:\n{switcher.switcher_text}"
         )
@@ -856,7 +891,7 @@ def _assert_active_local_restore(
             "busy-state release but rendered as `Local Unavailable` instead of "
             "`Local Git`.\n"
             f"Observed local row: {json.dumps(_row_payload(local_row), indent=2)}\n"
-            f"Observed trigger label: {trigger.semantic_label!r}"
+            f"Observed trigger label: {_trigger_label(trigger)!r}"
         )
     if local_row.state_label != "Local Git":
         raise AssertionError(
@@ -876,12 +911,17 @@ def _assert_active_local_restore(
             f"Observed selected row: {json.dumps(_row_payload(selected_row), indent=2)}\n"
             f"Observed local row: {json.dumps(_row_payload(local_row), indent=2)}"
         )
+    if trigger is None:
+        raise AssertionError(
+            "Step 4 failed: the workspace switcher recovered, but the header trigger "
+            "never became observable again after the busy-state release."
+        )
     if trigger.display_name == HOSTED_DISPLAY_NAME or trigger.workspace_type == "Hosted":
         raise AssertionError(
             "Step 4 failed: the header trigger still defaulted to the hosted setup "
             "workspace instead of the prepared active local workspace after the "
             "busy-state release.\n"
-            f"Observed trigger label: {trigger.semantic_label!r}"
+            f"Observed trigger label: {_trigger_label(trigger)!r}"
         )
 
 
@@ -1386,6 +1426,82 @@ def _observe_restore_message(
     return observation.message_text
 
 
+def _open_startup_surface(
+    *,
+    tracker_page: TrackStateTrackerPage,
+    page: LiveWorkspaceSwitcherPage,
+    timeout_seconds: float,
+) -> _StartupSurfaceObservation:
+    tracker_page.open_entrypoint()
+    interactive, observation = poll_until(
+        probe=lambda: _probe_startup_surface(tracker_page=tracker_page, page=page),
+        is_satisfied=lambda candidate: candidate.kind != "loading",
+        timeout_seconds=timeout_seconds,
+        interval_seconds=1.0,
+    )
+    if interactive:
+        return observation
+    raise AssertionError(
+        "Step 1 failed: the deployed app never reached an interactive state. "
+        f"Visible body text: {observation.body_text}",
+    )
+
+
+def _probe_startup_surface(
+    *,
+    tracker_page: TrackStateTrackerPage,
+    page: LiveWorkspaceSwitcherPage,
+) -> _StartupSurfaceObservation:
+    body_text = tracker_page.body_text()
+    if any(
+        text in body_text for text in TrackStateTrackerPage.LOAD_ERROR_TEXT_VARIANTS
+    ):
+        return _StartupSurfaceObservation(
+            kind="data-load-failed",
+            body_text=body_text,
+            surface="load-error",
+        )
+    if _workspace_switcher_surface_visible(body_text):
+        return _StartupSurfaceObservation(
+            kind="ready",
+            body_text=body_text,
+            surface="workspace-switcher",
+        )
+    try:
+        page.observe_trigger(timeout_ms=500)
+    except (AssertionError, WebAppTimeoutError):
+        pass
+    else:
+        return _StartupSurfaceObservation(
+            kind="ready",
+            body_text=body_text,
+            surface="workspace-trigger",
+        )
+    if (
+        "Connect GitHub" in body_text
+        or TrackStateTrackerPage.BOARD_LABEL in body_text
+    ):
+        return _StartupSurfaceObservation(
+            kind="ready",
+            body_text=body_text,
+            surface="tracker-shell",
+        )
+    return _StartupSurfaceObservation(
+        kind="loading",
+        body_text=body_text,
+        surface="loading",
+    )
+
+
+def _observe_trigger_state(
+    page: LiveWorkspaceSwitcherPage,
+    *,
+    timeout_ms: int,
+) -> WorkspaceSwitcherTriggerObservation | None:
+    try:
+        return page.observe_trigger(timeout_ms=timeout_ms)
+    except (AssertionError, WebAppTimeoutError):
+        return None
 def _collect_pre_release_overlap_state(
     *,
     page: LiveWorkspaceSwitcherPage,
@@ -1606,14 +1722,17 @@ def _failed_due_to_missing_saved_handle_revalidation_capability(
 def _observe_pre_release_public_overlap(
     page: LiveWorkspaceSwitcherPage,
 ) -> dict[str, object]:
-    trigger = page.observe_trigger(timeout_ms=5_000)
+    trigger = _observe_trigger_state(page, timeout_ms=5_000)
+    trigger_error: str | None = None
+    if trigger is None:
+        trigger_error = "Workspace switcher trigger was not observable while blocked."
     switcher: WorkspaceSwitcherObservation | None = None
     local_row: WorkspaceSwitcherRowObservation | None = None
     selected_row: WorkspaceSwitcherRowObservation | None = None
     switcher_error: str | None = None
     switcher_opened = False
     try:
-        switcher = page.open_and_observe(timeout_ms=5_000)
+        switcher = _observe_switcher_surface(page, timeout_ms=5_000)
         switcher_opened = True
         local_row = _find_named_local_row(switcher)
         selected_row = _find_selected_row(switcher)
@@ -1639,6 +1758,7 @@ def _observe_pre_release_public_overlap(
         "public_overlap_observed": public_overlap_reason is not None,
         "public_overlap_reason": public_overlap_reason,
         "trigger": _trigger_payload(trigger),
+        "trigger_error": trigger_error,
         "switcher": _switcher_payload(switcher) if switcher is not None else None,
         "local_row": _row_payload(local_row),
         "selected_row": _row_payload(selected_row),
@@ -1646,13 +1766,34 @@ def _observe_pre_release_public_overlap(
     }
 
 
+def _observe_switcher_surface(
+    page: LiveWorkspaceSwitcherPage,
+    *,
+    timeout_ms: int,
+) -> WorkspaceSwitcherObservation:
+    try:
+        return page.observe_open_switcher(timeout_ms=min(timeout_ms, 1_500))
+    except (AssertionError, WebAppTimeoutError):
+        return page.open_and_observe(timeout_ms=timeout_ms)
+
+
+def _workspace_switcher_surface_visible(body_text: str) -> bool:
+    normalized = " ".join(body_text.split())
+    return (
+        "Workspace switcher" in normalized
+        and "Saved workspaces" in normalized
+        and ("Save and switch" in normalized or "Add workspace" in normalized)
+    )
 def _pre_release_public_overlap_reason(
     *,
-    trigger: WorkspaceSwitcherTriggerObservation,
+    trigger: WorkspaceSwitcherTriggerObservation | None,
     local_row: WorkspaceSwitcherRowObservation | None,
     selected_row: WorkspaceSwitcherRowObservation | None,
 ) -> str | None:
-    if trigger.display_name == HOSTED_DISPLAY_NAME or trigger.workspace_type == "Hosted":
+    if trigger is not None and (
+        trigger.display_name == HOSTED_DISPLAY_NAME
+        or trigger.workspace_type == "Hosted"
+    ):
         return "header trigger showed the hosted fallback while the local workspace was blocked"
     if local_row is not None and (
         local_row.state_label != "Local Git" or "Local Unavailable" in local_row.visible_text
@@ -1669,7 +1810,11 @@ def _pre_release_public_overlap_reason(
     return None
 
 
-def _trigger_payload(observation: WorkspaceSwitcherTriggerObservation) -> dict[str, object]:
+def _trigger_payload(
+    observation: WorkspaceSwitcherTriggerObservation | None,
+) -> dict[str, object] | None:
+    if observation is None:
+        return None
     return {
         "semantic_label": observation.semantic_label,
         "visible_text": observation.visible_text,
@@ -1679,6 +1824,14 @@ def _trigger_payload(observation: WorkspaceSwitcherTriggerObservation) -> dict[s
         "state_label": observation.state_label,
         "top_button_labels": list(observation.top_button_labels),
     }
+
+
+def _trigger_label(observation: WorkspaceSwitcherTriggerObservation | None) -> str | None:
+    return None if observation is None else observation.semantic_label
+
+
+def _trigger_text(observation: WorkspaceSwitcherTriggerObservation | None) -> str | None:
+    return None if observation is None else observation.visible_text
 
 
 def _row_payload(

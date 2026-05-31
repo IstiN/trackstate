@@ -36,6 +36,13 @@ EXPECTED_RETRY_INTERVAL_SECONDS = 60
 RETRY_INTERVAL_TOLERANCE_SECONDS = 15
 FIRST_FAILED_REQUEST_TIMEOUT_SECONDS = 90
 DISPLAYED_RETRY_MAXIMUM_SECONDS = 120
+MIN_DISTINCT_RETRY_GAP_SECONDS = (
+    EXPECTED_RETRY_INTERVAL_SECONDS - RETRY_INTERVAL_TOLERANCE_SECONDS
+)
+# The linked backoff bugs are marked Done, so this live test should still fail
+# far sooner than the old 15-minute workaround while still leaving enough
+# headroom to capture the known delayed follow-up retry for bug reporting.
+FOLLOW_UP_FAILED_REQUEST_TIMEOUT_SECONDS = 420
 DEFAULT_BRANCH = "main"
 AUTH_ERROR_FRAGMENT_PATTERN = re.compile(
     r"(401|bad credentials|gitHub api request failed|gitHub connection failed)",
@@ -209,21 +216,33 @@ def main() -> None:
                         sync_observation,
                         timeout_seconds=FIRST_FAILED_REQUEST_TIMEOUT_SECONDS,
                     )
+                    displayed_retry_window = _parse_displayed_retry_window(
+                        failure_surface,
+                    )
+                    second_failed_request = _wait_for_failed_request(
+                        sync_observation,
+                        previous_request=first_failed_request,
+                        minimum_gap_seconds=MIN_DISTINCT_RETRY_GAP_SECONDS,
+                        timeout_seconds=FOLLOW_UP_FAILED_REQUEST_TIMEOUT_SECONDS,
+                    )
+                    retry_interval_seconds = (
+                        second_failed_request.observed_at_monotonic
+                        - first_failed_request.observed_at_monotonic
+                    )
                     result["failed_sync_requests"] = [
                         asdict(request) for request in sync_observation.failed_sync_requests
                     ]
                     result["post_revocation_request_urls"] = list(
                         sync_observation.post_revocation_request_urls,
                     )
-                    displayed_retry_window = _parse_displayed_retry_window(
-                        failure_surface,
-                    )
                     result["first_failed_request"] = asdict(first_failed_request)
                     result["displayed_retry_window"] = displayed_retry_window
+                    result["retry_interval_seconds"] = retry_interval_seconds
                     _assert_first_failed_check_timing(
                         first_failed_request.since_revocation_seconds,
                     )
                     _assert_displayed_retry_window(displayed_retry_window)
+                    _assert_retry_interval(retry_interval_seconds)
                 except Exception as step5_error:
                     result["failed_sync_requests"] = [
                         asdict(request) for request in sync_observation.failed_sync_requests
@@ -246,14 +265,16 @@ def main() -> None:
                 _record_step(
                     result,
                     step=5,
-                    status="passed",
-                    action="Verify the time of the next scheduled check in the logs.",
-                    observed=(
-                        f"first_failed_sync_request={first_failed_request.url}; "
-                        f"seconds_after_revocation={first_failed_request.since_revocation_seconds:.1f}; "
-                        "displayed_last_checked="
-                        f"{displayed_retry_window['last_checked_label']}; "
-                        "displayed_next_retry="
+                        status="passed",
+                        action="Verify the time of the next scheduled check in the logs.",
+                        observed=(
+                            f"first_failed_sync_request={first_failed_request.url}; "
+                            f"seconds_after_revocation={first_failed_request.since_revocation_seconds:.1f}; "
+                            f"second_failed_sync_request={second_failed_request.url}; "
+                            f"retry_interval_seconds={retry_interval_seconds:.1f}; "
+                            "displayed_last_checked="
+                            f"{displayed_retry_window['last_checked_label']}; "
+                            "displayed_next_retry="
                         f"{displayed_retry_window['next_retry_label']}; "
                         "displayed_retry_interval_seconds="
                         f"{displayed_retry_window['displayed_interval_seconds']:.1f}"
@@ -263,11 +284,14 @@ def main() -> None:
                     result,
                     check=(
                         "Verified the first logged repository-scoped failure arrived about one "
-                        "minute after revoking the PAT and the visible next-retry schedule "
-                        "advanced by about one minute."
+                        "minute after revoking the PAT, the visible next-retry schedule "
+                        "advanced by about one minute, and the follow-up failed retry fired "
+                        "about one minute after the first failed sync check."
                     ),
                     observed=(
                         f"first_failed_at_plus={first_failed_request.since_revocation_seconds:.1f}s; "
+                        f"second_failed_at_plus={second_failed_request.since_revocation_seconds:.1f}s; "
+                        f"retry_interval={retry_interval_seconds:.1f}s; "
                         "displayed_last_checked="
                         f"{displayed_retry_window['last_checked_label']}; "
                         "displayed_next_retry="
@@ -296,6 +320,7 @@ def main() -> None:
             result["post_revocation_request_urls"] = list(
                 sync_observation.post_revocation_request_urls,
             )
+        _upgrade_step5_timeout_failure(result)
         _write_failure_outputs(result)
         raise
 
@@ -304,9 +329,15 @@ def _wait_for_failed_request(
     observation: HostedSyncAuthFailureObservation,
     *,
     timeout_seconds: float,
+    previous_request: HostedSyncAuthFailureRequest | None = None,
+    minimum_gap_seconds: float = 0.0,
 ) -> HostedSyncAuthFailureRequest:
     found, request = poll_until(
-        probe=lambda: _first_failed_request(tuple(observation.failed_sync_requests)),
+        probe=lambda: _matching_failed_request(
+            tuple(observation.failed_sync_requests),
+            previous_request=previous_request,
+            minimum_gap_seconds=minimum_gap_seconds,
+        ),
         is_satisfied=lambda item: item is not None,
         timeout_seconds=timeout_seconds,
         interval_seconds=2.0,
@@ -314,12 +345,20 @@ def _wait_for_failed_request(
     requests = tuple(observation.failed_sync_requests)
     if found and isinstance(request, HostedSyncAuthFailureRequest):
         return request
+    if previous_request is None:
+        raise AssertionError(
+            "Step 5 failed: the hosted app did not issue the first failed repository-scoped "
+            "GitHub request within the expected one-minute backoff window after the PAT was "
+            "revoked.\n"
+            f"Expected first failed check after revocation: {EXPECTED_RETRY_INTERVAL_SECONDS}s "
+            f"(tolerance {RETRY_INTERVAL_TOLERANCE_SECONDS}s)\n"
+            f"Observed failed sync request log: {_request_log(tuple(requests))}\n"
+            f"Observed post-revocation GitHub API URLs: {observation.post_revocation_request_urls}",
+        )
     raise AssertionError(
-        "Step 5 failed: the hosted app did not issue the first failed repository-scoped "
-        "GitHub request within the expected one-minute backoff window after the PAT was "
-        "revoked.\n"
-        f"Expected first failed check after revocation: {EXPECTED_RETRY_INTERVAL_SECONDS}s "
-        f"(tolerance {RETRY_INTERVAL_TOLERANCE_SECONDS}s)\n"
+        "Step 5 failed: the hosted app did not issue a distinct follow-up failed "
+        "repository-scoped GitHub request after the first revoked-PAT check.\n"
+        f"Required minimum gap after first failed request: {minimum_gap_seconds:.1f}s\n"
         f"Observed failed sync request log: {_request_log(tuple(requests))}\n"
         f"Observed post-revocation GitHub API URLs: {observation.post_revocation_request_urls}",
     )
@@ -333,10 +372,21 @@ def _first_post_revocation_request(
     return None
 
 
-def _first_failed_request(
+def _matching_failed_request(
     requests: tuple[HostedSyncAuthFailureRequest, ...],
+    *,
+    previous_request: HostedSyncAuthFailureRequest | None,
+    minimum_gap_seconds: float,
 ) -> HostedSyncAuthFailureRequest | None:
-    return requests[0] if requests else None
+    if previous_request is None:
+        return requests[0] if requests else None
+    for request in requests:
+        if (
+            request.observed_at_monotonic - previous_request.observed_at_monotonic
+            >= minimum_gap_seconds
+        ):
+            return request
+    return None
 
 
 def _wait_for_expected_failure_surface(
@@ -400,6 +450,20 @@ def _assert_displayed_retry_window(displayed_retry_window: dict[str, object]) ->
     )
 
 
+def _assert_retry_interval(retry_interval_seconds: float) -> None:
+    minimum = EXPECTED_RETRY_INTERVAL_SECONDS - RETRY_INTERVAL_TOLERANCE_SECONDS
+    maximum = EXPECTED_RETRY_INTERVAL_SECONDS + RETRY_INTERVAL_TOLERANCE_SECONDS
+    if minimum <= retry_interval_seconds <= maximum:
+        return
+    raise AssertionError(
+        "Step 5 failed: the follow-up repository-scoped sync retry did not honor the "
+        "expected one-minute exponential-backoff interval.\n"
+        f"Expected retry interval after first failed check: {EXPECTED_RETRY_INTERVAL_SECONDS}s "
+        f"(tolerance {RETRY_INTERVAL_TOLERANCE_SECONDS}s)\n"
+        f"Observed retry interval: {retry_interval_seconds:.1f}s",
+    )
+
+
 def _surface_payload(observation: WorkspaceSyncSurfaceObservation) -> dict[str, object]:
     return {
         "body_text": observation.body_text,
@@ -460,6 +524,23 @@ def _step5_failure_observation(
     )
     if requests:
         first_request = requests[0]
+        second_request = _matching_failed_request(
+            requests,
+            previous_request=first_request,
+            minimum_gap_seconds=MIN_DISTINCT_RETRY_GAP_SECONDS,
+        )
+        if second_request is not None:
+            retry_interval_seconds = (
+                second_request.observed_at_monotonic - first_request.observed_at_monotonic
+            )
+            return (
+                f"first_failed_sync_request={first_request.url}; "
+                f"second_failed_sync_request={second_request.url}; "
+                f"retry_interval_seconds={retry_interval_seconds:.1f}; "
+                f"{displayed_retry_observation}"
+                f"observed_failed_sync_request_log={_request_log(requests)}; "
+                f"error={type(error).__name__}: {error}"
+            )
         return (
             f"first_failed_sync_request={first_request.url}; "
             f"seconds_after_revocation={first_request.since_revocation_seconds:.1f}; "
@@ -510,6 +591,49 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
     PR_BODY_PATH.write_text(_pr_body(result, passed=False), encoding="utf-8")
     RESPONSE_PATH.write_text(_response_summary(result, passed=False), encoding="utf-8")
     BUG_DESCRIPTION_PATH.write_text(_bug_description(result), encoding="utf-8")
+
+
+def _upgrade_step5_timeout_failure(result: dict[str, object]) -> None:
+    error = str(result.get("error", ""))
+    timeout_prefix = (
+        "AssertionError: Step 5 failed: the hosted app did not issue a distinct "
+        "follow-up failed repository-scoped GitHub request after the first revoked-PAT "
+        "check."
+    )
+    if not error.startswith(timeout_prefix):
+        return
+    requests = _request_items(result)
+    if len(requests) < 2:
+        return
+    first_request = requests[0]
+    second_request = _matching_failed_request(
+        requests,
+        previous_request=first_request,
+        minimum_gap_seconds=MIN_DISTINCT_RETRY_GAP_SECONDS,
+    )
+    if second_request is None:
+        return
+    retry_interval_seconds = (
+        second_request.observed_at_monotonic - first_request.observed_at_monotonic
+    )
+    result["retry_interval_seconds"] = retry_interval_seconds
+    try:
+        _assert_retry_interval(retry_interval_seconds)
+    except AssertionError as measured_error:
+        measured_message = f"{type(measured_error).__name__}: {measured_error}"
+        result["error"] = measured_message
+        result["traceback"] = measured_message
+        _replace_step_result(
+            result,
+            step=5,
+            status="failed",
+            observed=(
+                f"first_failed_sync_request={first_request.url}; "
+                f"second_failed_sync_request={second_request.url}; "
+                f"retry_interval_seconds={retry_interval_seconds:.1f}; "
+                f"error={measured_message}"
+            ),
+        )
 
 
 def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
@@ -656,7 +780,7 @@ def _bug_description(result: dict[str, object]) -> str:
     actual_summary = _actual_retry_summary(result)
     return "\n".join(
         [
-            "# TS-715 - Hosted sync auth failure does not present the expected `Sync unavailable` state/backoff evidence",
+            "# TS-715 - Hosted sync auth failure retry backoff remains slower than the expected first exponential-backoff step",
             "",
             "## Steps to reproduce",
             "1. Revoke the GitHub PAT used by the app.",
@@ -870,6 +994,23 @@ def _visible_workspace_sync_text(
 
 def _actual_retry_summary(result: dict[str, object]) -> str:
     requests = _request_items(result)
+    if requests:
+        first_request = requests[0]
+        second_request = _matching_failed_request(
+            requests,
+            previous_request=first_request,
+            minimum_gap_seconds=MIN_DISTINCT_RETRY_GAP_SECONDS,
+        )
+        if second_request is not None:
+            retry_interval_seconds = (
+                second_request.observed_at_monotonic - first_request.observed_at_monotonic
+            )
+            return (
+                "the UI switched to `Sync unavailable` and showed an auth failure plus "
+                "`Next retry at ...`, but the captured repository-scoped retry interval was "
+                f"{retry_interval_seconds:.1f}s instead of about {EXPECTED_RETRY_INTERVAL_SECONDS}s. "
+                f"Request log: {_request_log(requests)}"
+            )
     if requests:
         first_request = requests[0]
         displayed_retry_window = result.get("displayed_retry_window", {})
