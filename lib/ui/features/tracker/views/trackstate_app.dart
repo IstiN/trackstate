@@ -13631,6 +13631,7 @@ class _SettingsTextField extends StatelessWidget {
           WidgetsBinding.instance.addPostFrameCallback((_) {
             browser_text_field_value_sync.syncBrowserTextFieldValue(
               label: label,
+              controller: textController,
               value: value.text,
               enabled: enabled,
               readOnly: !enabled,
