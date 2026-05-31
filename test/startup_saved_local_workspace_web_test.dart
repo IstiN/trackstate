@@ -1442,18 +1442,24 @@ void main() {
       final observedTriggerLabels = <String>{};
       for (var sample = 0; sample < 20; sample += 1) {
         await tester.pump(const Duration(milliseconds: 500));
-        if (find.bySemanticsLabel(
+        if (find
+            .bySemanticsLabel(
               RegExp(
                 r'Workspace switcher: Hosted setup workspace, .*Needs sign-in',
               ),
-            ).evaluate().isNotEmpty) {
+            )
+            .evaluate()
+            .isNotEmpty) {
           observedTriggerLabels.add('Needs sign-in');
         }
-        if (find.bySemanticsLabel(
+        if (find
+            .bySemanticsLabel(
               RegExp(
                 r'Workspace switcher: Hosted setup workspace, .*Attachments limited',
               ),
-            ).evaluate().isNotEmpty) {
+            )
+            .evaluate()
+            .isNotEmpty) {
           observedTriggerLabels.add('Attachments limited');
         }
       }
@@ -1470,7 +1476,10 @@ void main() {
         reason:
             'The late /user resolution must not flip the visible trigger into the post-auth attachment-restricted state until the user explicitly reconnects.',
       );
-      expect(find.text('Git-native. Jira-compatible. Team-proven.'), findsWidgets);
+      expect(
+        find.text('Git-native. Jira-compatible. Team-proven.'),
+        findsWidgets,
+      );
       for (final label in _shellNavigationLabels) {
         expect(find.text(label), findsWidgets);
       }
@@ -1478,7 +1487,7 @@ void main() {
   );
 
   testWidgets(
-    'web startup keeps a signed-in saved local workspace in Local Git state while deferred local auth restore is still pending',
+    'web startup keeps a signed-in saved local workspace in the pending Local state while deferred local auth restore is still pending',
     (tester) async {
       const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
       const authStore = SharedPreferencesTrackStateAuthStore();
@@ -1549,6 +1558,10 @@ void main() {
       );
       expect(
         find.descendant(of: activeRow, matching: find.text('Local Git')),
+        findsNothing,
+      );
+      expect(
+        find.descendant(of: activeRow, matching: find.text('Local')),
         findsWidgets,
       );
       expect(
@@ -1566,6 +1579,123 @@ void main() {
       localRepository.completeConnect();
       await tester.pump();
       await tester.pumpAndSettle();
+
+      expect(
+        find.descendant(of: activeRow, matching: find.text('Local Git')),
+        findsWidgets,
+      );
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump(const Duration(milliseconds: 20));
+    },
+  );
+
+  testWidgets(
+    'web startup starts the real delayed /user probe for a saved local workspace when hosted access falls back from saved hosted profiles',
+    (tester) async {
+      const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
+      const authStore = SharedPreferencesTrackStateAuthStore();
+      final workspaceProfiles = SharedPreferencesWorkspaceProfileService(
+        authStore: authStore,
+      );
+      await workspaceProfiles.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.local,
+          target: '/tmp/trackstate-demo',
+          defaultBranch: 'main',
+          displayName: 'Active local workspace',
+        ),
+      );
+      await workspaceProfiles.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.hosted,
+          target: 'stable/repo',
+          defaultBranch: 'main',
+          displayName: 'Hosted setup workspace',
+        ),
+        select: false,
+      );
+      await authStore.saveToken(
+        'workspace-token',
+        workspaceId: activeLocalWorkspaceId,
+      );
+
+      final localRepository = _LocalHostedAccessStartupRepository(
+        snapshot: await _snapshotForRepository(''),
+      );
+      final browserHarness = _LocalHostedAccessBrowserAuthProbeHarness()
+        ..install();
+
+      tester.view.physicalSize = const Size(1440, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        browserHarness.dispose();
+      });
+
+      await tester.pumpWidget(
+        TrackStateApp(
+          workspaceProfileService: workspaceProfiles,
+          authStore: authStore,
+          openBrowserLocalRepository:
+              ({
+                required String repositoryPath,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async => localRepository,
+        ),
+      );
+      await tester.pump();
+      for (
+        var index = 0;
+        index < 20 &&
+            find
+                .byKey(const ValueKey('workspace-switcher-trigger'))
+                .evaluate()
+                .isEmpty;
+        index += 1
+      ) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+
+      await tester.tap(
+        find.byKey(const ValueKey('workspace-switcher-trigger')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(localRepository.connectedRepositories, contains('stable/repo'));
+      expect(
+        localRepository.connectedRepositories,
+        isNot(contains('/tmp/trackstate-demo')),
+      );
+      expect(browserHarness.userProbeRequestCount, 1);
+      expect(browserHarness.userProbePending, isTrue);
+      expect(
+        browserHarness.requestedPaths,
+        containsAll(<String>['/repos/stable/repo', '/user']),
+      );
+
+      final activeRow = find.byKey(
+        const ValueKey('workspace-$activeLocalWorkspaceId'),
+      );
+      expect(activeRow, findsOneWidget);
+      expect(
+        find.descendant(of: activeRow, matching: find.text('Local Git')),
+        findsNothing,
+      );
+      expect(
+        find.descendant(of: activeRow, matching: find.text('Local')),
+        findsWidgets,
+      );
+
+      browserHarness.completeUserProbe();
+      await tester.pump();
+      await tester.pumpAndSettle();
+      expect(
+        find.descendant(of: activeRow, matching: find.text('Local Git')),
+        findsWidgets,
+      );
     },
   );
 }
@@ -1692,6 +1822,136 @@ class _DelayedLocalHostedAccessRepository extends DemoTrackStateRepository {
     _hostedAccessConnectStarted = true;
     return _hostedAccessConnectCompleter.future;
   }
+}
+
+class _LocalHostedAccessStartupRepository
+    extends ProviderBackedTrackStateRepository {
+  _LocalHostedAccessStartupRepository({required TrackerSnapshot snapshot})
+    : _snapshotOverride = snapshot,
+      super(
+        provider: _LocalHostedAccessStartupProvider(),
+        usesLocalPersistence: true,
+        supportsGitHubAuth: false,
+      );
+
+  final TrackerSnapshot _snapshotOverride;
+
+  _LocalHostedAccessStartupProvider get _provider =>
+      providerAdapter as _LocalHostedAccessStartupProvider;
+
+  List<String> get connectedRepositories => _provider.connectedRepositories;
+
+  @override
+  Future<TrackerSnapshot> loadSnapshot() async {
+    replaceCachedState(snapshot: _snapshotOverride);
+    return _snapshotOverride;
+  }
+}
+
+class _LocalHostedAccessStartupProvider implements TrackStateProviderAdapter {
+  final List<String> connectedRepositories = <String>[];
+  bool _authenticated = false;
+
+  @override
+  String get dataRef => 'main';
+
+  @override
+  ProviderType get providerType => ProviderType.local;
+
+  @override
+  String get repositoryLabel => '/tmp/trackstate-demo';
+
+  @override
+  Future<RepositoryUser> authenticate(RepositoryConnection connection) async {
+    connectedRepositories.add(connection.repository);
+    final user =
+        await GitHubTrackStateProvider(
+          repositoryName: connection.repository,
+          sourceRef: connection.branch,
+          dataRef: connection.branch,
+        ).authenticate(
+          GitHubConnection(
+            repository: connection.repository,
+            branch: connection.branch,
+            token: connection.token,
+          ),
+        );
+    _authenticated = true;
+    return user;
+  }
+
+  @override
+  Future<RepositoryCommitResult> createCommit(
+    RepositoryCommitRequest request,
+  ) async => throw UnimplementedError();
+
+  @override
+  Future<RepositoryBranch> getBranch(String name) async =>
+      RepositoryBranch(name: name, exists: true, isCurrent: name == 'main');
+
+  @override
+  Future<RepositoryPermission> getPermission() async => RepositoryPermission(
+    canRead: true,
+    canWrite: _authenticated,
+    isAdmin: false,
+    canCreateBranch: _authenticated,
+    canManageAttachments: _authenticated,
+    attachmentUploadMode: _authenticated
+        ? AttachmentUploadMode.full
+        : AttachmentUploadMode.none,
+    supportsReleaseAttachmentWrites: false,
+    canCheckCollaborators: false,
+  );
+
+  @override
+  Future<RepositorySyncCheck> checkSync({
+    RepositorySyncState? previousState,
+  }) async => RepositorySyncCheck(
+    state: RepositorySyncState(
+      providerType: providerType,
+      repositoryRevision: 'fixture-revision',
+      sessionRevision: _authenticated ? 'connected' : 'disconnected',
+      connectionState: _authenticated
+          ? ProviderConnectionState.connected
+          : ProviderConnectionState.disconnected,
+      permission: await getPermission(),
+    ),
+  );
+
+  @override
+  Future<void> ensureCleanWorktree() async {}
+
+  @override
+  Future<bool> isLfsTracked(String path) async => false;
+
+  @override
+  Future<List<RepositoryTreeEntry>> listTree({required String ref}) async =>
+      const <RepositoryTreeEntry>[];
+
+  @override
+  Future<RepositoryAttachment> readAttachment(
+    String path, {
+    required String ref,
+  }) async => throw UnimplementedError();
+
+  @override
+  Future<RepositoryTextFile> readTextFile(
+    String path, {
+    required String ref,
+  }) async => throw UnimplementedError();
+
+  @override
+  Future<String> resolveWriteBranch() async => 'main';
+
+  @override
+  Future<RepositoryAttachmentWriteResult> writeAttachment(
+    RepositoryAttachmentWriteRequest request,
+  ) async => throw UnimplementedError();
+
+  @override
+  Future<RepositoryWriteResult> writeTextFile(
+    RepositoryWriteRequest request,
+  ) async => throw UnimplementedError();
 }
 
 class _DelayedGitHubProbeHarness {
@@ -1939,6 +2199,88 @@ class _BrowserStartupAuthProbeHarness {
     }
     _windowFetch = _previousFetch;
     _consoleInfoCapture.dispose();
+    completeUserProbe();
+  }
+
+  web.Response _jsonResponse(String body, {int status = 200}) {
+    return web.Response(
+      body.toJS,
+      web.ResponseInit(
+        status: status,
+        headers: web.Headers()..set('content-type', 'application/json'),
+      ),
+    );
+  }
+}
+
+class _LocalHostedAccessBrowserAuthProbeHarness {
+  final List<String> requestedPaths = <String>[];
+  final Completer<web.Response> _userProbeCompleter = Completer<web.Response>();
+  bool _installed = false;
+  late final JSFunction _previousFetch = _windowFetch;
+
+  int get userProbeRequestCount =>
+      requestedPaths.where((path) => path == '/user').length;
+  bool get userProbePending =>
+      userProbeRequestCount > 0 && !_userProbeCompleter.isCompleted;
+
+  void install() {
+    if (_installed) {
+      return;
+    }
+    _installed = true;
+    _windowFetch = ((JSAny? input, JSAny? init) {
+      final requestUrl = (input! as JSString).toDart;
+      final path = Uri.parse(requestUrl).path;
+      requestedPaths.add(path);
+      return switch (path) {
+        '/repos/stable/repo' => Future<web.Response>.value(
+          _jsonResponse(
+            jsonEncode({
+              'full_name': 'stable/repo',
+              'permissions': <String, Object?>{
+                'pull': true,
+                'push': true,
+                'admin': false,
+              },
+            }),
+          ),
+        ).toJS,
+        '/repos/stable/repo/branches/main' => Future<web.Response>.value(
+          _jsonResponse(
+            jsonEncode({
+              'name': 'main',
+              'commit': <String, Object?>{'sha': 'mock-revision'},
+            }),
+          ),
+        ).toJS,
+        '/user' => _userProbeCompleter.future.toJS,
+        _ => Future<web.Response>.value(_jsonResponse('{}', status: 404)).toJS,
+      };
+    }).toJS;
+  }
+
+  void completeUserProbe() {
+    if (_userProbeCompleter.isCompleted) {
+      return;
+    }
+    _userProbeCompleter.complete(
+      _jsonResponse(
+        jsonEncode({
+          'login': 'demo-user',
+          'name': 'Demo User',
+          'id': 1,
+          'email': 'demo@example.com',
+        }),
+      ),
+    );
+  }
+
+  void dispose() {
+    if (!_installed) {
+      return;
+    }
+    _windowFetch = _previousFetch;
     completeUserProbe();
   }
 
