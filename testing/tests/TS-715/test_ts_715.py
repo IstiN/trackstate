@@ -6,6 +6,7 @@ import re
 import sys
 import traceback
 from dataclasses import asdict
+from datetime import datetime
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -34,19 +35,30 @@ EXPECTED_SYNC_LABEL = "Sync unavailable"
 EXPECTED_RETRY_INTERVAL_SECONDS = 60
 RETRY_INTERVAL_TOLERANCE_SECONDS = 15
 FIRST_FAILED_REQUEST_TIMEOUT_SECONDS = 90
+DISPLAYED_RETRY_MAXIMUM_SECONDS = 120
 MIN_DISTINCT_RETRY_GAP_SECONDS = (
     EXPECTED_RETRY_INTERVAL_SECONDS - RETRY_INTERVAL_TOLERANCE_SECONDS
 )
-# The linked backoff bugs are marked Done, so this live test should still fail
-# far sooner than the old 15-minute workaround while still leaving enough
-# headroom to capture the known delayed follow-up retry for bug reporting.
-FOLLOW_UP_FAILED_REQUEST_TIMEOUT_SECONDS = 420
+# Keep waiting long enough to capture the real follow-up retry even when the
+# hosted implementation regresses to a much slower backoff than the expected
+# one-minute step. The ticket history already captured a delayed retry at
+# 962.1 seconds, so keep a clear buffer above that documented regression window
+# instead of timing out on the same harness failure mode.
+FOLLOW_UP_FAILED_REQUEST_TIMEOUT_SECONDS = 18 * 60
 DEFAULT_BRANCH = "main"
 AUTH_ERROR_FRAGMENT_PATTERN = re.compile(
     r"(401|bad credentials|gitHub api request failed|gitHub connection failed)",
     re.IGNORECASE,
 )
 NEXT_RETRY_PATTERN = re.compile(r"Next retry at [^.]+\.", re.IGNORECASE)
+LAST_CHECKED_PATTERN = re.compile(
+    r"Last checked\s+(?P<timestamp>\d{1,2}/\d{1,2}/\d{4}\s+\d{1,2}:\d{2}\s+[ap]m)",
+    re.IGNORECASE,
+)
+NEXT_RETRY_TIMESTAMP_PATTERN = re.compile(
+    r"Next retry at\s+(?P<timestamp>\d{1,2}/\d{1,2}/\d{4}\s+\d{1,2}:\d{2}\s+[ap]m)",
+    re.IGNORECASE,
+)
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
@@ -206,6 +218,9 @@ def main() -> None:
                         sync_observation,
                         timeout_seconds=FIRST_FAILED_REQUEST_TIMEOUT_SECONDS,
                     )
+                    displayed_retry_window = _parse_displayed_retry_window(
+                        failure_surface,
+                    )
                     second_failed_request = _wait_for_failed_request(
                         sync_observation,
                         previous_request=first_failed_request,
@@ -223,7 +238,9 @@ def main() -> None:
                         sync_observation.post_revocation_request_urls,
                     )
                     result["first_failed_request"] = asdict(first_failed_request)
+                    result["displayed_retry_window"] = displayed_retry_window
                     result["retry_interval_seconds"] = retry_interval_seconds
+                    _assert_displayed_retry_window(displayed_retry_window)
                     _assert_retry_interval(retry_interval_seconds)
                 except Exception as step5_error:
                     result["failed_sync_requests"] = [
@@ -249,20 +266,33 @@ def main() -> None:
                         f"first_failed_sync_request={first_failed_request.url}; "
                         f"seconds_after_revocation={first_failed_request.since_revocation_seconds:.1f}; "
                         f"second_failed_sync_request={second_failed_request.url}; "
-                        f"retry_interval_seconds={retry_interval_seconds:.1f}"
+                        f"retry_interval_seconds={retry_interval_seconds:.1f}; "
+                        "displayed_last_checked="
+                        f"{displayed_retry_window['last_checked_label']}; "
+                        "displayed_next_retry="
+                        f"{displayed_retry_window['next_retry_label']}; "
+                        "displayed_retry_interval_seconds="
+                        f"{displayed_retry_window['displayed_interval_seconds']:.1f}"
                     ),
                 )
                 _record_human_verification(
                     result,
                     check=(
-                        "Verified the captured repository-scoped sync-request log showed the "
-                        "follow-up failed retry fired about one minute after the first failed "
-                        "sync check."
+                        "Verified the visible `Workspace sync` retry schedule stayed about one "
+                        "minute ahead of `Last checked`, and the captured repository-scoped "
+                        "sync-request log showed the follow-up failed retry fired about one "
+                        "minute after the first failed sync check."
                     ),
                     observed=(
                         f"first_failed_at_plus={first_failed_request.since_revocation_seconds:.1f}s; "
                         f"second_failed_at_plus={second_failed_request.since_revocation_seconds:.1f}s; "
-                        f"retry_interval={retry_interval_seconds:.1f}s"
+                        f"retry_interval={retry_interval_seconds:.1f}s; "
+                        "displayed_last_checked="
+                        f"{displayed_retry_window['last_checked_label']}; "
+                        "displayed_next_retry="
+                        f"{displayed_retry_window['next_retry_label']}; "
+                        "displayed_interval="
+                        f"{displayed_retry_window['displayed_interval_seconds']:.1f}s"
                     ),
                 )
 
@@ -402,6 +432,19 @@ def _assert_retry_interval(retry_interval_seconds: float) -> None:
     )
 
 
+def _assert_displayed_retry_window(displayed_retry_window: dict[str, object]) -> None:
+    interval_seconds = float(displayed_retry_window["displayed_interval_seconds"])
+    if 0 < interval_seconds <= DISPLAYED_RETRY_MAXIMUM_SECONDS:
+        return
+    raise AssertionError(
+        "Step 5 failed: the visible `Workspace sync` retry schedule did not show the "
+        "expected first one-minute backoff step.\n"
+        f"Observed last checked: {displayed_retry_window['last_checked_label']}\n"
+        f"Observed next retry: {displayed_retry_window['next_retry_label']}\n"
+        f"Observed displayed retry interval: {interval_seconds:.1f}s",
+    )
+
+
 def _surface_payload(observation: WorkspaceSyncSurfaceObservation) -> dict[str, object]:
     return {
         "body_text": observation.body_text,
@@ -475,6 +518,36 @@ def _step5_failure_observation(
         f"observed_failed_sync_request_log={_request_log(requests)}; "
         f"error={type(error).__name__}: {error}"
     )
+
+
+def _parse_displayed_retry_window(
+    observation: WorkspaceSyncSurfaceObservation,
+) -> dict[str, object]:
+    raw_text = observation.settings_card_text or observation.body_text
+    next_retry_match = NEXT_RETRY_TIMESTAMP_PATTERN.search(raw_text)
+    last_checked_match = LAST_CHECKED_PATTERN.search(raw_text)
+    if next_retry_match is None or last_checked_match is None:
+        raise AssertionError(
+            "Step 5 failed: the visible `Workspace sync` card did not expose both "
+            "`Last checked ...` and `Next retry at ...` timestamps needed to verify "
+            "the first backoff step.\n"
+            f"Observed Workspace sync text:\n{raw_text}",
+        )
+    last_checked_label = last_checked_match.group("timestamp")
+    next_retry_label = next_retry_match.group("timestamp")
+    last_checked_at = _parse_displayed_timestamp(last_checked_label)
+    next_retry_at = _parse_displayed_timestamp(next_retry_label)
+    return {
+        "last_checked_label": last_checked_label,
+        "next_retry_label": next_retry_label,
+        "displayed_interval_seconds": (
+            next_retry_at - last_checked_at
+        ).total_seconds(),
+    }
+
+
+def _parse_displayed_timestamp(value: str) -> datetime:
+    return datetime.strptime(value.upper(), "%m/%d/%Y %I:%M %p")
 
 
 def _write_pass_outputs(result: dict[str, object]) -> None:
@@ -580,11 +653,13 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
     )
     retry_log_line = (
         "* Verified the visible authentication error and the {Next retry at ...} message, "
-        "then confirmed the captured repository-scoped sync-request log showed the "
+        "then confirmed the visible retry schedule stayed about one minute ahead of "
+        "{Last checked} and the captured repository-scoped sync-request log showed the "
         "follow-up failed retry happened about one minute after the first failed check."
         if passed
         else "* Verified the visible authentication error and the {Next retry at ...} "
-        "message, then inspected the captured sync-request log for the actual backoff timing."
+        "message, then inspected both the visible retry schedule and the captured sync-request "
+        "log for the actual backoff timing."
     )
     lines = [
         f"h3. {TICKET_KEY} {status}",
@@ -634,9 +709,9 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
         else "- Did not match the expected result."
     )
     retry_log_line = (
-        "- Verified the visible authentication error and the `Next retry at ...` message, then confirmed the captured repository-scoped sync-request log showed the follow-up failed retry happened about one minute after the first failed check."
+        "- Verified the visible authentication error and the `Next retry at ...` message, then confirmed the visible retry schedule stayed about one minute ahead of `Last checked` and the captured repository-scoped sync-request log showed the follow-up failed retry happened about one minute after the first failed check."
         if passed
-        else "- Verified the visible authentication error and the `Next retry at ...` message, then inspected the captured sync-request log for the actual backoff timing."
+        else "- Verified the visible authentication error and the `Next retry at ...` message, then inspected both the visible retry schedule and the captured sync-request log for the actual backoff timing."
     )
     lines = [
         f"## {TICKET_KEY} {status}",
@@ -735,7 +810,7 @@ def _bug_description(result: dict[str, object]) -> str:
             ),
             "",
             "## Actual vs Expected",
-            "- Expected: after the hosted PAT is revoked, the top-bar pill shows `Sync unavailable`, the Settings `Workspace sync` card shows an authentication error plus `Next retry at ...`, and the next logged repository-scoped failed retry happens about one minute after the first failed check.",
+            "- Expected: after the hosted PAT is revoked, the top-bar pill shows `Sync unavailable`, the Settings `Workspace sync` card shows an authentication error plus `Next retry at ...` with a visible retry window of about one minute after `Last checked`, and the next logged repository-scoped failed retry happens about one minute after the first failed check.",
             f"- Actual: {actual_summary}",
             "",
             "## Exact error message",
@@ -935,11 +1010,21 @@ def _actual_retry_summary(result: dict[str, object]) -> str:
             retry_interval_seconds = (
                 second_request.observed_at_monotonic - first_request.observed_at_monotonic
             )
+            displayed_retry_window = result.get("displayed_retry_window", {})
+            displayed_retry_summary = ""
+            if isinstance(displayed_retry_window, dict) and displayed_retry_window:
+                displayed_retry_summary = (
+                    " Visible retry schedule: "
+                    f"{displayed_retry_window.get('displayed_interval_seconds')}s between "
+                    f"`Last checked {displayed_retry_window.get('last_checked_label')}` and "
+                    f"`Next retry at {displayed_retry_window.get('next_retry_label')}`."
+                )
             return (
                 "the UI switched to `Sync unavailable` and showed an auth failure plus "
                 "`Next retry at ...`, but the captured repository-scoped retry interval was "
                 f"{retry_interval_seconds:.1f}s instead of about {EXPECTED_RETRY_INTERVAL_SECONDS}s. "
                 f"Request log: {_request_log(requests)}"
+                f"{displayed_retry_summary}"
             )
         return (
             "the UI switched to `Sync unavailable` and showed an auth failure plus "
