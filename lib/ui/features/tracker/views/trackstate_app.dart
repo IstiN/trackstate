@@ -348,6 +348,7 @@ class _TrackStateAppState extends State<TrackStateApp>
           widget.repository ??
           widget.repositoryFactory?.call() ??
           createTrackStateRepository(),
+      workspaceProfileService: widget.workspaceProfileService,
       workspaceId: workspaceId ?? _workspaceState.activeWorkspaceId,
     );
     if (previous != null) {
@@ -696,9 +697,8 @@ class _TrackStateAppState extends State<TrackStateApp>
           prepared.workspace?.isHosted == true &&
           restoredWorkspaceId != workspace.id;
       if (preservesUnavailableActiveLocalSelection) {
-        final optimisticHostedAccessMode = _hostedWorkspaceAccessModeForViewModel(
-          prepared.viewModel,
-        );
+        final optimisticHostedAccessMode =
+            _hostedWorkspaceAccessModeForViewModel(prepared.viewModel);
         final optimisticState = _workspaceState.copyWith(
           profiles: [
             for (final profile in _workspaceState.profiles)
@@ -1194,7 +1194,7 @@ class _TrackStateAppState extends State<TrackStateApp>
         profiles: [
           for (final profile in _workspaceState.profiles)
             if (profile.id == prepared.workspace!.id && profile.isHosted)
-                profile.copyWith(hostedAccessMode: optimisticHostedAccessMode)
+              profile.copyWith(hostedAccessMode: optimisticHostedAccessMode)
             else
               profile,
         ],
@@ -5886,6 +5886,10 @@ String _activeWorkspaceStateLabel(
     if (activeWorkspace != null &&
         localWorkspaceAvailability[activeWorkspace.id] == false) {
       return l10n.workspaceStateUnavailable;
+    }
+    if (viewModel.isRestoringLocalHostedAccess &&
+        !viewModel.hasLocalHostedAccessSession) {
+      return l10n.workspaceStateLocal;
     }
     return l10n.workspaceStateLocalGit;
   }
