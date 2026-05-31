@@ -83,6 +83,16 @@ class PythonTrackStateCliReleaseIdentityMissingRemoteFramework(
             for variable in ("GH_TOKEN", "GITHUB_TOKEN", "TRACKSTATE_TOKEN")
             if env.pop(variable, None) is not None
         )
+        remote_names = tuple(
+            line.strip()
+            for line in self._git_output(repository_path, "remote").splitlines()
+            if line.strip()
+        )
+        remote_description = (
+            "a repository whose configured remotes do not point to GitHub"
+            if remote_names
+            else "a repository with no Git remotes"
+        )
         with tempfile.TemporaryDirectory(
             prefix="trackstate-release-identity-home-"
         ) as sandbox_home_dir:
@@ -99,25 +109,25 @@ class PythonTrackStateCliReleaseIdentityMissingRemoteFramework(
                 text=True,
                 check=False,
             )
-        observation = TrackStateCliCommandObservation(
-            requested_command=requested_command,
-            executed_command=executed_command,
-            fallback_reason=(
-                "Pinned execution to a temporary executable compiled from this checkout "
-                "and stripped GitHub credentials from the environment so the missing-"
-                "remote release-identity scenario runs the exact local command from a "
-                "repository with no Git remotes."
-            ),
-            repository_path=str(repository_path),
-            compiled_binary_path=str(executable_path),
-            result=CliCommandResult(
-                command=executed_command,
-                exit_code=completed.returncode,
-                stdout=completed.stdout,
-                stderr=completed.stderr,
-                json_payload=self._parse_json(completed.stdout),
-            ),
-        )
+            observation = TrackStateCliCommandObservation(
+                requested_command=requested_command,
+                executed_command=executed_command,
+                fallback_reason=(
+                    "Pinned execution to a temporary executable compiled from this checkout "
+                    "and stripped GitHub credentials from the environment so the missing-"
+                    "remote release-identity scenario runs the exact local command from "
+                    f"{remote_description}."
+                ),
+                repository_path=str(repository_path),
+                compiled_binary_path=str(executable_path),
+                result=CliCommandResult(
+                    command=executed_command,
+                    exit_code=completed.returncode,
+                    stdout=completed.stdout,
+                    stderr=completed.stderr,
+                    json_payload=self._parse_json(completed.stdout),
+                ),
+            )
         return observation, stripped
 
     def _seed_local_repository(
@@ -191,6 +201,14 @@ Release identity missing-remote fixture.
             "user.email",
             "release-identity@example.com",
         )
+        if config.origin_remote_name and config.origin_remote_url:
+            self._git(
+                repository_path,
+                "remote",
+                "add",
+                config.origin_remote_name,
+                config.origin_remote_url,
+            )
         self._git(repository_path, "add", ".")
         self._git(repository_path, "commit", "-m", "Seed missing-remote fixture")
 

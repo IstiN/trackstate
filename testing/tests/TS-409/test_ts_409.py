@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import json
 import os
 from pathlib import Path
+import platform
+import re
 import sys
 import traceback
 import uuid
@@ -40,15 +43,37 @@ from testing.tests.support.live_tracker_app_factory import (
 
 TICKET_KEY = "TS-409"
 OUTPUTS_DIR = REPO_ROOT / "outputs"
+JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
+PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
+RESPONSE_PATH = OUTPUTS_DIR / "response.md"
+RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
+BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
 FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts409_failure.png"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts409_success.png"
 STATUSES_SCREENSHOT_PATH = OUTPUTS_DIR / "ts409_statuses_commit.png"
 WORKFLOWS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts409_workflows_commit.png"
-RESULT_PATH = OUTPUTS_DIR / "ts409_result.json"
+TEST_FILE_PATH = f"testing/tests/{TICKET_KEY}/test_ts_409.py"
+TEST_RUN_COMMAND = f"mkdir -p outputs && PYTHONPATH=. python3 {TEST_FILE_PATH}"
+DESKTOP_VIEWPORT = {"width": 1440, "height": 900}
 STATUSES_PATH = "DEMO/config/statuses.json"
 WORKFLOWS_PATH = "DEMO/config/workflows.json"
 WORKFLOW_NAME = "Delivery Workflow"
 WORKFLOW_ID = "delivery-workflow"
+REQUEST_STEPS = (
+    "Navigate to Settings Admin Workspace.",
+    "Make changes in 'Statuses' (Add new) and 'Workflows' (Update transition).",
+    "Click 'Save'.",
+    "Verify the resulting Git commit.",
+    "Execute `trackstate session` via CLI.",
+)
+
+
+@dataclass(frozen=True)
+class HostedSettingsPersistenceObservation:
+    head_sha: str
+    statuses_content: str
+    workflows_content: str
+    commits_since_baseline: tuple[HostedCommitObservation, ...]
 
 
 def main() -> None:
@@ -92,6 +117,7 @@ def main() -> None:
         "expected_status_name": status_name,
         "expected_transition_name": transition_name,
         "steps": [],
+        "human_verification": [],
     }
 
     mutation_attempted = False
@@ -100,6 +126,8 @@ def main() -> None:
         with create_live_tracker_app_with_stored_token(config, token=token) as tracker_page:
             settings_page = LiveProjectSettingsPage(tracker_page)
             try:
+                tracker_page.session.set_viewport_size(**DESKTOP_VIEWPORT)
+                result["viewport"] = DESKTOP_VIEWPORT
                 runtime = tracker_page.open()
                 result["runtime_state"] = runtime.kind
                 result["runtime_body_text"] = runtime.body_text
@@ -117,7 +145,8 @@ def main() -> None:
                     observed=runtime.body_text,
                 )
 
-                connected_text = settings_page.ensure_connected(
+                settings_page.open_settings()
+                connected_text = settings_page.ensure_write_capable_connection(
                     token=token,
                     repository=config.repository,
                     user_login=user.login,
@@ -141,7 +170,9 @@ def main() -> None:
                     transition_index=transition_index,
                 )
                 tracker_page.screenshot(str(SUCCESS_SCREENSHOT_PATH))
+                post_save_state = settings_page.read_save_state()
                 result["ui_observation"] = _ui_observation_to_dict(ui_observation)
+                result["post_save_state"] = _save_state_to_dict(post_save_state)
                 result["settings_screenshot"] = str(SUCCESS_SCREENSHOT_PATH)
                 _record_step(
                     result,
@@ -151,7 +182,23 @@ def main() -> None:
                         "In Settings, add a new status, update the Delivery Workflow "
                         "transition label, and save the settings."
                     ),
-                    observed=ui_observation.post_save_text,
+                    observed=(
+                        f"post_save_text={ui_observation.post_save_text!r}; "
+                        f"save_button_enabled={post_save_state.save_button_enabled!r}; "
+                        f"save_failure_text={post_save_state.save_failure_text!r}"
+                    ),
+                )
+                _record_human_verification(
+                    result,
+                    check=(
+                        "Verified the visible hosted settings flow exposed the user-facing "
+                        "`Project Settings`, `Add status`, `Workflows`, `Edit workflow`, "
+                        "and `Save settings` surfaces before and after saving."
+                    ),
+                    observed=(
+                        f"{_human_ui_observation_text(ui_observation)}; "
+                        f"post_save_state={_save_state_to_dict(post_save_state)!r}"
+                    ),
                 )
             except Exception:
                 settings_page.screenshot(str(FAILURE_SCREENSHOT_PATH))
@@ -159,48 +206,95 @@ def main() -> None:
                 raise
 
         mutation_attempted = True
-        new_head_sha = repository_service.wait_for_head_change(baseline_head_sha)
-        commit_observation = repository_service.fetch_commit(new_head_sha)
-        result["commit_observation"] = _commit_observation_to_dict(commit_observation)
-        result["new_head_sha"] = new_head_sha
-        _assert_commit_observation(
-            baseline_head_sha=baseline_head_sha,
-            commit_observation=commit_observation,
-        )
-        _record_step(
-            result,
-            step=4,
-            status="passed",
-            action="Verify the resulting Git commit for the hosted settings save.",
-            observed=json.dumps(_commit_observation_to_dict(commit_observation), indent=2),
-        )
+        step_errors: list[str] = []
+        step_4_passed = False
+        try:
+            persistence_observation = _wait_for_atomic_settings_persistence(
+                repository_service=repository_service,
+                baseline_head_sha=baseline_head_sha,
+                status_id=status_id,
+                status_name=status_name,
+                transition_name=transition_name,
+            )
+            commit_snapshot_cache: dict[str, tuple[str, str]] = {}
+            commit_observation = _matching_settings_commit(
+                repository_service=repository_service,
+                observation=persistence_observation,
+                status_id=status_id,
+                status_name=status_name,
+                transition_name=transition_name,
+                commit_snapshot_cache=commit_snapshot_cache,
+            )
+            if commit_observation is None:
+                raise AssertionError(
+                    "Step 4 failed: the repository eventually exposed the saved status and "
+                    "workflow markers, but no single commit in the observed compare range "
+                    "updated both catalog files atomically.\n"
+                    f"Observed commits: {json.dumps([_commit_observation_to_dict(commit) for commit in persistence_observation.commits_since_baseline], indent=2)}",
+                )
+            result["commit_observation"] = _commit_observation_to_dict(commit_observation)
+            result["observed_head_sha"] = persistence_observation.head_sha
+            result["new_head_sha"] = commit_observation.sha
+            _assert_commit_observation(commit_observation=commit_observation)
+            _record_step(
+                result,
+                step=4,
+                status="passed",
+                action="Verify the resulting Git commit for the hosted settings save.",
+                observed=json.dumps(_commit_observation_to_dict(commit_observation), indent=2),
+            )
+            result["committed_statuses_content"] = persistence_observation.statuses_content
+            result["committed_workflows_content"] = persistence_observation.workflows_content
+            _assert_committed_configuration(
+                statuses_content=persistence_observation.statuses_content,
+                workflows_content=persistence_observation.workflows_content,
+                status_id=status_id,
+                status_name=status_name,
+                transition_name=transition_name,
+            )
 
-        committed_statuses = repository_service.fetch_file(STATUSES_PATH, ref=new_head_sha)
-        committed_workflows = repository_service.fetch_file(WORKFLOWS_PATH, ref=new_head_sha)
-        result["committed_statuses_content"] = committed_statuses.content
-        result["committed_workflows_content"] = committed_workflows.content
-        _assert_committed_configuration(
-            statuses_content=committed_statuses.content,
-            workflows_content=committed_workflows.content,
-            status_id=status_id,
-            status_name=status_name,
-            transition_name=transition_name,
-        )
+            file_page_observations = _verify_files_in_github_ui(
+                repository=config.repository,
+                commit_sha=commit_observation.sha,
+                status_name=status_name,
+                transition_name=transition_name,
+            )
+            result["github_ui_verification"] = file_page_observations
+            _record_human_verification(
+                result,
+                check=(
+                    "Verified the committed GitHub file views visibly showed the new status "
+                    "and updated Delivery Workflow transition in the saved repository state."
+                ),
+                observed=_human_commit_observation_text(file_page_observations),
+            )
+            step_4_passed = True
+        except AssertionError as error:
+            step_4_error = str(error)
+            result["step_4_error"] = step_4_error
+            step_errors.append(step_4_error)
+            _record_step(
+                result,
+                step=4,
+                status="failed",
+                action="Verify the resulting Git commit.",
+                observed=_step_failure_observed_text(step_4_error),
+            )
+            _capture_failed_save_repository_state(
+                result,
+                repository_service=repository_service,
+                expected_status_id=status_id,
+                expected_status_name=status_name,
+                expected_transition_name=transition_name,
+            )
 
-        file_page_observations = _verify_files_in_github_ui(
-            repository=config.repository,
-            commit_sha=new_head_sha,
-            status_name=status_name,
-            transition_name=transition_name,
-        )
-        result["github_ui_verification"] = file_page_observations
-
-        cli_result = _run_session_until_project_config(
+        cli_result, cli_error = _observe_session_project_config(
             cli_service=cli_service,
             repository=config.repository,
             branch=config.ref,
             status_marker=status_name,
             workflow_marker=transition_name,
+            wait_for_markers=step_4_passed,
         )
         result["cli_observation"] = {
             "command": cli_result.command_text,
@@ -209,22 +303,53 @@ def main() -> None:
             "stderr": cli_result.stderr,
             "json_payload": cli_result.json_payload,
         }
-        _record_step(
+        _record_human_verification(
             result,
-            step=5,
-            status="passed",
-            action="Run `trackstate session` for the same hosted repository.",
-            observed=cli_result.stdout,
+            check=(
+                "Ran the hosted `trackstate session` CLI from the user-visible repository "
+                "context and checked the returned `projectConfig` content after saving."
+            ),
+            observed=_human_cli_observation_text(cli_result),
         )
+        if cli_error is None:
+            _record_step(
+                result,
+                step=5,
+                status="passed",
+                action="Execute `trackstate session` via CLI.",
+                observed=cli_result.stdout,
+            )
+        else:
+            result["step_5_error"] = cli_error
+            step_errors.append(cli_error)
+            _record_step(
+                result,
+                step=5,
+                status="failed",
+                action="Execute `trackstate session` via CLI.",
+                observed=_step_failure_observed_text(cli_error),
+            )
+
+        if step_errors:
+            raise AssertionError("\n\n".join(step_errors))
     except AssertionError as error:
         result["error"] = str(error)
         result["traceback"] = traceback.format_exc()
-        _write_result(result)
+        if str(error).startswith("Step 4 failed:") and "failure_repository_state" not in result:
+            _capture_failed_save_repository_state(
+                result,
+                repository_service=repository_service,
+                expected_status_id=status_id,
+                expected_status_name=status_name,
+                expected_transition_name=transition_name,
+            )
+        _record_failed_step_from_error(result)
+        _write_failure_outputs(result)
         raise
     except Exception as error:
         result["error"] = f"{type(error).__name__}: {error}"
         result["traceback"] = traceback.format_exc()
-        _write_result(result)
+        _write_failure_outputs(result)
         raise
     finally:
         if mutation_attempted:
@@ -254,7 +379,7 @@ def main() -> None:
         "changes in one commit and that the hosted CLI session output exposed the "
         "updated projectConfig data immediately afterward."
     )
-    _write_result(result)
+    _write_pass_outputs(result)
     print(json.dumps(result, indent=2))
 
 
@@ -267,7 +392,7 @@ def _perform_settings_mutation(
     transition_name: str,
     transition_index: int,
 ) -> ProjectSettingsUiObservation:
-    settings_text = settings_page.open_settings()
+    settings_text = settings_page.body_text()
     status_dialog_text, status_list_text = settings_page.add_status(
         status_id=status_id,
         status_name=status_name,
@@ -309,12 +434,164 @@ def _resolve_delivery_transition_index(workflows_content: str) -> int:
             "least four transitions so the existing 'Reopen' transition can be updated.\n"
             f"Observed workflows.json:\n{workflows_content}",
         )
-    return len(transitions) - 1
+    for index, transition in enumerate(transitions):
+        if not isinstance(transition, dict):
+            continue
+        if str(transition.get("id", "")).strip() == "reopen":
+            return index
+    for index, transition in enumerate(transitions):
+        if not isinstance(transition, dict):
+            continue
+        if str(transition.get("name", "")).strip().lower() == "reopen":
+            return index
+    raise AssertionError(
+        "Precondition failed: TS-409 expected the Delivery Workflow to expose an "
+        "existing `Reopen` transition to edit.\n"
+        f"Observed workflows.json:\n{workflows_content}",
+    )
+
+
+def _wait_for_atomic_settings_persistence(
+    *,
+    repository_service: HostedProjectSettingsRepositoryService,
+    baseline_head_sha: str,
+    status_id: str,
+    status_name: str,
+    transition_name: str,
+    attempts: int = 24,
+    interval_seconds: float = 5.0,
+) -> HostedSettingsPersistenceObservation:
+    commit_cache: dict[str, HostedCommitObservation] = {}
+    commit_snapshot_cache: dict[str, tuple[str, str]] = {}
+    matched, observation = poll_until(
+        probe=lambda: _observe_settings_persistence(
+            repository_service=repository_service,
+            baseline_head_sha=baseline_head_sha,
+            commit_cache=commit_cache,
+        ),
+        is_satisfied=lambda current: (
+            _settings_state_has_expected_markers(
+                current,
+                status_id=status_id,
+                status_name=status_name,
+                transition_name=transition_name,
+            )
+            and _matching_settings_commit(
+                repository_service=repository_service,
+                observation=current,
+                status_id=status_id,
+                status_name=status_name,
+                transition_name=transition_name,
+                commit_snapshot_cache=commit_snapshot_cache,
+            )
+            is not None
+        ),
+        timeout_seconds=attempts * interval_seconds,
+        interval_seconds=interval_seconds,
+    )
+    if matched:
+        return observation
+
+    raise AssertionError(
+        "Step 4 failed: the hosted Settings save did not produce a repository state "
+        "with the saved status and workflow markers within the polling window.\n"
+        f"Baseline head: {baseline_head_sha}\n"
+        f"Last observed head: {observation.head_sha}\n"
+        f"Observed commits since baseline: {json.dumps([_commit_observation_to_dict(commit) for commit in observation.commits_since_baseline], indent=2)}\n"
+        f"Observed statuses.json:\n{observation.statuses_content}\n"
+        f"Observed workflows.json:\n{observation.workflows_content}",
+    )
+
+
+def _observe_settings_persistence(
+    *,
+    repository_service: HostedProjectSettingsRepositoryService,
+    baseline_head_sha: str,
+    commit_cache: dict[str, HostedCommitObservation],
+) -> HostedSettingsPersistenceObservation:
+    head_sha = repository_service.branch_head_sha()
+    statuses_content = repository_service.fetch_file(STATUSES_PATH, ref=head_sha).content
+    workflows_content = repository_service.fetch_file(WORKFLOWS_PATH, ref=head_sha).content
+    commit_shas = repository_service.compare_commits(
+        base_sha=baseline_head_sha,
+        head_sha=head_sha,
+    )
+    commits_since_baseline: list[HostedCommitObservation] = []
+    for commit_sha in commit_shas:
+        commit = commit_cache.get(commit_sha)
+        if commit is None:
+            commit = repository_service.fetch_commit(commit_sha)
+            commit_cache[commit_sha] = commit
+        commits_since_baseline.append(commit)
+    return HostedSettingsPersistenceObservation(
+        head_sha=head_sha,
+        statuses_content=statuses_content,
+        workflows_content=workflows_content,
+        commits_since_baseline=tuple(commits_since_baseline),
+    )
+
+
+def _settings_state_has_expected_markers(
+    observation: HostedSettingsPersistenceObservation,
+    *,
+    status_id: str,
+    status_name: str,
+    transition_name: str,
+) -> bool:
+    return (
+        status_id in observation.statuses_content
+        and status_name in observation.statuses_content
+        and transition_name in observation.workflows_content
+    )
+
+
+def _matching_settings_commit(
+    *,
+    repository_service: HostedProjectSettingsRepositoryService,
+    observation: HostedSettingsPersistenceObservation,
+    status_id: str,
+    status_name: str,
+    transition_name: str,
+    commit_snapshot_cache: dict[str, tuple[str, str]],
+) -> HostedCommitObservation | None:
+    expected_files = {STATUSES_PATH, WORKFLOWS_PATH}
+    for commit in observation.commits_since_baseline:
+        if not expected_files.issubset(set(commit.changed_files)):
+            continue
+        candidate_statuses, candidate_workflows = _fetch_commit_catalog_snapshots(
+            repository_service=repository_service,
+            commit_sha=commit.sha,
+            commit_snapshot_cache=commit_snapshot_cache,
+        )
+        if (
+            status_id in candidate_statuses
+            and status_name in candidate_statuses
+            and transition_name in candidate_workflows
+        ):
+            return commit
+    return None
+
+
+def _fetch_commit_catalog_snapshots(
+    *,
+    repository_service: HostedProjectSettingsRepositoryService,
+    commit_sha: str,
+    commit_snapshot_cache: dict[str, tuple[str, str]],
+) -> tuple[str, str]:
+    snapshot = commit_snapshot_cache.get(commit_sha)
+    if snapshot is not None:
+        return snapshot
+
+    snapshot = (
+        repository_service.fetch_file(STATUSES_PATH, ref=commit_sha).content,
+        repository_service.fetch_file(WORKFLOWS_PATH, ref=commit_sha).content,
+    )
+    commit_snapshot_cache[commit_sha] = snapshot
+    return snapshot
 
 
 def _assert_commit_observation(
     *,
-    baseline_head_sha: str,
     commit_observation: HostedCommitObservation,
 ) -> None:
     if len(commit_observation.parent_shas) != 1:
@@ -322,13 +599,6 @@ def _assert_commit_observation(
             "Step 4 failed: the resulting head commit was not a single atomic commit "
             "for the hosted settings save.\n"
             f"Observed parent SHAs: {list(commit_observation.parent_shas)}\n"
-            f"Observed commit: {json.dumps(_commit_observation_to_dict(commit_observation), indent=2)}",
-        )
-    if commit_observation.parent_shas[0] != baseline_head_sha:
-        raise AssertionError(
-            "Step 4 failed: the resulting head commit was not a direct atomic child "
-            "of the pre-save repository head.\n"
-            f"Expected parent: {baseline_head_sha}\n"
             f"Observed commit: {json.dumps(_commit_observation_to_dict(commit_observation), indent=2)}",
         )
     expected_files = {STATUSES_PATH, WORKFLOWS_PATH}
@@ -408,64 +678,77 @@ def _verify_files_in_github_ui(
     }
 
 
-def _run_session_until_project_config(
+def _observe_session_project_config(
     *,
     cli_service: HostedTrackStateSessionCliService,
     repository: str,
     branch: str,
     status_marker: str,
     workflow_marker: str,
-    attempts: int = 5,
-    interval_seconds: float = 3.0,
-) -> CliCommandResult:
-    matched, last_result = poll_until(
-        probe=lambda: cli_service.run_session(
+    wait_for_markers: bool,
+    attempts: int = 12,
+    interval_seconds: float = 5.0,
+) -> tuple[CliCommandResult, str | None]:
+    if wait_for_markers:
+        matched, last_result = poll_until(
+            probe=lambda: cli_service.run_session(
+                repository=repository,
+                branch=branch,
+            ),
+            is_satisfied=lambda result: _session_result_has_project_config_markers(
+                result,
+                status_marker=status_marker,
+                workflow_marker=workflow_marker,
+            ),
+            timeout_seconds=attempts * interval_seconds,
+            interval_seconds=interval_seconds,
+        )
+    else:
+        last_result = cli_service.run_session(
             repository=repository,
             branch=branch,
-        ),
-        is_satisfied=lambda result: _session_result_has_project_config_markers(
-            result,
+        )
+        matched = _session_result_has_project_config_markers(
+            last_result,
             status_marker=status_marker,
             workflow_marker=workflow_marker,
-        ),
-        timeout_seconds=attempts * interval_seconds,
-        interval_seconds=interval_seconds,
-    )
+        )
     if matched:
-        return last_result
+        return last_result, None
     if not last_result.succeeded:
-        raise AssertionError(
+        return last_result, (
             "Step 5 failed: `trackstate session` did not complete successfully "
             "against the hosted repository after the Settings save.\n"
             f"Command: {last_result.command_text}\n"
             f"Exit code: {last_result.exit_code}\n"
             f"stdout:\n{last_result.stdout}\n"
-            f"stderr:\n{last_result.stderr}",
+            f"stderr:\n{last_result.stderr}"
         )
     payload = last_result.json_payload
     if not isinstance(payload, dict):
-        raise AssertionError(
+        return last_result, (
             "Step 5 failed: `trackstate session` did not emit a JSON object.\n"
             f"stdout:\n{last_result.stdout}\n"
-            f"stderr:\n{last_result.stderr}",
+            f"stderr:\n{last_result.stderr}"
         )
     data = payload.get("data")
     if not isinstance(data, dict):
-        raise AssertionError(
+        return last_result, (
             "Step 5 failed: the session payload did not expose a `data` object.\n"
-            f"Observed payload: {json.dumps(payload, indent=2)}",
+            f"Observed payload: {json.dumps(payload, indent=2)}"
         )
     payload = (
         last_result.json_payload
         if isinstance(last_result.json_payload, dict)
         else {"stdout": last_result.stdout}
     )
-    raise AssertionError(
-        "Step 5 failed: the hosted CLI session output did not expose an updated "
-        "`projectConfig` block with the saved status catalog and workflow summary.\n"
+    return last_result, (
+        "Step 5 failed: the hosted CLI session output did not expose the saved "
+        "status catalog and workflow summary inside the returned `projectConfig` "
+        "block after the Settings save.\n"
         f"Expected status marker: {status_marker}\n"
         f"Expected workflow marker: {workflow_marker}\n"
-        f"Observed payload: {json.dumps(payload, indent=2)}",
+        f"Observed payload: {json.dumps(payload, indent=2)}"
     )
 
 
@@ -501,6 +784,16 @@ def _ui_observation_to_dict(observation: ProjectSettingsUiObservation) -> dict[s
     }
 
 
+def _save_state_to_dict(post_save_state: object) -> dict[str, object]:
+    return {
+        "body_text": str(getattr(post_save_state, "body_text", "")),
+        "save_button_enabled": bool(
+            getattr(post_save_state, "save_button_enabled", False)
+        ),
+        "save_failure_text": getattr(post_save_state, "save_failure_text", None),
+    }
+
+
 def _commit_observation_to_dict(observation: HostedCommitObservation) -> dict[str, object]:
     return {
         "sha": observation.sha,
@@ -529,9 +822,594 @@ def _record_step(
         },
     )
 
+def _record_human_verification(
+    result: dict[str, object],
+    *,
+    check: str,
+    observed: str,
+) -> None:
+    observations = result.setdefault("human_verification", [])
+    assert isinstance(observations, list)
+    observations.append({"check": check, "observed": observed})
 
-def _write_result(payload: dict[str, object]) -> None:
-    RESULT_PATH.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+def _record_failed_step_from_error(result: dict[str, object]) -> None:
+    error = str(result.get("error", "")).strip()
+    if not error.startswith("Step "):
+        return
+    try:
+        prefix, _, observed = error.partition("\n")
+        step_number = int(prefix.split()[1])
+    except (IndexError, ValueError):
+        return
+    steps = result.setdefault("steps", [])
+    assert isinstance(steps, list)
+    if any(
+        isinstance(step, dict) and int(step.get("step", -1)) == step_number
+        for step in steps
+    ):
+        return
+    action = (
+        REQUEST_STEPS[step_number - 1]
+        if 0 < step_number <= len(REQUEST_STEPS)
+        else "Automation step failed."
+    )
+    steps.append(
+        {
+            "step": step_number,
+            "status": "failed",
+            "action": action,
+            "observed": observed or error,
+        },
+    )
+
+
+def _step_failure_observed_text(error: str) -> str:
+    _, _, observed = error.partition("\n")
+    return observed or error
+
+
+def _capture_failed_save_repository_state(
+    result: dict[str, object],
+    *,
+    repository_service: HostedProjectSettingsRepositoryService,
+    expected_status_id: str,
+    expected_status_name: str,
+    expected_transition_name: str,
+) -> None:
+    try:
+        current_head_sha = repository_service.branch_head_sha()
+        current_statuses = repository_service.fetch_file(STATUSES_PATH)
+        current_workflows = repository_service.fetch_file(WORKFLOWS_PATH)
+    except Exception as capture_error:  # pragma: no cover - best-effort evidence
+        result["failure_state_capture_error"] = (
+            f"{type(capture_error).__name__}: {capture_error}"
+        )
+        return
+
+    failure_state = {
+        "head_sha": current_head_sha,
+        "statuses_path": STATUSES_PATH,
+        "workflows_path": WORKFLOWS_PATH,
+        "statuses_contains_expected_status": (
+            expected_status_id in current_statuses.content
+            and expected_status_name in current_statuses.content
+        ),
+        "workflows_contains_expected_transition": (
+            expected_transition_name in current_workflows.content
+        ),
+        "statuses_content": current_statuses.content,
+        "workflows_content": current_workflows.content,
+    }
+    result["failure_repository_state"] = failure_state
+    _record_human_verification(
+        result,
+        check=(
+            "Verified the live repository state after the Save action to confirm "
+            "whether the user-visible Settings change actually persisted."
+        ),
+        observed=(
+            f"head_sha={current_head_sha!r}; "
+            f"statuses_contains_expected_status="
+            f"{failure_state['statuses_contains_expected_status']!r}; "
+            f"workflows_contains_expected_transition="
+            f"{failure_state['workflows_contains_expected_transition']!r}"
+        ),
+    )
+
+
+def _write_pass_outputs(result: dict[str, object]) -> None:
+    BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
+    RESULT_PATH.write_text(
+        json.dumps(
+            {
+                "status": "passed",
+                "passed": 1,
+                "failed": 0,
+                "skipped": 0,
+                "summary": "1 passed, 0 failed",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=True), encoding="utf-8")
+    PR_BODY_PATH.write_text(_pr_body(result, passed=True), encoding="utf-8")
+    RESPONSE_PATH.write_text(_response_summary(result, passed=True), encoding="utf-8")
+
+
+def _write_failure_outputs(result: dict[str, object]) -> None:
+    error = str(result.get("error", "AssertionError: unknown failure"))
+    RESULT_PATH.write_text(
+        json.dumps(
+            {
+                "status": "failed",
+                "passed": 0,
+                "failed": 1,
+                "skipped": 0,
+                "summary": "0 passed, 1 failed",
+                "error": error,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=False), encoding="utf-8")
+    PR_BODY_PATH.write_text(_pr_body(result, passed=False), encoding="utf-8")
+    RESPONSE_PATH.write_text(_response_summary(result, passed=False), encoding="utf-8")
+    if _is_product_failure(result):
+        BUG_DESCRIPTION_PATH.write_text(_bug_description(result), encoding="utf-8")
+    else:
+        BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
+
+
+def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
+    status = "✅ PASSED" if passed else "❌ FAILED"
+    screenshot_path = _resolve_artifact_screenshot_path(result, passed=passed)
+    cli_scope_line = (
+        "* Ran the installed {{trackstate session}} CLI against the same hosted repository and checked the returned {{projectConfig}} block."
+        if result.get("cli_observation") is not None
+        else "* Prepared the final {{trackstate session}} CLI parity check for the same hosted repository, but the CLI step was not reached because the save never persisted to Git."
+    )
+    cli_scope_line = (
+        "* Ran the installed {{trackstate session}} CLI against the same hosted repository and checked the returned {{projectConfig}} block."
+        if result.get("cli_observation") is not None
+        else "* Prepared the final {{trackstate session}} CLI parity check for the same hosted repository, but the CLI step was not reached because the save never persisted to Git."
+    )
+    lines = [
+        "h3. Test Automation Result",
+        "",
+        f"*Status:* {status}",
+        (
+            "*Test Case:* TS-409 — Settings persistence — Atomic multi-file write and "
+            "CLI parity"
+        ),
+        "",
+        "h4. What was tested",
+        "* Opened the deployed hosted TrackState app, connected to the live setup repository, and navigated to *Project Settings*.",
+        "* Added a unique status, edited the existing *Delivery Workflow* transition, and saved through the visible hosted Settings UI.",
+        "* Verified the save result through the live GitHub repository commit/file state.",
+        cli_scope_line,
+        "",
+        "h4. Result",
+        (
+            "* Matched the expected result: the hosted save produced one atomic commit and the CLI immediately exposed the updated project configuration."
+            if passed
+            else "* Did not match the expected result: Step 4 failed because the hosted Save action never produced an atomic persisted settings commit with both catalog updates."
+        ),
+        *(_result_detail_lines(result, jira=True, passed=passed)),
+        "",
+        "h4. Test file",
+        "{code}",
+        TEST_FILE_PATH,
+        "{code}",
+        "",
+        "h4. Run command",
+        "{code:bash}",
+        TEST_RUN_COMMAND,
+        "{code}",
+        "",
+        "h4. Step results",
+        *_step_lines(result, jira=True),
+        "",
+        "h4. Human-style verification",
+        *_human_lines(result, jira=True),
+    ]
+    if not passed:
+        lines.extend(
+            [
+                "",
+                "h4. Exact error",
+                "{code}",
+                str(result.get("traceback", result.get("error", ""))),
+                "{code}",
+            ]
+        )
+    return _jira_markup("\n".join(lines) + "\n")
+
+
+def _pr_body(result: dict[str, object], *, passed: bool) -> str:
+    status = "✅ PASSED" if passed else "❌ FAILED"
+    cli_scope_line = (
+        "- Ran the installed `trackstate session` CLI against the same hosted repository and checked the returned `projectConfig` block."
+        if result.get("cli_observation") is not None
+        else "- Prepared the final `trackstate session` CLI parity check for the same hosted repository, but the CLI step was not reached because the save never persisted to Git."
+    )
+    lines = [
+        "## Test Automation Result",
+        "",
+        f"**Status:** {status}",
+        (
+            "**Test Case:** TS-409 — Settings persistence — Atomic multi-file write and "
+            "CLI parity"
+        ),
+        "",
+        "## What was automated",
+        "- Opened the deployed hosted TrackState app, connected to the live setup repository, and navigated to `Project Settings`.",
+        "- Added a unique status, edited the existing `Delivery Workflow` transition, and saved through the visible hosted Settings UI.",
+        "- Verified the save result through the live GitHub repository commit/file state.",
+        cli_scope_line,
+        "",
+        "## Result",
+        (
+            "- Matched the expected result: the hosted save produced one atomic commit and the CLI immediately exposed the updated project configuration."
+            if passed
+            else "- Did not match the expected result: Step 4 failed because the hosted Save action never produced an atomic persisted settings commit with both catalog updates."
+        ),
+        *(_result_detail_lines(result, jira=False, passed=passed)),
+        "",
+        "## Test file",
+        "```text",
+        TEST_FILE_PATH,
+        "```",
+        "",
+        "## Step results",
+        *_step_lines(result, jira=False),
+        "",
+        "## Human-style verification",
+        *_human_lines(result, jira=False),
+        "",
+        "## How to run",
+        "```bash",
+        TEST_RUN_COMMAND,
+        "```",
+    ]
+    if not passed:
+        lines.extend(
+            [
+                "",
+                "## Exact error",
+                "```text",
+                str(result.get("traceback", result.get("error", ""))),
+                "```",
+            ]
+        )
+    return "\n".join(lines) + "\n"
+
+
+def _response_summary(result: dict[str, object], *, passed: bool) -> str:
+    status = "PASSED" if passed else "FAILED"
+    lines = [
+        f"# {TICKET_KEY} {status}",
+        "",
+        (
+            "Verified the hosted Settings save created one atomic commit and the installed "
+            "`trackstate session` CLI immediately returned the updated `projectConfig`."
+            if passed
+            else (
+                "The hosted Settings persistence / CLI parity scenario failed because "
+                "the live Save action returned to the Settings screen but never produced "
+                "an atomic persisted settings commit with both catalog updates."
+            )
+        ),
+        "",
+        *(_result_detail_lines(result, jira=False, passed=passed)),
+        "",
+        "## Step results",
+        *_step_lines(result, jira=False),
+        "",
+        "## Human-style verification",
+        *_human_lines(result, jira=False),
+    ]
+    if not passed:
+        lines.extend(
+            [
+                "",
+                "## Exact error",
+                "```text",
+                str(result.get("traceback", result.get("error", ""))),
+                "```",
+            ]
+        )
+    return "\n".join(lines) + "\n"
+
+
+def _bug_description(result: dict[str, object]) -> str:
+    screenshot_path = _resolve_artifact_screenshot_path(result, passed=False)
+    actual = _actual_result_text(result)
+    cli_observation = result.get("cli_observation")
+    cli_text = (
+        json.dumps(cli_observation, indent=2)
+        if isinstance(cli_observation, dict)
+        else "CLI step was not reached."
+    )
+    failure_state = result.get("failure_repository_state")
+    notes = _failure_repository_notes(failure_state)
+    return _jira_markup(
+        "\n".join(
+        [
+            f"h3. {TICKET_KEY} product defect",
+            "",
+            "h4. Environment",
+            f"* URL: {{{{{result['app_url']}}}}}",
+            f"* Repository: {{{{{result['repository']}}}}}",
+            f"* Branch/ref: {{{{{result['repository_ref']}}}}}",
+            "* Browser: {{Chromium (Playwright)}}",
+            f"* OS: {{{{{platform.system()}}}}}",
+            "",
+            "h4. Steps to Reproduce",
+            *_ticket_step_lines(result),
+            "",
+            "h4. Expected Result",
+            (
+                "Approved changes are written in one atomic Git commit via `applyFileChanges`. "
+                "The CLI `session` output immediately reflects the updated status catalog and "
+                "workflow summaries in the `projectConfig` block."
+            ),
+            "",
+            "h4. Actual Result",
+            actual,
+            "",
+            "h4. Logs / Error Output",
+            "{code}",
+            str(result.get("traceback", result.get("error", ""))),
+            "{code}",
+            "",
+            "h4. Notes",
+            f"* Screenshot: {{{{{screenshot_path}}}}}",
+            *notes,
+            "* CLI observation:",
+            "{code:json}",
+            cli_text,
+            "{code}",
+        ]
+        )
+        + "\n"
+    )
+
+
+def _step_lines(result: dict[str, object], *, jira: bool) -> list[str]:
+    steps = result.get("steps", [])
+    if not isinstance(steps, list) or not steps:
+        return ["* No automation steps were recorded." if jira else "- No automation steps were recorded."]
+    prefix = "*" if jira else "-"
+    rendered: list[str] = []
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        rendered.append(
+            f"{prefix} Step {step.get('step')}: {step.get('status', 'unknown').upper()} - "
+            f"{step.get('action', '')}"
+        )
+        rendered.append(
+            f"{prefix} Observed: {_compact_text(str(step.get('observed', '')))}"
+        )
+    return rendered
+
+
+def _human_lines(result: dict[str, object], *, jira: bool) -> list[str]:
+    entries = result.get("human_verification", [])
+    if not isinstance(entries, list) or not entries:
+        return ["* No additional human-style observations were recorded." if jira else "- No additional human-style observations were recorded."]
+    prefix = "*" if jira else "-"
+    rendered: list[str] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        rendered.append(f"{prefix} {entry.get('check', '')}")
+        rendered.append(
+            f"{prefix} Observed: {_compact_text(str(entry.get('observed', '')))}"
+        )
+    return rendered
+
+
+def _ticket_step_lines(result: dict[str, object]) -> list[str]:
+    recorded_steps = result.get("steps", [])
+    step_lookup = {
+        int(step.get("step")): step
+        for step in recorded_steps
+        if isinstance(step, dict) and isinstance(step.get("step"), int)
+    }
+    lines: list[str] = []
+    for index, action in enumerate(REQUEST_STEPS, start=1):
+        step = step_lookup.get(index)
+        if step is None:
+            lines.append(f"# {action} - not reached.")
+            continue
+        status = str(step.get("status", "unknown")).upper()
+        icon = "✅" if status == "PASSED" else "❌"
+        lines.append(f"# {action} - {icon} {status}")
+        lines.append(f"Observed: {_compact_text(str(step.get('observed', '')), limit=900)}")
+    return lines
+
+
+def _actual_result_text(result: dict[str, object]) -> str:
+    error = str(result.get("error", ""))
+    if error.startswith("Step 4 failed:"):
+        failure_state = result.get("failure_repository_state")
+        cli_tail = ""
+        if result.get("step_5_error"):
+            cli_tail = (
+                " The follow-up `trackstate session` call also returned a "
+                "projectConfig payload without the saved status/workflow markers."
+            )
+        if isinstance(failure_state, dict):
+            head_sha = failure_state.get("head_sha", "")
+            statuses_present = failure_state.get("statuses_contains_expected_status")
+            workflows_present = failure_state.get(
+                "workflows_contains_expected_transition"
+            )
+            baseline_head_sha = str(result.get("baseline_head_sha", "")).strip()
+            head_summary = (
+                f"advanced to `{head_sha}` from `{baseline_head_sha}`"
+                if head_sha and baseline_head_sha and head_sha != baseline_head_sha
+                else f"remained `{head_sha}`"
+            )
+            return (
+                "After clicking Save in the hosted Settings UI, the application returned "
+                "to the Project settings administration screen, but the repository head "
+                f"{head_summary} and the saved catalog markers were still missing "
+                f"from `{STATUSES_PATH}` and `{WORKFLOWS_PATH}` "
+                f"(status persisted: {statuses_present}, workflow persisted: "
+                f"{workflows_present}).{cli_tail}"
+            )
+        return (
+            "After the hosted Settings save, the repository never exposed both saved "
+            "catalog markers together in an atomic persisted state within the polling "
+            f"window.{cli_tail}"
+        )
+    if error.startswith("Step 5 failed:"):
+        return (
+            "The hosted save reached Git, but the installed `trackstate session` CLI did "
+            "not expose the updated status/workflow markers inside the returned "
+            "`projectConfig` block within the polling window."
+        )
+    return error or "The scenario failed before the expected user-visible result was observed."
+
+
+def _human_ui_observation_text(observation: ProjectSettingsUiObservation) -> str:
+    return (
+        f"settings_text={observation.settings_text!r}; "
+        f"status_dialog_text={observation.status_dialog_text!r}; "
+        f"workflow_dialog_text={observation.workflow_dialog_text!r}; "
+        f"post_save_text={observation.post_save_text!r}"
+    )
+
+
+def _human_commit_observation_text(observation: dict[str, object]) -> str:
+    statuses = observation.get("statuses_file", {}) if isinstance(observation, dict) else {}
+    workflows = observation.get("workflows_file", {}) if isinstance(observation, dict) else {}
+    return (
+        f"statuses_url={statuses.get('url', '')!r}; "
+        f"statuses_match={statuses.get('matched_text', '')!r}; "
+        f"statuses_screenshot={statuses.get('screenshot_path', '')!r}; "
+        f"workflows_url={workflows.get('url', '')!r}; "
+        f"workflows_match={workflows.get('matched_text', '')!r}; "
+        f"workflows_screenshot={workflows.get('screenshot_path', '')!r}"
+    )
+
+
+def _human_cli_observation_text(result: CliCommandResult) -> str:
+    payload = (
+        json.dumps(result.json_payload, sort_keys=True)
+        if result.json_payload is not None
+        else result.stdout
+    )
+    return (
+        f"command={result.command_text!r}; exit_code={result.exit_code}; "
+        f"project_config_payload={payload}"
+    )
+
+
+def _is_product_failure(result: dict[str, object]) -> bool:
+    error = str(result.get("error", ""))
+    if error.startswith("Precondition failed:"):
+        return False
+    if "requires GH_TOKEN" in error or "available on PATH" in error:
+        return False
+    return error.startswith("Step ")
+
+
+def _result_detail_lines(
+    result: dict[str, object],
+    *,
+    jira: bool,
+    passed: bool,
+) -> list[str]:
+    prefix = "*" if jira else "-"
+    screenshot_path = _resolve_artifact_screenshot_path(result, passed=passed)
+    lines = [
+        (
+            f"{prefix} Environment: URL "
+            f"{'{{' + result['app_url'] + '}}' if jira else '`' + str(result['app_url']) + '`'}, "
+            f"repository "
+            f"{'{{' + result['repository'] + '}}' if jira else '`' + str(result['repository']) + '`'} "
+            f"@ {'{{' + result['repository_ref'] + '}}' if jira else '`' + str(result['repository_ref']) + '`'}, "
+            f"browser {'{{Chromium (Playwright)}}' if jira else '`Chromium (Playwright)`'}, "
+            f"viewport {'{{1440x900}}' if jira else '`1440x900`'}, "
+            f"OS {'{{' + platform.system() + '}}' if jira else '`' + platform.system() + '`'}."
+        ),
+        (
+            f"{prefix} Screenshot: "
+            f"{'{{' + str(screenshot_path) + '}}' if jira else '`' + str(screenshot_path) + '`'}"
+        ),
+    ]
+    failure_state = result.get("failure_repository_state")
+    if not passed and isinstance(failure_state, dict):
+        head_sha = str(failure_state.get("head_sha", "")).strip()
+        statuses_present = failure_state.get("statuses_contains_expected_status")
+        workflows_present = failure_state.get("workflows_contains_expected_transition")
+        lines.extend(
+            [
+                f"{prefix} Repository head after Save: "
+                f"{'{{' + head_sha + '}}' if jira else '`' + head_sha + '`'}",
+                (
+                    f"{prefix} Repository files after Save still missing the expected "
+                    f"markers: status persisted = {statuses_present}, workflow "
+                    f"persisted = {workflows_present}."
+                ),
+            ]
+        )
+    if not passed and result.get("cli_observation") is not None:
+        lines.append(
+            f"{prefix} CLI parity check after Save returned the expected projectConfig markers: "
+            f"{result.get('step_5_error') is None}."
+        )
+    return lines
+
+
+def _failure_repository_notes(failure_state: object) -> list[str]:
+    if not isinstance(failure_state, dict):
+        return ["* Live repository state could not be captured after the failed Save."]
+    return [
+        f"* Repository head after Save: {{{{{failure_state.get('head_sha', '')}}}}}",
+        (
+            "* statuses.json contained expected new status: "
+            f"{failure_state.get('statuses_contains_expected_status')}"
+        ),
+        (
+            "* workflows.json contained expected renamed transition: "
+            f"{failure_state.get('workflows_contains_expected_transition')}"
+        ),
+        "{code:json}",
+        str(failure_state.get("statuses_content", "")),
+        "{code}",
+        "{code:json}",
+        str(failure_state.get("workflows_content", "")),
+        "{code}",
+    ]
+
+
+def _resolve_artifact_screenshot_path(
+    result: dict[str, object], *, passed: bool
+) -> object:
+    if passed:
+        return result.get("settings_screenshot", SUCCESS_SCREENSHOT_PATH)
+    screenshot_path = result.get("screenshot")
+    if screenshot_path:
+        return screenshot_path
+    return result.get("settings_screenshot", FAILURE_SCREENSHOT_PATH)
+
+
+def _compact_text(value: str, *, limit: int = 500) -> str:
+    normalized = " ".join(value.split())
+    if len(normalized) <= limit:
+        return normalized
+    return normalized[: limit - 3] + "..."
+
+
+def _jira_markup(value: str) -> str:
+    return re.sub(r"`([^`]+)`", r"{{\1}}", value)
 
 
 if __name__ == "__main__":

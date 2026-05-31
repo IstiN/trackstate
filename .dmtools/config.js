@@ -10,6 +10,9 @@ const SETUP_REPO_INSTRUCTIONS = './.dmtools/instructions/product/trackstate_setu
 const TRACKSTATE_TEST_AUTOMATION_RULES = './.dmtools/instructions/agents/test_automation_hardening.md';
 const TRACKSTATE_TEST_REVIEW_CHECKLIST = './.dmtools/instructions/agents/test_automation_review_checklist.md';
 const TRACKSTATE_FLUTTER_RULES = './.dmtools/instructions/agents/flutter_development_rules.md';
+const TRACKSTATE_WEB_FOCUS_RULES = './.dmtools/instructions/agents/flutter_web_focus_keyboard_rules.md';
+const BUG_DEV_ANTIPATTERNS = './.dmtools/prompts/bug_dev_antipatterns.md';
+const TEST_AUTOMATION_ANTIPATTERNS = './.dmtools/prompts/test_automation_antipatterns.md';
 const TRACKSTATE_SETUP_SUBMODULES = [
     { path: 'trackstate-setup', branch: 'main', tagPrefix: 'stable' }
 ];
@@ -28,20 +31,31 @@ const FLUTTER_FEEDBACK = {
         enabled: true,
         gates: [
             { name: 'flutter-analyze', command: 'flutter analyze', maxAttempts: 2 },
-            { name: 'flutter-test', command: 'flutter test --coverage', maxAttempts: 2 }
+            { name: 'flutter-test', command: 'flutter test --coverage', maxAttempts: 2 },
+            { name: 'accessibility-build', command: 'bash tool/run_if_accessibility_needed.sh \"flutter build web --release --base-href / --pwa-strategy=none --dart-define TRACKSTATE_USE_DEMO_REPOSITORY=true --dart-define TRACKSTATE_REPOSITORY=IstiN/trackstate-setup --dart-define TRACKSTATE_SOURCE_REF=main --dart-define TRACKSTATE_DATA_REF=main\"', maxAttempts: 1 },
+            { name: 'accessibility-axe', command: 'bash tool/run_if_accessibility_needed.sh \"npm run test:a11y\"', maxAttempts: 1 },
+            { name: 'accessibility-log-validation', command: 'bash tool/run_if_accessibility_needed.sh \"node testing/accessibility/log_validation.node.test.js\"', maxAttempts: 1 }
         ]
     },
     policyGates: {
         enabled: true,
         gates: [
-            { name: 'theme-token-lint', command: 'dart run tool/check_theme_tokens.dart', maxAttempts: 2 }
+            { name: 'theme-token-lint', command: 'dart run tool/check_theme_tokens.dart', maxAttempts: 2 },
+            { name: 'web-safety-lint', command: 'dart run tool/check_web_safety.dart', maxAttempts: 2 }
         ]
     }
 };
 
 module.exports = {
-    // SM parallelism: number of workflows SM dispatches per run (overrides sm.json default)
-    smMaxWorkflows: 5,
+    globalCliPrompts: [
+        './agents/prompts/codegraph_tools.md'
+    ],
+
+    globalAdditionalInstructions: [
+        './agents/prompts/codegraph_tools.md'
+    ],
+    // SM parallelism: keep capacity for normal automation plus Failed TC bug triage.
+    smMaxWorkflows: 3,
 
     repository: {
         owner: 'IstiN',
@@ -79,7 +93,8 @@ module.exports = {
             DESIGN_REFERENCE,
             SETUP_REPO_INSTRUCTIONS,
             './.dmtools/instructions/architecture/trackstate_scope.md',
-            './.dmtools/prompts/development_focus.md'
+            './.dmtools/prompts/development_focus.md',
+            BUG_DEV_ANTIPATTERNS
         ],
         bug_rca: [
             GOAL_INSTRUCTIONS,
@@ -93,17 +108,26 @@ module.exports = {
         pr_rework: [
             GOAL_INSTRUCTIONS,
             './.dmtools/instructions/architecture/trackstate_scope.md',
-            './.dmtools/prompts/rework_focus.md'
+            './.dmtools/prompts/rework_focus.md',
+            BUG_DEV_ANTIPATTERNS
         ],
         pr_test_automation_review: [
             GOAL_INSTRUCTIONS,
             './.dmtools/instructions/architecture/trackstate_scope.md',
-            './.dmtools/prompts/test_review_focus.md'
+            './.dmtools/prompts/test_review_focus.md',
+            TEST_AUTOMATION_ANTIPATTERNS
         ],
         pr_test_automation_rework: [
             GOAL_INSTRUCTIONS,
             './.dmtools/instructions/architecture/trackstate_scope.md',
-            './.dmtools/prompts/test_rework_focus.md'
+            './.dmtools/prompts/test_rework_focus.md',
+            TEST_AUTOMATION_ANTIPATTERNS
+        ],
+        test_case_automation: [
+            GOAL_INSTRUCTIONS,
+            SETUP_REPO_INSTRUCTIONS,
+            './.dmtools/instructions/architecture/trackstate_scope.md',
+            TEST_AUTOMATION_ANTIPATTERNS
         ]
     },
 
@@ -153,19 +177,23 @@ module.exports = {
             './.dmtools/instructions/product/trackstate_domain_knowledge.md'
         ],
         story_development: [
-            TRACKSTATE_FLUTTER_RULES
+            TRACKSTATE_FLUTTER_RULES,
+            TRACKSTATE_WEB_FOCUS_RULES
         ],
         bug_development: [
-            TRACKSTATE_FLUTTER_RULES
+            TRACKSTATE_FLUTTER_RULES,
+            TRACKSTATE_WEB_FOCUS_RULES
         ],
         test_case_automation: [
             TRACKSTATE_TEST_AUTOMATION_RULES
         ],
         pr_review: [
-            TRACKSTATE_FLUTTER_RULES
+            TRACKSTATE_FLUTTER_RULES,
+            TRACKSTATE_WEB_FOCUS_RULES
         ],
         pr_rework: [
-            TRACKSTATE_FLUTTER_RULES
+            TRACKSTATE_FLUTTER_RULES,
+            TRACKSTATE_WEB_FOCUS_RULES
         ],
         pr_test_automation_review: [
             TRACKSTATE_TEST_AUTOMATION_RULES,
@@ -177,6 +205,9 @@ module.exports = {
         bug_creation: [
             GOAL_INSTRUCTIONS,
             './.dmtools/instructions/product/trackstate_domain_knowledge.md'
+        ],
+        df_manager: [
+            './.dmtools/instructions/agents/df_manager_watchlist.md'
         ]
     },
 

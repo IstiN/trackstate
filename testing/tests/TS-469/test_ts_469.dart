@@ -7,6 +7,7 @@ import '../../fixtures/settings/local_git_settings_screen_context.dart';
 import 'support/ts469_locales_fixture.dart';
 
 void main() {
+  const defaultDesktopViewport = Size(1440, 900);
   setUp(() {
     SharedPreferences.setMockInitialValues({});
   });
@@ -33,6 +34,7 @@ void main() {
         }
 
         await robot.pumpLocalGitApp(repositoryPath: fixture.repositoryPath);
+        await robot.resize(defaultDesktopViewport);
         await robot.openSettings();
         await robot.openLocalesTab();
         await robot.selectLocaleChip(locale);
@@ -202,6 +204,7 @@ void main() {
         final placeholderColor = robot.localeTranslationFieldPlaceholderColor(
           locale: locale,
           id: 'description',
+          section: 'field',
         );
         final placeholderContrast = contrastRatio(
           placeholderColor,

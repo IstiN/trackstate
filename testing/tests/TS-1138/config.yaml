@@ -1,0 +1,13 @@
+test_id: TS-1138
+type: cli
+framework: python
+platform: python
+dependencies:
+  - Flutter SDK available on PATH
+  - python3 available on PATH
+  - git CLI available on PATH
+notes:
+  - Reuses the shared issue-link-types CLI validator, config, and probe.
+  - Compiles a temporary repository-local `trackstate` executable wrapper from this checkout.
+  - Executes both `trackstate read issue-link-types` and `trackstate read link-types` from the same seeded Local Git repository.
+  - Verifies the JSON payloads are identical and still expose the four canonical Jira-style link types in visible CLI output.
