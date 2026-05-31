@@ -416,6 +416,7 @@ def main() -> None:
                 mobile_after_path = OUTPUTS_DIR / "ts726_mobile_focus_after.png"
                 mobile_before_path.unlink(missing_ok=True)
                 mobile_after_path.unlink(missing_ok=True)
+                page.clear_focus()
                 page.screenshot(str(mobile_before_path))
                 mobile_focus = page.observe_mobile_trigger_focus(
                     tab_count=MOBILE_TAB_COUNT,
