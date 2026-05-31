@@ -1662,19 +1662,41 @@ class LiveMultiViewRefreshPage:
         self._session.wait_for_selector(self._dialog_group_selector, timeout_ms=30_000)
         self._session.wait_for_function(
             """
-            ({ dialogSelector }) => {
+            ({ dialogSelector, issueKey }) => {
               const root = document.querySelector(dialogSelector);
               if (!root) {
                 return false;
               }
-              return (
+              const collectText = (element) =>
+                (element?.innerText || element?.textContent || '').trim();
+              const bodyText = document.body?.innerText ?? '';
+              const dialogText = collectText(root);
+              const hasLegacyFields =
                 root.querySelector('input[aria-label="Summary"]') !== null
-                && root.querySelector('textarea[aria-label="Description"]') !== null
-                && (document.body?.innerText ?? '').includes('Edit issue')
-              );
+                || root.querySelector('textarea[aria-label="Description"]') !== null;
+              const hasEditControls =
+                Array.from(root.querySelectorAll('flt-semantics[role="button"]'))
+                  .some((button) => {
+                    const label = button.getAttribute('aria-label') ?? '';
+                    const text = collectText(button);
+                    return (
+                      label.includes('Status')
+                      || label.includes('Priority')
+                      || text.startsWith('Priority')
+                      || text === 'Save'
+                      || text === 'Cancel'
+                    );
+                  });
+              const hasCurrentEditSurface =
+                dialogText.includes('Edit issue')
+                && dialogText.includes(issueKey)
+                && hasEditControls
+                && dialogText.includes('Save')
+                && dialogText.includes('Cancel');
+              return bodyText.includes('Edit issue') && (hasLegacyFields || hasCurrentEditSurface);
             }
             """,
-            arg={"dialogSelector": self._dialog_group_selector},
+            arg={"dialogSelector": self._dialog_group_selector, "issueKey": issue_key},
             timeout_ms=30_000,
         )
         dialog_text = self.current_body_text()
