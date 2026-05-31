@@ -34,6 +34,36 @@ Rules:
 - If Copilot rate-limits before CodeGraph is invoked, stop without edits; do
   not let the run appear completed without CodeGraph usage.
 
+## Interrupted / precondition-not-met runs
+
+Do not convert infrastructure interruptions into blind retry loops. If the CLI
+crashes, rate-limits, or exits without result JSON, report the run as
+interrupted and preserve enough evidence for recovery instead of treating the
+test as product-failed.
+
+```mermaid
+flowchart TD
+  A[Test automation run finished] --> B{Result JSON exists?}
+  B -- No --> C[Classify as interrupted: CLI/rate limit/crash]
+  C --> D[Comment with run URL and last known error]
+  D --> E[Do not create a product Bug]
+  B -- Yes --> F{Result says PRECONDITION NOT MET?}
+  F -- Yes --> G[Classify as precondition gap or environment issue]
+  G --> H[Do not create product Bug; avoid immediate blind retry]
+  F -- No --> I[Use normal pass/fail triage]
+```
+
+Rules:
+
+- `CLI exited without producing result JSON` is an interrupted run, not proof
+  that the Test Case is invalid and not proof of a product bug.
+- Repeated interrupted runs on the same Test Case should be surfaced as an
+  automation/recovery gap with the latest CI run URL, not hidden by repeated
+  Backlog retries.
+- A `PRECONDITION NOT MET` result should not enter the Done-bug suppression
+  path. Treat it as an environment/precondition issue unless a later complete
+  run reports a current product failure.
+
 ## Architecture — required layer order
 
 ```mermaid
