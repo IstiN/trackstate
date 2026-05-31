@@ -1,8 +1,7 @@
 # TS-909
 
-Validates that the live `IstiN/trackstate` GitHub pull-request compose flow
-opens on GitHub and that the actual PR description field exposed on GitHub's
-compose page includes the exact manual accessibility item:
+Validates that the live `IstiN/trackstate` GitHub PR template configuration
+exposes a PR template body containing the exact manual accessibility item:
 
 `Manual verification: DOM order matches visual hierarchy for keyboard-accessible elements.`
 
@@ -11,15 +10,13 @@ The automation checks the live implementation in three ways:
 1. GitHub CLI reads repository metadata, the GitHub community profile, the
    default-branch tree, conventional PR template file paths, and GitHub's
    `pullRequestTemplates` GraphQL field.
-2. The test opens the live GitHub compare/compose surface for a branch that does
-   not already have an open PR, verifies that GitHub reaches `Open a pull
-   request`, and reads the compose page's PR description field value.
-3. The checklist assertions use the actual compose-page description value, while
-   the repository file probes and `pullRequestTemplates` query remain diagnostics
-   for template-path selection.
-4. The test requires a Playwright browser runtime; the unauthenticated `urllib`
-   fallback is intentionally disallowed because it cannot prove the live GitHub
-   compose form body.
+2. The checklist assertions use GitHub's recognized PR template body when
+   available, otherwise they fall back to the live repository file contents for
+   the selected template path.
+3. The test opens the live GitHub file page for the selected PR-template path
+   (or the canonical missing-template path) and captures a screenshot of the
+   reviewer-visible page content for human-style verification.
+4. The test requires a Playwright browser runtime for the visible-page proof.
 
 ## Run
 

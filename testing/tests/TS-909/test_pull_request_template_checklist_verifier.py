@@ -10,6 +10,9 @@ from unittest.mock import patch
 from testing.components.pages.github_pull_request_compose_page import (
     GitHubPullRequestComposePage,
 )
+from testing.components.pages.github_repository_blob_page import (
+    GitHubRepositoryBlobPage,
+)
 from testing.components.services.pull_request_template_checklist_verifier import (
     PullRequestTemplateChecklistVerifier,
 )
@@ -164,6 +167,41 @@ class _FakeComposeSession:
         if selector not in self._read_values:
             raise WebAppTimeoutError(f'missing selector "{selector}"')
         return self._read_values[selector]
+
+    def body_text(self) -> str:
+        return self._body_text
+
+    def screenshot(self, path: str, *, full_page: bool = True) -> None:
+        del path, full_page
+
+
+class _FakeBlobSession:
+    def __init__(
+        self,
+        *,
+        body_text: str = "trackstate",
+        matched_text: str = "trackstate",
+    ) -> None:
+        self._body_text = body_text
+        self._matched_text = matched_text
+
+    def goto(
+        self,
+        url: str,
+        *,
+        wait_until: str = "domcontentloaded",
+        timeout_ms: int = 120_000,
+    ) -> None:
+        del url, wait_until, timeout_ms
+
+    def wait_for_any_text(
+        self,
+        texts,
+        *,
+        timeout_ms: int = 90_000,
+    ) -> WaitMatch:
+        del texts, timeout_ms
+        return WaitMatch(matched_text=self._matched_text, body_text=self._body_text)
 
     def body_text(self) -> str:
         return self._body_text
@@ -337,6 +375,28 @@ class PullRequestTemplateChecklistVerifierTest(unittest.TestCase):
             with context:
                 self.fail("context manager should not yield without a browser runtime")
 
+    def test_blob_page_reads_visible_body_text(self) -> None:
+        page = GitHubRepositoryBlobPage(
+            _FakeBlobSession(
+                body_text=(
+                    "Accessibility checklist\n"
+                    "Manual verification: DOM order matches visual hierarchy for "
+                    "keyboard-accessible elements."
+                ),
+                matched_text="Accessibility checklist",
+            )
+        )
+
+        observation = page.open_blob_page(
+            repository="octocat/example",
+            ref="main",
+            path=".github/PULL_REQUEST_TEMPLATE.md",
+            expected_texts=("Accessibility checklist",),
+        )
+
+        self.assertIn(".github/PULL_REQUEST_TEMPLATE.md", observation.url)
+        self.assertEqual(observation.matched_text, "Accessibility checklist")
+
 
 class Ts909ReviewRegressionTest(unittest.TestCase):
     @classmethod
@@ -485,6 +545,58 @@ class Ts909ReviewRegressionTest(unittest.TestCase):
         )
 
         self.assertEqual(len(result["steps"]), 1)
+
+    def test_repository_template_check_marks_missing_template_as_product_failure(self) -> None:
+        result = self._result()
+        verification = SimpleNamespace(
+            target_repository="octocat/example",
+            default_branch="main",
+            configured_pull_request_template_path=None,
+            configured_pull_request_template_url=None,
+            discovered_template_paths=(),
+            selected_recognized_template=None,
+            selected_candidate=None,
+        )
+
+        self.module._evaluate_repository_template(  # type: ignore[attr-defined]
+            result=result,
+            verification=verification,
+            config=self.config,
+        )
+
+        self.assertEqual(result["failure_kind"], "product")
+        self.assertEqual(result["steps"][0]["status"], "failed")
+        self.assertIn(
+            "does not expose any pull-request template body",
+            result["steps"][0]["observed"],
+        )
+
+    def test_repository_template_check_passes_when_item_is_present(self) -> None:
+        result = self._result()
+        verification = SimpleNamespace(
+            target_repository="octocat/example",
+            default_branch="main",
+            selected_recognized_template=SimpleNamespace(
+                filename=".github/PULL_REQUEST_TEMPLATE.md",
+                body=(
+                    "## Accessibility checklist\n"
+                    "- Manual verification: DOM order matches visual hierarchy for "
+                    "keyboard-accessible elements."
+                ),
+            ),
+            selected_candidate=None,
+        )
+
+        self.module._evaluate_repository_template(  # type: ignore[attr-defined]
+            result=result,
+            verification=verification,
+            config=self.config,
+        )
+
+        self.assertEqual(
+            [step["status"] for step in result["steps"]],
+            ["passed", "passed", "passed"],
+        )
 
 
 if __name__ == "__main__":
