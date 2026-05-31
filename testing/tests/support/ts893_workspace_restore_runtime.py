@@ -104,7 +104,10 @@ class Ts893WorkspaceRestoreRuntime(StoredWorkspaceProfilesRuntime):
   const activityPrefix = {json.dumps(self.RUNTIME_ACTIVITY_PREFIX)};
   const busyStatePrefix = {json.dumps(self.BUSY_STATE_PREFIX)};
   const trackedHandleLineage = new WeakMap();
+  const wrappedMethodsKey = Symbol('trackstateTs893WrappedMethods');
   const blockableMethods = new Set([
+    'queryPermission',
+    'requestPermission',
     'entries',
     'keys',
     'values',
@@ -188,12 +191,60 @@ class Ts893WorkspaceRestoreRuntime(StoredWorkspaceProfilesRuntime):
     return [...lineage, normalizedChildName];
   }};
 
+  const isNativeFileSystemHandle = (handle) => {{
+    return (
+      typeof globalThis.FileSystemHandle === 'function' &&
+      handle instanceof globalThis.FileSystemHandle
+    );
+  }};
+
+  const decoratePlainHandleMethods = (handle) => {{
+    if (
+      !handle ||
+      typeof handle !== 'object' ||
+      isNativeFileSystemHandle(handle)
+    ) {{
+      return handle;
+    }}
+    wrapHandleMethod(handle, 'queryPermission');
+    wrapHandleMethod(handle, 'requestPermission');
+    wrapHandleMethod(
+      handle,
+      'entries',
+      (result, details) => wrapAsyncIterable(result, details),
+    );
+    wrapHandleMethod(
+      handle,
+      'keys',
+      (result, details) => wrapAsyncIterable(result, details),
+    );
+    wrapHandleMethod(
+      handle,
+      'values',
+      (result, details) => wrapAsyncIterable(result, details),
+    );
+    wrapHandleMethod(
+      handle,
+      'getDirectoryHandle',
+      (result, details, args) => trackReturnedValue(result, details.handleLineage, args),
+    );
+    wrapHandleMethod(
+      handle,
+      'getFileHandle',
+      (result, details, args) => trackReturnedValue(result, details.handleLineage, args),
+    );
+    wrapHandleMethod(handle, 'resolve');
+    wrapHandleMethod(handle, 'getFile');
+    wrapHandleMethod(handle, 'createWritable');
+    return handle;
+  }};
+
   const trackHandle = (handle, lineage) => {{
     if (!handle || typeof handle !== 'object' || !Array.isArray(lineage) || lineage.length === 0) {{
       return handle;
     }}
     trackedHandleLineage.set(handle, [...lineage]);
-    return handle;
+    return decoratePlainHandleMethods(handle);
   }};
 
   const trackedLineageForHandle = (handle) => {{
@@ -324,6 +375,21 @@ class Ts893WorkspaceRestoreRuntime(StoredWorkspaceProfilesRuntime):
     if (typeof original !== 'function') {{
       return;
     }}
+    const wrappedMethods =
+      prototype?.[wrappedMethodsKey] instanceof Set
+        ? prototype[wrappedMethodsKey]
+        : new Set();
+    if (!(prototype?.[wrappedMethodsKey] instanceof Set)) {{
+      Object.defineProperty(prototype, wrappedMethodsKey, {{
+        configurable: true,
+        enumerable: false,
+        value: wrappedMethods,
+      }});
+    }}
+    if (wrappedMethods.has(methodName)) {{
+      return;
+    }}
+    wrappedMethods.add(methodName);
     prototype[methodName] = function (...args) {{
       const handleLineage = trackedLineageForHandle(this);
       const tracked = Array.isArray(handleLineage);
@@ -430,6 +496,13 @@ class Ts893WorkspaceRestoreRuntime(StoredWorkspaceProfilesRuntime):
   wrapHandleMethod(globalThis.FileSystemDirectoryHandle?.prototype, 'resolve');
   wrapHandleMethod(globalThis.FileSystemFileHandle?.prototype, 'getFile');
   wrapHandleMethod(globalThis.FileSystemFileHandle?.prototype, 'createWritable');
+
+  const fixtureHandles = globalThis.__trackstateStoredWorkspaceRuntimeFixtureHandles;
+  if (fixtureHandles instanceof Map) {{
+    for (const fixtureHandle of fixtureHandles.values()) {{
+      decoratePlainHandleMethods(fixtureHandle);
+    }}
+  }}
 
   console.debug(`${{busyStatePrefix}} ${{JSON.stringify({{
     event: 'initialized',

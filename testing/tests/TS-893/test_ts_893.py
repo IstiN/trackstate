@@ -1105,8 +1105,8 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
         "## Rework Summary",
         "",
         "### Fixed Issues",
-        "- Added a strict non-pass gate: TS-893 now requires pre-release evidence that startup actually overlapped the blocked saved-handle revalidation path before a successful final `Local Git` restore can pass.",
-        "- Kept blocked-window probes diagnostic-only for product bug filing: a no-overlap run is now treated as inconclusive setup evidence instead of a product failure when the visible `Local Git` restore contract still passes.",
+        "- Patched the TS-893 runtime so restored local-workspace fixture handles are instrumented the same way as native File System Access handles, and the transient busy gate can now observe/block the saved-handle revalidation calls that happen during startup.",
+        "- Kept blocked-window probes diagnostic-only for product bug filing: a no-overlap run remains inconclusive setup evidence instead of a product failure when the visible `Local Git` restore contract still passes.",
         "",
         "### Test Status",
         f"- Re-ran `{RUN_COMMAND}`",
@@ -1349,17 +1349,19 @@ def _discussion_threads() -> list[dict[str, object]]:
 def _review_reply_text(*, passed: bool, result: dict[str, object]) -> str:
     if passed:
         return (
-            "Updated TS-893 to require a pre-release blocked-handle overlap signal "
-            "before a successful final `Local Git` restore can pass, while treating "
-            "missing overlap evidence as inconclusive setup-only evidence instead of "
-            "a product failure/bug when the visible restore contract succeeds. "
+            "Fixed TS-893 by instrumenting the restored local-workspace fixture "
+            "handles themselves, so the transient busy gate now observes the saved "
+            "handle revalidation path instead of missing it when startup restores "
+            "from IndexedDB-backed test fixtures. Missing overlap evidence remains "
+            "non-product setup-only evidence when the visible restore contract succeeds. "
             f"Re-ran `{RUN_COMMAND}`: passed (`1 passed, 0 failed`)."
         )
     return (
-        "Updated TS-893 to require a pre-release blocked-handle overlap signal "
-        "before a successful final `Local Git` restore can pass, while treating "
-        "no-overlap runs as inconclusive setup-only evidence instead of a product "
-        "failure/bug when the visible restore contract still succeeds. Re-ran "
+        "Fixed TS-893 by instrumenting the restored local-workspace fixture "
+        "handles themselves, so the transient busy gate now observes the saved "
+        "handle revalidation path instead of missing it when startup restores "
+        "from IndexedDB-backed test fixtures. No-overlap runs still stay out of "
+        "the product-bug path when the visible restore contract succeeds. Re-ran "
         f"`{RUN_COMMAND}`: still failing. Current failure: {_exact_error_summary(result)}"
     )
 
