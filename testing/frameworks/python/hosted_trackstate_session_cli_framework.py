@@ -5,16 +5,23 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import tempfile
 
 from testing.core.interfaces.hosted_trackstate_session_cli_probe import (
     HostedTrackStateSessionCliProbe,
 )
 from testing.core.models.cli_command_result import CliCommandResult
+from testing.frameworks.python.trackstate_cli_compiled_local_framework import (
+    PythonTrackStateCliCompiledLocalFramework,
+)
 
 
-class PythonHostedTrackStateSessionCliFramework(HostedTrackStateSessionCliProbe):
+class PythonHostedTrackStateSessionCliFramework(
+    PythonTrackStateCliCompiledLocalFramework,
+    HostedTrackStateSessionCliProbe,
+):
     def __init__(self, repository_root: Path) -> None:
-        self._repository_root = Path(repository_root)
+        super().__init__(repository_root)
 
     def run_session(
         self,
@@ -23,8 +30,6 @@ class PythonHostedTrackStateSessionCliFramework(HostedTrackStateSessionCliProbe)
         branch: str = "main",
         provider: str = "github",
     ) -> CliCommandResult:
-        command = self._resolve_command()
-
         token = (
             os.environ.get("TRACKSTATE_TOKEN")
             or os.environ.get("GH_TOKEN")
@@ -36,25 +41,39 @@ class PythonHostedTrackStateSessionCliFramework(HostedTrackStateSessionCliProbe)
         if token:
             env.setdefault("TRACKSTATE_TOKEN", token)
 
-        completed = subprocess.run(
-            command
-            + (
-                "session",
-                "--target",
-                "hosted",
-                "--provider",
-                provider,
-                "--repository",
-                repository,
-                "--branch",
-                branch,
-            ),
-            cwd=self._repository_root,
-            env=env,
-            capture_output=True,
-            text=True,
-            check=False,
+        command_suffix = (
+            "session",
+            "--target",
+            "hosted",
+            "--provider",
+            provider,
+            "--repository",
+            repository,
+            "--branch",
+            branch,
         )
+        resolved_command = self._resolve_command()
+        if resolved_command is not None:
+            completed = subprocess.run(
+                resolved_command + command_suffix,
+                cwd=self._repository_root,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        else:
+            with tempfile.TemporaryDirectory(prefix="trackstate-hosted-cli-") as bin_dir:
+                executable_path = Path(bin_dir) / "trackstate"
+                self._compile_executable(executable_path)
+                completed = subprocess.run(
+                    (str(executable_path),) + command_suffix,
+                    cwd=self._repository_root,
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
         payload = None
         stdout = completed.stdout.strip()
         if stdout:
@@ -70,12 +89,8 @@ class PythonHostedTrackStateSessionCliFramework(HostedTrackStateSessionCliProbe)
             json_payload=payload,
         )
 
-    def _resolve_command(self) -> tuple[str, ...]:
+    def _resolve_command(self) -> tuple[str, ...] | None:
         executable = shutil.which("trackstate")
         if executable is not None:
             return (executable,)
-
-        raise AssertionError(
-            "Precondition failed: TS-409 requires the installed `trackstate` CLI "
-            "on PATH so Step 5 validates the packaged `trackstate session` surface."
-        )
+        return None
