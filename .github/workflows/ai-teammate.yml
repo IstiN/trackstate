@@ -165,7 +165,7 @@ jobs:
       - name: Install CodeGraph usage guard
         run: |
           real_codegraph="$(command -v codegraph)"
-          guard_dir="${GITHUB_WORKSPACE}/.agent-bin"
+          guard_dir="${RUNNER_TEMP}/agent-bin"
           mkdir -p "${guard_dir}" "${GITHUB_WORKSPACE}/.dmtools"
           cat > "${guard_dir}/codegraph" <<EOF
           #!/usr/bin/env bash
