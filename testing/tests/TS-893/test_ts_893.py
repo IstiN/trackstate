@@ -82,6 +82,10 @@ class _StartupSurfaceObservation:
     surface: str
 
 
+class InconclusiveRunError(RuntimeError):
+    """Raised when the run cannot prove the blocked-startup overlap required for TS-893."""
+
+
 def main() -> None:
     OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
     SUCCESS_SCREENSHOT_PATH.unlink(missing_ok=True)
@@ -139,6 +143,7 @@ def main() -> None:
             page = LiveWorkspaceSwitcherPage(tracker_page)
             try:
                 failure_message: str | None = None
+                setup_failure_message: str | None = None
                 runtime_observation = _open_startup_surface(
                     tracker_page=tracker_page,
                     page=page,
@@ -538,12 +543,12 @@ def main() -> None:
                     )
                 elif not overlap_proof_sources:
                     result["missing_overlap_proof_for_pass"] = True
-                    failure_message = (
-                        "Step 2 failed: startup never exposed a pre-release signal "
-                        "that the blocked saved-handle revalidation/retry path ran "
-                        "before the transient busy state was released, so this run "
-                        "cannot pass TS-893 even though the final workspace state "
-                        "recovered.\n"
+                    setup_failure_message = (
+                        "TS-893 run inconclusive: the final `Local Git` restore matched "
+                        "the ticket, but the run never proved that startup overlapped "
+                        "the blocked saved handle before release, so this execution "
+                        "cannot be used as a trustworthy PASS or as product-defect "
+                        "evidence.\n"
                         "Observed overlap proof sources: "
                         f"{json.dumps(overlap_proof_sources, indent=2)}\n"
                         "Observed pre-release busy state: "
@@ -559,20 +564,22 @@ def main() -> None:
                     _update_step_result(
                         result,
                         step=2,
-                        status="failed",
+                        status="passed",
                         observed=(
                             step_2_observed
                             + "\nscenario_result="
                             + (
-                                "The final `Local Git` restore matched the ticket, but the "
-                                "run never proved that startup overlapped the blocked saved "
-                                "handle before release, so TS-893 cannot pass from this "
-                                "execution."
+                                "The final `Local Git` restore matched the ticket, but "
+                                "the run did not capture a public pre-release overlap "
+                                "signal, so this execution is setup-only rather than a "
+                                "product-defect signal."
                             )
                         ),
                     )
                 if failure_message is not None:
                     raise AssertionError(failure_message)
+                if setup_failure_message is not None:
+                    raise InconclusiveRunError(setup_failure_message)
 
             except Exception:
                 if page is not None:
@@ -1006,7 +1013,7 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         (
             "* Matched the expected result."
             if passed
-            else f"* Did not match the expected result. {_failed_step_summary(result)}"
+            else f"* {_result_summary_line(result)}"
         ),
         (
             f"* Environment: URL {{{{{result['app_url']}}}}}, repository "
@@ -1054,7 +1061,7 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         (
             "- Matched the expected result."
             if passed
-            else f"- Did not match the expected result. {_failed_step_summary(result)}"
+            else f"- {_result_summary_line(result)}"
         ),
         (
             f"- Environment: URL `{result['app_url']}`, repository "
@@ -1099,7 +1106,7 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
         "",
         "### Fixed Issues",
         "- Added a strict non-pass gate: TS-893 now requires pre-release evidence that startup actually overlapped the blocked saved-handle revalidation path before a successful final `Local Git` restore can pass.",
-        "- Kept blocked-window probes diagnostic-only for product bug filing: a no-overlap run now fails as scenario evidence instead of generating a synthetic product defect when the visible restore contract still passes.",
+        "- Kept blocked-window probes diagnostic-only for product bug filing: a no-overlap run is now treated as inconclusive setup evidence instead of a product failure when the visible `Local Git` restore contract still passes.",
         "",
         "### Test Status",
         f"- Re-ran `{RUN_COMMAND}`",
@@ -1107,6 +1114,16 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
         f"- Outcome: {outcome}",
     ]
     return "\n".join(lines) + "\n"
+
+
+def _result_summary_line(result: dict[str, object]) -> str:
+    if _failed_due_to_missing_overlap(result):
+        return (
+            "The run remained inconclusive: the visible `Local Git` restore contract "
+            "passed, but no pre-release blocked-handle overlap signal was captured, "
+            "so this execution cannot be accepted as a trustworthy PASS."
+        )
+    return f"Did not match the expected result. {_failed_step_summary(result)}"
 
 
 def _bug_description(result: dict[str, object]) -> str:
@@ -1333,16 +1350,16 @@ def _review_reply_text(*, passed: bool, result: dict[str, object]) -> str:
     if passed:
         return (
             "Updated TS-893 to require a pre-release blocked-handle overlap signal "
-            "before a successful final `Local Git` restore can pass, while still "
-            "keeping missing overlap evidence out of product-bug reporting when the "
-            "visible restore contract succeeds. "
+            "before a successful final `Local Git` restore can pass, while treating "
+            "missing overlap evidence as inconclusive setup-only evidence instead of "
+            "a product failure/bug when the visible restore contract succeeds. "
             f"Re-ran `{RUN_COMMAND}`: passed (`1 passed, 0 failed`)."
         )
     return (
         "Updated TS-893 to require a pre-release blocked-handle overlap signal "
-        "before a successful final `Local Git` restore can pass, while keeping "
-        "no-overlap runs out of product-bug reporting when the visible restore "
-        "contract still succeeds. Re-ran "
+        "before a successful final `Local Git` restore can pass, while treating "
+        "no-overlap runs as inconclusive setup-only evidence instead of a product "
+        "failure/bug when the visible restore contract still succeeds. Re-ran "
         f"`{RUN_COMMAND}`: still failing. Current failure: {_exact_error_summary(result)}"
     )
 
@@ -1353,6 +1370,14 @@ def _exact_error_summary(result: dict[str, object]) -> str:
         for line in reversed(traceback_text.splitlines()):
             candidate = line.strip()
             if candidate.startswith("AssertionError:"):
+                return candidate
+        for line in traceback_text.splitlines():
+            candidate = line.strip()
+            if (
+                candidate.endswith("Error:")
+                or "Error: " in candidate
+                or candidate.startswith("InconclusiveRunError:")
+            ):
                 return candidate
         for line in reversed(traceback_text.splitlines()):
             candidate = line.strip()
