@@ -305,7 +305,7 @@ jobs:
           esac
 
           if [ ! -s "${CODEGRAPH_USAGE_LOG}" ]; then
-            if grep -q "outputs/response.md missing — CLI agent was interrupted\\|outputs/response.md missing - CLI agent was interrupted\\|\"path\":\"interrupted\"\\|\"path\":\"already_fixed_without_codegraph\"\\|CLI command executed but did not produce output file\\|No review data found\\|No review data found in pr_review.json" "${GITHUB_WORKSPACE}/.dmtools/ai-run.log" 2>/dev/null; then
+            if grep -q "outputs/response.md missing — CLI agent was interrupted\\|outputs/response.md missing - CLI agent was interrupted\\|\"path\":\"interrupted\"\\|\"path\":\"already_fixed_without_codegraph\"\\|\"path\":\"blocked_without_codegraph\"\\|CLI command executed but did not produce output file\\|No review data found\\|No review data found in pr_review.json" "${GITHUB_WORKSPACE}/.dmtools/ai-run.log" 2>/dev/null; then
               echo "CodeGraph usage not recorded because the CLI agent did not complete acceptable source-code output generation. Post-action reset the ticket for retry."
               exit 0
             fi
