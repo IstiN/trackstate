@@ -23,7 +23,8 @@ void main() {
       workflow,
       contains(r'release_ref="v${major}.${minor}.$((patch + 1))"'),
     );
-    expect(workflow, contains(r'-f target_commitish="$release_checkout_ref"'));
+    expect(workflow, contains(r'release_target_commit="$(git rev-parse HEAD)"'));
+    expect(workflow, contains(r'-f target_commitish="$release_target_commit"'));
     expect(workflow, isNot(contains('branches: [main]')));
     expect(workflow, contains('runs-on: ubuntu-latest'));
     expect(workflow, contains('GET /repos/{owner}/{repo}/actions/runners'));
@@ -108,4 +109,22 @@ void main() {
     expect(workflow, contains('universal binary'));
     expect(workflow, contains('x86_64'));
   });
+
+  test(
+    'apple release workflow can rebuild historical tags that predate the thinning helper',
+    () {
+      final workflow = repositoryFile(
+        '.github/workflows/build-native.yml',
+      ).readAsStringSync();
+
+      expect(
+        workflow,
+        contains('if [[ -f ./tool/thin_macos_app_bundle.sh ]]; then'),
+      );
+      expect(workflow, contains('source ./tool/thin_macos_app_bundle.sh'));
+      expect(workflow, contains("read_file_mode() {"));
+      expect(workflow, contains("lipo -thin arm64"));
+      expect(workflow, contains("thin_app_bundle_to_arm64() {"));
+    },
+  );
 }

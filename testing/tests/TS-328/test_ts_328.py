@@ -205,23 +205,28 @@ def _assert_empty_query_results(
             f"Expected visible text: {expected_count_summary}\n"
             f"Observed body text:\n{observation.body_text}",
         )
+    visible_issue_labels = tuple(observation.issue_result_labels)
     for fixture in expected_issues:
-        if fixture.key not in observation.body_text:
+        if not any(fixture.key in label for label in visible_issue_labels):
             raise AssertionError(
                 "Human-style verification failed: a live issue key was missing from the "
                 "visible empty-query result list.\n"
                 f"Missing issue key: {fixture.key}\n"
+                f"Observed result labels: {list(visible_issue_labels)}\n"
                 f"Observed body text:\n{observation.body_text}",
             )
-        if fixture.summary not in observation.body_text:
+        if not any(
+            fixture.key in label and fixture.summary in label
+            for label in visible_issue_labels
+        ):
             raise AssertionError(
                 "Human-style verification failed: a live issue summary was missing from "
                 "the visible empty-query result list.\n"
                 f"Missing issue summary: {fixture.summary}\n"
                 f"Issue key: {fixture.key}\n"
+                f"Observed result labels: {list(visible_issue_labels)}\n"
                 f"Observed body text:\n{observation.body_text}",
             )
-
 
 def _observation_to_dict(observation) -> dict[str, object]:
     return {
@@ -229,6 +234,7 @@ def _observation_to_dict(observation) -> dict[str, object]:
         "visible_query": observation.visible_query,
         "count_summary": observation.count_summary,
         "issue_result_count": observation.issue_result_count,
+        "issue_result_labels": list(observation.issue_result_labels),
         "body_text": observation.body_text,
     }
 

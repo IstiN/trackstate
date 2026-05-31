@@ -254,7 +254,52 @@ jobs:
             fi
           }
 
-          source ./tool/thin_macos_app_bundle.sh
+          if [[ -f ./tool/thin_macos_app_bundle.sh ]]; then
+            source ./tool/thin_macos_app_bundle.sh
+          else
+            read_file_mode() {
+              local file_path="$1"
+              stat -f '%Lp' "$file_path"
+            }
+
+            preserve_file_mode() {
+              local source_path="$1"
+              local target_path="$2"
+              local file_mode=""
+
+              file_mode="$(read_file_mode "$source_path")"
+              chmod "$file_mode" "$target_path"
+            }
+
+            thin_macho_to_arm64() {
+              local binary_path="$1"
+              local file_output=""
+              local thinned_path="${binary_path}.arm64"
+
+              if [[ ! -f "$binary_path" ]]; then
+                return
+              fi
+
+              file_output="$(file "$binary_path")"
+              if [[ "$file_output" != *"Mach-O"* ]]; then
+                return
+              fi
+
+              if [[ "$file_output" == *"Mach-O universal binary"* ]]; then
+                lipo -thin arm64 "$binary_path" -output "$thinned_path"
+                preserve_file_mode "$binary_path" "$thinned_path"
+                mv "$thinned_path" "$binary_path"
+              fi
+            }
+
+            thin_app_bundle_to_arm64() {
+              local app_bundle_path="$1"
+
+              while IFS= read -r -d '' bundle_file; do
+                thin_macho_to_arm64 "$bundle_file"
+              done < <(find "$app_bundle_path" -type f -print0)
+            }
+          fi
 
           app_path="build/macos/Build/Products/Release/trackstate.app"
           if [[ ! -d "$app_path" ]]; then
@@ -338,6 +383,7 @@ jobs:
           trap cleanup_heartbeat EXIT
 
           release_notes="$(mktemp)"
+          release_target_commit="$(git rev-parse HEAD)"
           legacy_checksum_asset="trackstate-apple-${release_tag}-sha256.txt"
           if gh release view "$release_tag" >/dev/null 2>&1; then
             echo "Updating existing release $release_tag"
@@ -350,13 +396,13 @@ jobs:
               -H "X-GitHub-Api-Version: 2022-11-28" \
               "/repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
               -f tag_name="$release_tag" \
-              -f target_commitish="$release_checkout_ref" \
+              -f target_commitish="$release_target_commit" \
               --jq '.body' > "$release_notes"
 
             gh release create "$release_tag" \
               --title "TrackState $release_tag" \
               --notes-file "$release_notes" \
-              --target "$release_checkout_ref"
+              --target "$release_target_commit"
           fi
 
           gh release upload "$release_tag" \
@@ -367,7 +413,7 @@ jobs:
 
           gh release edit "$release_tag" \
             --title "TrackState $release_tag" \
-            --target "$release_checkout_ref" \
+            --target "$release_target_commit" \
             --draft=false \
             --prerelease=false
 

@@ -19,7 +19,20 @@ class TrackStateCliHelpValidator:
         *,
         config: TrackStateCliHelpConfig,
     ) -> TrackStateCliHelpValidationResult:
+        root_help = self._probe.root_help()
+        session_help = self._probe.session_help()
+        root_output = root_help.result.stdout
         return TrackStateCliHelpValidationResult(
-            root_help=self._probe.root_help(),
-            session_help=self._probe.session_help(),
+            root_help=root_help,
+            session_help=session_help,
+            missing_root_examples=tuple(
+                example
+                for example in config.required_root_examples
+                if example not in root_output
+            ),
+            missing_root_option_fragments=tuple(
+                fragment
+                for fragment in config.required_root_option_fragments
+                if fragment not in root_output
+            ),
         )

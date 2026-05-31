@@ -127,6 +127,60 @@ def install_restorable_directory_picker(
     )
 
 
+def seed_remembered_directory_access(
+    *,
+    tracker_page: TrackStateTrackerPage,
+    workspace_path: str,
+    directory_snapshot: dict[str, object],
+    permission_state: str = "granted",
+) -> dict[str, object]:
+    payload = tracker_page.session.evaluate(
+        """
+        ({ workspacePath, directorySnapshot, permissionState }) => {
+          const seed = globalThis.__ts980SeedRememberedDirectoryAccess;
+          const readSnapshot = globalThis.__ts980ReadPersistedDirectorySnapshot;
+          if (typeof seed !== 'function') {
+            return {
+              seeded: false,
+              error: 'Missing __ts980SeedRememberedDirectoryAccess helper.',
+            };
+          }
+          try {
+            seed(workspacePath, directorySnapshot, permissionState);
+            const normalizedPath = String(workspacePath ?? '').trim();
+            const markerPrefix =
+              `trackstate.browserLocalWorkspaceSelections.marker:${window.location.pathname}${window.location.search}:`;
+            return {
+              seeded: true,
+              workspacePath: normalizedPath,
+              permissionState: String(permissionState ?? ''),
+              markerPresent:
+                window.localStorage.getItem(`${markerPrefix}${normalizedPath}`) === '1',
+              snapshotStored:
+                typeof readSnapshot === 'function' && !!readSnapshot(normalizedPath),
+            };
+          } catch (error) {
+            return {
+              seeded: false,
+              error: String(error),
+            };
+          }
+        }
+        """,
+        arg={
+            "workspacePath": workspace_path,
+            "directorySnapshot": directory_snapshot,
+            "permissionState": permission_state,
+        },
+    )
+    if isinstance(payload, dict):
+        return payload
+    return {
+        "seeded": False,
+        "error": f"Unexpected seed payload: {payload!r}",
+    }
+
+
 def read_manual_reauth_probe(tracker_page: TrackStateTrackerPage) -> dict[str, object]:
     payload = tracker_page.session.evaluate(
         """
@@ -246,8 +300,15 @@ def _restorable_directory_handle_persistence_script() -> str:
     return """
     (() => {
       const snapshotStoragePrefix = '__ts980.persistedDirectorySnapshot:';
+      const permissionStateStoragePrefix = '__ts980.persistedDirectoryPermissionState:';
+      const markerStoragePrefix =
+        `trackstate.browserLocalWorkspaceSelections.marker:${window.location.pathname}${window.location.search}:`;
       const cloneJson = (value) => JSON.parse(JSON.stringify(value));
       const normalizeWorkspacePath = (value) => String(value ?? '').trim();
+      const normalizePermissionState = (value) => {
+        const normalized = String(value ?? '').trim().toLowerCase();
+        return normalized === 'prompt' ? 'prompt' : 'granted';
+      };
       const persistSnapshot = (workspacePath, snapshot) => {
         const normalizedPath = normalizeWorkspacePath(workspacePath);
         if (!normalizedPath || !snapshot || typeof snapshot !== 'object') {
@@ -256,6 +317,16 @@ def _restorable_directory_handle_persistence_script() -> str:
         window.localStorage.setItem(
           `${snapshotStoragePrefix}${normalizedPath}`,
           JSON.stringify(snapshot),
+          );
+      };
+      const persistPermissionState = (workspacePath, permissionState) => {
+        const normalizedPath = normalizeWorkspacePath(workspacePath);
+        if (!normalizedPath) {
+          return;
+        }
+        window.localStorage.setItem(
+          `${permissionStateStoragePrefix}${normalizedPath}`,
+          normalizePermissionState(permissionState),
         );
       };
       const readPersistedSnapshot = (workspacePath) => {
@@ -276,6 +347,17 @@ def _restorable_directory_handle_persistence_script() -> str:
           return null;
         }
       };
+      const readPersistedPermissionState = (workspacePath) => {
+        const normalizedPath = normalizeWorkspacePath(workspacePath);
+        if (!normalizedPath) {
+          return 'granted';
+        }
+        return normalizePermissionState(
+          window.localStorage.getItem(
+            `${permissionStateStoragePrefix}${normalizedPath}`,
+          ),
+        );
+      };
       const clearPersistedSnapshot = (workspacePath) => {
         const normalizedPath = normalizeWorkspacePath(workspacePath);
         if (!normalizedPath) {
@@ -283,11 +365,61 @@ def _restorable_directory_handle_persistence_script() -> str:
         }
         window.localStorage.removeItem(`${snapshotStoragePrefix}${normalizedPath}`);
       };
+      const clearPersistedPermissionState = (workspacePath) => {
+        const normalizedPath = normalizeWorkspacePath(workspacePath);
+        if (!normalizedPath) {
+          return;
+        }
+        window.localStorage.removeItem(
+          `${permissionStateStoragePrefix}${normalizedPath}`,
+        );
+      };
+      const markRememberedSelection = (workspacePath) => {
+        const normalizedPath = normalizeWorkspacePath(workspacePath);
+        if (!normalizedPath) {
+          return;
+        }
+        window.localStorage.setItem(`${markerStoragePrefix}${normalizedPath}`, '1');
+      };
+      const clearRememberedSelectionMarker = (workspacePath) => {
+        const normalizedPath = normalizeWorkspacePath(workspacePath);
+        if (!normalizedPath) {
+          return;
+        }
+        window.localStorage.removeItem(`${markerStoragePrefix}${normalizedPath}`);
+      };
       const clearAllPersistedSnapshots = () => {
         const keys = [];
         for (let index = 0; index < window.localStorage.length; index += 1) {
           const key = window.localStorage.key(index);
           if (typeof key === 'string' && key.startsWith(snapshotStoragePrefix)) {
+            keys.push(key);
+          }
+        }
+        for (const key of keys) {
+          window.localStorage.removeItem(key);
+        }
+      };
+      const clearAllPersistedPermissionStates = () => {
+        const keys = [];
+        for (let index = 0; index < window.localStorage.length; index += 1) {
+          const key = window.localStorage.key(index);
+          if (
+            typeof key === 'string'
+            && key.startsWith(permissionStateStoragePrefix)
+          ) {
+            keys.push(key);
+          }
+        }
+        for (const key of keys) {
+          window.localStorage.removeItem(key);
+        }
+      };
+      const clearAllRememberedSelectionMarkers = () => {
+        const keys = [];
+        for (let index = 0; index < window.localStorage.length; index += 1) {
+          const key = window.localStorage.key(index);
+          if (typeof key === 'string' && key.startsWith(markerStoragePrefix)) {
             keys.push(key);
           }
         }
@@ -374,7 +506,7 @@ def _restorable_directory_handle_persistence_script() -> str:
           && leftPath.every((segment, index) => segment === rightPath[index])
         );
       };
-      const attachMetadata = (handle, node, pathSegments, snapshot) => {
+      const attachMetadata = (handle, node, pathSegments, snapshot, permission) => {
         Object.defineProperty(handle, '__ts980Node', {
           configurable: true,
           enumerable: false,
@@ -389,6 +521,11 @@ def _restorable_directory_handle_persistence_script() -> str:
           configurable: true,
           enumerable: false,
           value: cloneJson(snapshot),
+        });
+        Object.defineProperty(handle, '__ts980PermissionStateRef', {
+          configurable: true,
+          enumerable: false,
+          value: permission,
         });
         return handle;
       };
@@ -434,34 +571,72 @@ def _restorable_directory_handle_persistence_script() -> str:
           },
         };
       };
-      const createHandleFactory = (snapshot) => {
+      const createHandleFactory = (
+        snapshot,
+        { workspacePath = null, permissionState = 'granted' } = {},
+      ) => {
         const { rootName, rootNode } = buildDirectoryTree(snapshot);
+        const permission = {
+          workspacePath: normalizeWorkspacePath(workspacePath),
+          state: normalizePermissionState(permissionState),
+        };
+        const recordProbe = (bucket, args) => {
+          const probe = window.__ts980ManualReauthProbe;
+          if (!probe || !Array.isArray(probe[bucket])) {
+            return;
+          }
+          probe[bucket].push({
+            callNumber: probe[bucket].length + 1,
+            args: cloneJson(args),
+          });
+        };
+        const ensureGranted = () => {
+          if (permission.state === 'granted') {
+            return;
+          }
+          throw new DOMException(
+            'The user did not grant permission to access this directory.',
+            'NotAllowedError',
+          );
+        };
+        const updatePermissionState = (nextState) => {
+          permission.state = normalizePermissionState(nextState);
+          if (permission.workspacePath) {
+            persistPermissionState(permission.workspacePath, permission.state);
+          }
+          return permission.state;
+        };
         const createFileHandle = (node, pathSegments) =>
           attachMetadata(
             {
               kind: 'file',
               name: node.name,
               async queryPermission() {
-                return 'granted';
+                recordProbe('queryPermissionCalls', []);
+                return permission.state;
               },
               async requestPermission() {
-                return 'granted';
+                recordProbe('requestPermissionCalls', []);
+                return updatePermissionState('granted');
               },
               async isSameEntry(other) {
                 return sameEntry(this, other);
               },
               async getFile() {
+                ensureGranted();
                 return new File([cloneArrayBuffer(node.bytes)], node.name, {
                   type: 'application/octet-stream',
                 });
               },
               async createWritable() {
+                ensureGranted();
                 return createWritable(node);
               },
             },
             node,
             pathSegments,
             snapshot,
+            permission,
           );
         const createHandle = (node, pathSegments) =>
           node.kind === 'directory'
@@ -473,30 +648,36 @@ def _restorable_directory_handle_persistence_script() -> str:
               kind: 'directory',
               name: node.name,
               async queryPermission() {
-                return 'granted';
+                recordProbe('queryPermissionCalls', []);
+                return permission.state;
               },
               async requestPermission() {
-                return 'granted';
+                recordProbe('requestPermissionCalls', []);
+                return updatePermissionState('granted');
               },
               async isSameEntry(other) {
                 return sameEntry(this, other);
               },
               async *values() {
+                ensureGranted();
                 for (const child of node.children.values()) {
                   yield createHandle(child, [...pathSegments, child.name]);
                 }
               },
               async *keys() {
+                ensureGranted();
                 for (const childName of node.children.keys()) {
                   yield childName;
                 }
               },
               async *entries() {
+                ensureGranted();
                 for (const [childName, child] of node.children.entries()) {
                   yield [childName, createHandle(child, [...pathSegments, childName])];
                 }
               },
               async getDirectoryHandle(name, options = {}) {
+                ensureGranted();
                 const normalized = String(name ?? '').trim();
                 if (!normalized) {
                   throw notFoundError('Directory name must not be empty.');
@@ -518,6 +699,7 @@ def _restorable_directory_handle_persistence_script() -> str:
                 return createDirectoryHandle(child, [...pathSegments, normalized]);
               },
               async getFileHandle(name, options = {}) {
+                ensureGranted();
                 const normalized = String(name ?? '').trim();
                 if (!normalized) {
                   throw notFoundError('File name must not be empty.');
@@ -539,12 +721,14 @@ def _restorable_directory_handle_persistence_script() -> str:
                 return createFileHandle(child, [...pathSegments, normalized]);
               },
               async removeEntry(name) {
+                ensureGranted();
                 const normalized = String(name ?? '').trim();
                 if (!node.children.delete(normalized)) {
                   throw notFoundError(`${normalized} does not exist.`);
                 }
               },
               async resolve(handle) {
+                ensureGranted();
                 const descendant = Array.isArray(handle?.__ts980Path)
                   ? handle.__ts980Path
                   : null;
@@ -562,17 +746,42 @@ def _restorable_directory_handle_persistence_script() -> str:
             node,
             pathSegments,
             snapshot,
+            permission,
           );
         return createDirectoryHandle(rootNode, [rootName]);
       };
-      globalThis.__ts980CreateDirectoryHandleFromSnapshot = (snapshot) => {
+      globalThis.__ts980CreateDirectoryHandleFromSnapshot = (snapshot, options = {}) => {
         if (!snapshot || typeof snapshot !== 'object') {
           return null;
         }
-        return createHandleFactory(snapshot);
+        return createHandleFactory(snapshot, {
+          workspacePath:
+            options && typeof options.workspacePath === 'string'
+              ? options.workspacePath
+              : null,
+          permissionState:
+            options && typeof options.permissionState === 'string'
+              ? options.permissionState
+              : 'granted',
+        });
       };
       globalThis.__ts980PersistDirectorySnapshot = persistSnapshot;
       globalThis.__ts980ReadPersistedDirectorySnapshot = readPersistedSnapshot;
+      globalThis.__ts980SeedRememberedDirectoryAccess = (
+        workspacePath,
+        snapshot,
+        permissionState = 'granted',
+      ) => {
+        const normalizedPath = normalizeWorkspacePath(workspacePath);
+        if (!normalizedPath || !snapshot || typeof snapshot !== 'object') {
+          throw new TypeError(
+            'workspacePath and snapshot are required to seed remembered directory access.',
+          );
+        }
+        persistSnapshot(normalizedPath, snapshot);
+        persistPermissionState(normalizedPath, permissionState);
+        markRememberedSelection(normalizedPath);
+      };
       const originalIndexedDb = window.indexedDB;
       const interceptedDatabasePrefix = 'trackstate.browserLocalWorkspaceSelections:';
       const createRequest = ({ result = null, operation = null }) => ({
@@ -627,6 +836,12 @@ def _restorable_directory_handle_persistence_script() -> str:
                       );
                     }
                     persistSnapshot(key, snapshot);
+                    persistPermissionState(
+                      key,
+                      value && typeof value === 'object' && value.__ts980PermissionStateRef
+                        ? value.__ts980PermissionStateRef.state
+                        : 'granted',
+                    );
                     completeRequest(request, key);
                     completeTransaction(transaction);
                   } catch (error) {
@@ -644,8 +859,12 @@ def _restorable_directory_handle_persistence_script() -> str:
                 setTimeout(() => {
                   try {
                     const snapshot = readPersistedSnapshot(key);
+                    const permissionState = readPersistedPermissionState(key);
                     const handle = snapshot
-                      ? globalThis.__ts980CreateDirectoryHandleFromSnapshot(snapshot)
+                      ? globalThis.__ts980CreateDirectoryHandleFromSnapshot(snapshot, {
+                          workspacePath: key,
+                          permissionState,
+                        })
                       : null;
                     completeRequest(request, handle);
                     completeTransaction(transaction);
@@ -664,6 +883,8 @@ def _restorable_directory_handle_persistence_script() -> str:
                 setTimeout(() => {
                   try {
                     clearPersistedSnapshot(key);
+                    clearPersistedPermissionState(key);
+                    clearRememberedSelectionMarker(key);
                     completeRequest(request, undefined);
                     completeTransaction(transaction);
                   } catch (error) {
@@ -681,6 +902,8 @@ def _restorable_directory_handle_persistence_script() -> str:
                 setTimeout(() => {
                   try {
                     clearAllPersistedSnapshots();
+                    clearAllPersistedPermissionStates();
+                    clearAllRememberedSelectionMarkers();
                     completeRequest(request, undefined);
                     completeTransaction(transaction);
                   } catch (error) {

@@ -17,7 +17,7 @@ const String _limitedMessage =
 const String _restrictionTitle =
     'Attachments stay download-only in the browser';
 const String _restrictionMessage =
-    'This browser session is download-only for Git LFS attachments. Existing attachments remain available for download.';
+    'This repository session is download-only for Git LFS attachments. Existing attachments remain available for download.';
 const String _openSettingsLabel = 'Open settings';
 const String _attachmentName = 'sync-sequence.svg';
 const String _downloadAttachmentLabel = 'Download sync-sequence.svg';

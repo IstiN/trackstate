@@ -349,6 +349,45 @@ void main() {
   );
 
   test(
+    'workspace sync service keeps the first hosted auth retry scheduled at one minute when extra forced checks fail early',
+    () async {
+      final repository = _ThrowingWorkspaceSyncRepository(
+        error: const TrackStateProviderException(
+          'GitHub API request failed for /repos/IstiN/trackstate-setup/branches/main (401): {"message":"Bad credentials"}',
+        ),
+      );
+      final statuses = <WorkspaceSyncStatus>[];
+      var now = DateTime.utc(2026, 5, 14, 10, 0);
+      final service = WorkspaceSyncService(
+        repository: repository,
+        loadSnapshot: () async =>
+            await const DemoTrackStateRepository().loadSnapshot(),
+        onRefresh: (_) {},
+        onStatusChanged: statuses.add,
+        now: () => now,
+      );
+
+      await service.checkNow(force: true);
+      expect(statuses.last.nextRetryAt, DateTime.utc(2026, 5, 14, 10, 1));
+
+      now = DateTime.utc(2026, 5, 14, 10, 0, 15);
+      await service.checkNow(
+        trigger: WorkspaceSyncTrigger.appResume,
+        force: true,
+      );
+
+      expect(statuses.last.health, WorkspaceSyncHealth.unavailable);
+      expect(statuses.last.nextRetryAt, DateTime.utc(2026, 5, 14, 10, 1));
+
+      now = DateTime.utc(2026, 5, 14, 10, 1);
+      await service.checkNow(force: true);
+
+      expect(statuses.last.health, WorkspaceSyncHealth.unavailable);
+      expect(statuses.last.nextRetryAt, DateTime.utc(2026, 5, 14, 10, 3));
+    },
+  );
+
+  test(
     'workspace sync service does not reload the hosted snapshot for comment-only changes',
     () async {
       final baseline = await const DemoTrackStateRepository().loadSnapshot();
@@ -640,7 +679,9 @@ class _PendingWorkspaceSyncRepository implements WorkspaceSyncRepository {
 
 class _ThrowingWorkspaceSyncRepository implements WorkspaceSyncRepository {
   _ThrowingWorkspaceSyncRepository({
-    this.error = const TrackStateProviderException('GitHub rate limit exceeded.'),
+    this.error = const TrackStateProviderException(
+      'GitHub rate limit exceeded.',
+    ),
   });
 
   final Object error;

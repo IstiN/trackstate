@@ -30,6 +30,13 @@ Each semantic tag release publishes exactly these Apple artifacts:
 2. Standalone compiled macOS CLI `tar.gz` archive
 3. SHA256 checksum file covering both published assets
 
+The repository also keeps a targeted historical repair path for `v0.0.98`: after
+successful `main` validation, `.github/workflows/repair-historical-apple-releases.yml`
+downloads the published `TrackState-macos-arm64-v0.0.98.zip` asset, verifies the
+embedded app binary with `file`, and dispatches `build-native.yml` against
+`release_ref: v0.0.98` only when the hosted archive is still universal or
+otherwise non-compliant.
+
 ## Readiness and failure mode
 
 The release workflow fails in two explicit places:
