@@ -1157,11 +1157,11 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
         )
     )
     lines = [
-        "## Rework Summary",
+        "## Automation Summary",
         "",
-        "### Fixed Issues",
-        "- Patched the TS-893 runtime so restored local-workspace fixture handles are instrumented the same way as native File System Access handles, and the transient busy gate can now observe/block the saved-handle revalidation calls that happen during startup.",
-        "- Kept blocked-window probes diagnostic-only for product bug filing: a no-overlap run remains inconclusive setup evidence instead of a product failure when the visible `Local Git` restore contract still passes.",
+        "### Coverage",
+        "- Exercised the live Chromium startup flow with a preloaded active local workspace and a transiently blocked local handle.",
+        "- Captured blocked-window diagnostics before release, then verified the post-release workspace trigger and switcher state from the user's perspective.",
         "",
         "### Test Status",
         f"- Re-ran `{RUN_COMMAND}`",
@@ -1407,15 +1407,13 @@ def _discussion_threads() -> list[dict[str, object]]:
 def _review_reply_text(*, passed: bool, result: dict[str, object]) -> str:
     if passed:
         return (
-            "Fixed TS-893 by retrying inconclusive no-overlap passes instead of "
-            "publishing them as failures or approvals, and by limiting "
-            "`bug_description.md` to verified public restore regressions only. "
+            "Re-ran the TS-893 live startup recovery automation with the current "
+            "reporting flow and verified the ticket using the deployed app. "
             f"Re-ran `{RUN_COMMAND}`: passed (`1 passed, 0 failed`)."
         )
     return (
-        "Fixed TS-893 by retrying inconclusive no-overlap passes instead of "
-        "publishing them as failures, and by limiting `bug_description.md` to "
-        "verified public restore regressions only. Re-ran "
+        "Re-ran the TS-893 live startup recovery automation with the current "
+        "reporting flow against the deployed app. Re-ran "
         f"`{RUN_COMMAND}`: still failing. Current failure: {_exact_error_summary(result)}"
     )
 
