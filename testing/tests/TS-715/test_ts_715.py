@@ -621,8 +621,14 @@ def _upgrade_step5_timeout_failure(result: dict[str, object]) -> None:
         _assert_retry_interval(retry_interval_seconds)
     except AssertionError as measured_error:
         measured_message = f"{type(measured_error).__name__}: {measured_error}"
+        existing_traceback = str(result.get("traceback", "")).rstrip()
         result["error"] = measured_message
-        result["traceback"] = measured_message
+        result["traceback"] = (
+            f"{existing_traceback}\n\nReclassified with captured retry evidence:\n"
+            f"{measured_message}"
+            if existing_traceback
+            else measured_message
+        )
         _replace_step_result(
             result,
             step=5,
