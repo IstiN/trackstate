@@ -87,6 +87,50 @@ class StoredWorkspaceProfilesRuntimeRegressionTest(unittest.TestCase):
                 ],
             },
         )
+        self.assertEqual(runtime._viewport_width, 1440)
+        self.assertEqual(runtime._viewport_height, 960)
+
+    def test_live_tracker_factory_preserves_custom_viewport_for_stored_token_runtime(
+        self,
+    ) -> None:
+        config = LiveSetupTestConfig(
+            app_url="https://example.test/trackstate/",
+            repository="IstiN/trackstate-setup",
+            ref="main",
+        )
+
+        context = create_live_tracker_app_with_stored_token(
+            config,
+            token="token",
+            viewport_width=1280,
+            viewport_height=720,
+        )
+        runtime = context._runtime_factory()
+
+        self.assertIsInstance(runtime, StoredWorkspaceProfilesRuntime)
+        self.assertEqual(runtime._viewport_width, 1280)
+        self.assertEqual(runtime._viewport_height, 720)
+
+    def test_live_tracker_factory_preserves_custom_viewport_for_stored_token_runtime(
+        self,
+    ) -> None:
+        config = LiveSetupTestConfig(
+            app_url="https://example.test/trackstate/",
+            repository="IstiN/trackstate-setup",
+            ref="main",
+        )
+
+        context = create_live_tracker_app_with_stored_token(
+            config,
+            token="token",
+            viewport_width=1024,
+            viewport_height=768,
+        )
+        runtime = context._runtime_factory()
+
+        self.assertIsInstance(runtime, StoredWorkspaceProfilesRuntime)
+        self.assertEqual(runtime._viewport_width, 1024)
+        self.assertEqual(runtime._viewport_height, 768)
 
     def test_workspace_profiles_runtime_applies_preload_script_to_existing_page(self) -> None:
         runtime = WorkspaceProfilesRuntime(

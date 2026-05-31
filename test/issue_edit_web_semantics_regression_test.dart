@@ -6,7 +6,7 @@ import '../testing/fixtures/issue_edit_accessibility_screen_fixture.dart';
 
 void main() {
   testWidgets(
-    'edit issue Summary semantics wrapper stays enabled when the field is editable',
+    'edit issue Summary field no longer uses a manual semantics wrapper',
     (tester) async {
       final semanticsHandle = tester.ensureSemantics();
       IssueEditAccessibilityScreenHandle? screen;
@@ -21,7 +21,7 @@ void main() {
         );
         expect(summaryTextField, findsOneWidget);
 
-        final wrappingSemantics = find.ancestor(
+        final manualWrappingSemantics = find.ancestor(
           of: summaryTextField,
           matching: find.byWidgetPredicate((widget) {
             return widget is Semantics &&
@@ -30,9 +30,7 @@ void main() {
           }, description: 'manual Summary semantics wrapper'),
         );
 
-        expect(wrappingSemantics, findsOneWidget);
-        final widget = tester.widget<Semantics>(wrappingSemantics.first);
-        expect(widget.properties.enabled, isTrue);
+        expect(manualWrappingSemantics, findsNothing);
       } finally {
         await screen?.dispose();
         semanticsHandle.dispose();

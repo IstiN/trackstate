@@ -119,6 +119,12 @@ class GitHubActionsPreflightGateProbeService:
             partial_result["downstream_job"] = (
                 asdict(downstream_job) if downstream_job is not None else None
             )
+            self._raise_if_runner_available(
+                run=completed_run,
+                preflight_job=preflight_job,
+                downstream_job=downstream_job,
+                partial_result=partial_result,
+            )
             log_text = self._workflow_run_log_reader.read_run_log(completed_run.id)
             matched_failure_text = self._match_failure_text(log_text)
             log_excerpt = self._extract_log_excerpt(
@@ -357,6 +363,50 @@ class GitHubActionsPreflightGateProbeService:
             "preflight_job": asdict(preflight_job),
             "downstream_job": asdict(downstream_job),
         }
+
+    def _raise_if_runner_available(
+        self,
+        *,
+        run: GitHubActionsWorkflowRunObservation,
+        preflight_job: GitHubActionsWorkflowJobObservation | None,
+        downstream_job: GitHubActionsWorkflowJobObservation | None,
+        partial_result: dict[str, Any],
+        observation_window_seconds: int | None = None,
+    ) -> None:
+        if preflight_job is None or downstream_job is None:
+            return
+        if preflight_job.conclusion != "success":
+            return
+
+        if downstream_job.status in {"queued", "in_progress", "waiting"}:
+            if observation_window_seconds is None:
+                return
+            raise GitHubActionsPreflightGatePreconditionError(
+                "Precondition failed: TS-706 could not reproduce the no-runner failure "
+                "condition through the live Apple Release Builds workflow because the "
+                "preflight job succeeded and the downstream macOS job kept waiting for a "
+                f"runner for at least {observation_window_seconds} seconds after the "
+                "tag-triggered run started. This repository currently appears to have a "
+                "matching online macOS release runner or a transiently busy one, so the "
+                "workflow did not settle into the ticket's no-runner failure path within "
+                "the configured observation window.",
+                partial_result=partial_result,
+            )
+
+        if downstream_job.conclusion == "skipped":
+            return
+
+        raise GitHubActionsPreflightGatePreconditionError(
+            "Precondition failed: TS-706 could not reproduce the no-runner failure "
+            "condition through the live Apple Release Builds workflow because the "
+            "preflight job succeeded and the downstream macOS job proceeded instead of "
+            "being suppressed. This proves the ticket precondition was not met during the "
+            "live run because a matching macOS release runner was available. "
+            f"Observed downstream job status/conclusion: `{downstream_job.status}` / "
+            f"`{downstream_job.conclusion}`. Run URL: {run.html_url}. Preflight job URL: "
+            f"{preflight_job.html_url}. Downstream job URL: {downstream_job.html_url}.",
+            partial_result=partial_result,
+        )
 
     def _list_workflow_runs(
         self,

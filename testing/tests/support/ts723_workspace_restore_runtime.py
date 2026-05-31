@@ -10,6 +10,9 @@ from testing.frameworks.python.playwright_web_app_session import (
     PlaywrightStoredTokenWebAppRuntime,
     PlaywrightWebAppSession,
 )
+from testing.tests.support.stored_workspace_profiles_runtime import (
+    _workspace_token_storage_keys,
+)
 
 
 @dataclass(frozen=True)
@@ -28,10 +31,12 @@ class Ts723WorkspaceRestoreRuntime(PlaywrightStoredTokenWebAppRuntime):
         repository: str,
         token: str,
         workspace_state: dict[str, object],
+        workspace_token_profile_ids: tuple[str, ...] = (),
         viewport: dict[str, int] | None = None,
     ) -> None:
         super().__init__(repository=repository, token=token)
         self._workspace_state = workspace_state
+        self._workspace_token_profile_ids = tuple(workspace_token_profile_ids)
         self._viewport = viewport or {"width": 1440, "height": 900}
         self._active_local_handle_name = _active_local_handle_name(workspace_state)
         self.console_events: list[WorkspaceRestoreConsoleEvent] = []
@@ -79,11 +84,16 @@ class Ts723WorkspaceRestoreRuntime(PlaywrightStoredTokenWebAppRuntime):
 
     def _build_preload_script(self) -> str:
         serialized_workspace_state = json.dumps(self._workspace_state)
+        workspace_token_storage_keys = _workspace_token_storage_keys(
+            self._workspace_state,
+            workspace_token_profile_ids=self._workspace_token_profile_ids,
+        )
         return f"""
 (() => {{
   const repositoryStorageKey = {json.dumps(self._repository_storage_key)};
   const token = {json.dumps(self._token)};
   const workspaceState = {json.dumps(serialized_workspace_state)};
+  const workspaceTokenStorageKeys = {json.dumps(workspace_token_storage_keys)};
   const trackedHandleName = {json.dumps(self._active_local_handle_name)};
   const probePrefix = {json.dumps(self.RUNTIME_PROBE_PREFIX)};
   const activityPrefix = {json.dumps(self.RUNTIME_ACTIVITY_PREFIX)};
@@ -99,6 +109,7 @@ class Ts723WorkspaceRestoreRuntime(PlaywrightStoredTokenWebAppRuntime):
   for (const key of [
     `trackstate.githubToken.${{repositoryStorageKey}}`,
     `flutter.trackstate.githubToken.${{repositoryStorageKey}}`,
+    ...workspaceTokenStorageKeys,
   ]) {{
     window.localStorage.setItem(key, token);
   }}

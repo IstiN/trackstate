@@ -105,7 +105,7 @@ def main() -> None:
 
         _write_pass_outputs(result)
     except AssertionError as error:
-        result["error"] = str(error)
+        result["error"] = f"AssertionError: {error}"
         result["traceback"] = traceback.format_exc()
         _write_failure_outputs(result)
         raise
@@ -607,6 +607,17 @@ def _first_accessibility_marker(
         if marker.lower() in lowered:
             return marker
     return None
+
+
+def _no_template_exists(
+    verification: PullRequestTemplateChecklistVerificationResult,
+) -> bool:
+    """Return True when every API source confirms no PR template is present."""
+    existing_candidates = getattr(verification, "existing_candidates", ())
+    recognized_templates = getattr(verification, "recognized_templates", ())
+    has_existing_candidate = bool(existing_candidates)
+    has_recognized_template = bool(recognized_templates)
+    return not has_existing_candidate and not has_recognized_template
 
 
 def _record_step(

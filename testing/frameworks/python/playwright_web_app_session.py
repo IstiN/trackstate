@@ -929,16 +929,28 @@ class PlaywrightWebAppSession(WebAppSession):
 
 
 class PlaywrightWebAppRuntime(AbstractContextManager[PlaywrightWebAppSession]):
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        viewport_width: int = 1440,
+        viewport_height: int = 960,
+    ) -> None:
         self._playwright = None
         self._browser: Browser | None = None
         self._context: BrowserContext | None = None
         self._page: Page | None = None
+        self._viewport_width = viewport_width
+        self._viewport_height = viewport_height
 
     def __enter__(self) -> PlaywrightWebAppSession:
         self._playwright = sync_playwright().start()
         self._browser = self._playwright.chromium.launch(headless=True)
-        self._context = self._browser.new_context(viewport={"width": 1440, "height": 960})
+        self._context = self._browser.new_context(
+            viewport={
+                "width": self._viewport_width,
+                "height": self._viewport_height,
+            },
+        )
         self._page = self._context.new_page()
         return PlaywrightWebAppSession(self._page)
 
@@ -955,18 +967,32 @@ class PlaywrightWebAppRuntime(AbstractContextManager[PlaywrightWebAppSession]):
 class PlaywrightStoredTokenWebAppRuntime(
     AbstractContextManager[PlaywrightWebAppSession],
 ):
-    def __init__(self, *, repository: str, token: str) -> None:
+    def __init__(
+        self,
+        *,
+        repository: str,
+        token: str,
+        viewport_width: int = 1440,
+        viewport_height: int = 960,
+    ) -> None:
         self._repository = repository
         self._token = token
         self._playwright = None
         self._browser: Browser | None = None
         self._context: BrowserContext | None = None
         self._page: Page | None = None
+        self._viewport_width = viewport_width
+        self._viewport_height = viewport_height
 
     def __enter__(self) -> PlaywrightWebAppSession:
         self._playwright = sync_playwright().start()
         self._browser = self._playwright.chromium.launch(headless=True)
-        self._context = self._browser.new_context(viewport={"width": 1440, "height": 960})
+        self._context = self._browser.new_context(
+            viewport={
+                "width": self._viewport_width,
+                "height": self._viewport_height,
+            },
+        )
         self._context.route("https://api.github.com/**", self._handle_github_api_route)
         storage_keys = tuple(
             sorted(

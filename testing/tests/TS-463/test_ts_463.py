@@ -75,9 +75,9 @@ SCREENSHOT_PATH = OUTPUTS_DIR / "ts463_failure.png"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts463_success.png"
 DISCUSSIONS_RAW_PATH = INPUTS_DIR / "pr_discussions_raw.json"
 REWORK_SUMMARY = (
-    "Updated TS-463 reporting to build failure summaries from the recorded failed step, "
-    "narrowed product-bug classification to explicit TS-463 product-visible failures, "
-    "and now emit review-thread replies to `outputs/review_replies.json`."
+    "Kept the visible Save settings synchronization fix, preserved explicit Step 6 "
+    "failure reporting for post-save UI validation, and restored the review-thread "
+    "ID guard so reply payloads skip automation-only entries."
 )
 PRODUCT_FAILURE_SIGNATURES: dict[int, tuple[str, ...]] = {
     2: (
@@ -421,37 +421,11 @@ def main() -> None:
                 )
                 result["repo_after_save"] = repo_after_save
                 repo_failure_message: str | None = None
-                if repo_matched:
-                    _record_step(
-                        result,
-                        step=6,
-                        status="passed",
-                        action=(
-                            "Inspect the repository files config/priorities.json, "
-                            "config/components.json, and config/versions.json."
-                        ),
-                        observed=(
-                            f'priorities.json contains "{PRIORITY_ID}" / "{PRIORITY_NAME}", '
-                            f'components.json keeps ID "{target_component["id"]}" with the '
-                            f'updated name "{target_component_name}", and versions.json no '
-                            f'longer contains "{TEMP_VERSION_ID}".'
-                        ),
-                    )
-                else:
+                if not repo_matched:
                     repo_failure_message = (
                         "Step 6 failed: the hosted save path did not persist the expected "
                         "catalog state within the timeout.\n"
                         f"Last observed state: {repo_after_save}"
-                    )
-                    _record_step(
-                        result,
-                        step=6,
-                        status="failed",
-                        action=(
-                            "Inspect the repository files config/priorities.json, "
-                            "config/components.json, and config/versions.json."
-                        ),
-                        observed=repo_failure_message,
                     )
 
                 priorities_text_saved = page.open_catalog_tab(
@@ -520,14 +494,46 @@ def main() -> None:
                     "versions_visible_labels": versions_labels_saved,
                     "priority_editor_presentation": _editor_payload(priority_editor),
                 }
-                if repo_failure_message or post_save_ui_error:
-                    raise AssertionError(
-                        "\n\n".join(
-                            message
-                            for message in (repo_failure_message, post_save_ui_error)
-                            if message
+                post_save_ui_failure_message = (
+                    f"Step 6 failed: {post_save_ui_error}" if post_save_ui_error else None
+                )
+                if repo_failure_message or post_save_ui_failure_message:
+                    step_6_failure_message = "\n\n".join(
+                        message
+                        for message in (
+                            repo_failure_message,
+                            post_save_ui_failure_message,
                         )
+                        if message
                     )
+                    _record_step(
+                        result,
+                        step=6,
+                        status="failed",
+                        action=(
+                            "Inspect the repository files config/priorities.json, "
+                            "config/components.json, and config/versions.json."
+                        ),
+                        observed=step_6_failure_message,
+                    )
+                    raise AssertionError(
+                        step_6_failure_message
+                    )
+                _record_step(
+                    result,
+                    step=6,
+                    status="passed",
+                    action=(
+                        "Inspect the repository files config/priorities.json, "
+                        "config/components.json, and config/versions.json."
+                    ),
+                    observed=(
+                        f'priorities.json contains "{PRIORITY_ID}" / "{PRIORITY_NAME}", '
+                        f'components.json keeps ID "{target_component["id"]}" with the '
+                        f'updated name "{target_component_name}", and versions.json no '
+                        f'longer contains "{TEMP_VERSION_ID}".'
+                    ),
+                )
 
                 page.screenshot(str(SUCCESS_SCREENSHOT_PATH))
                 result["screenshot"] = str(SUCCESS_SCREENSHOT_PATH)
@@ -1383,6 +1389,21 @@ def _review_reply_text(
             "failure signatures for this scenario (for example the Step 3 blank component "
             "editor and Step 6 persistence regression) instead of treating every "
             "`Step ... failed` assertion as a product bug. "
+            + rerun_summary
+        )
+    if "post-save UI check fails" in body or "Please prefix this branch as `Step 6 failed:`" in body:
+        return (
+            "Fixed: Step 6 is now recorded as failed only after both the repository and "
+            "post-save Settings-tab validations complete, and the post-save UI branch is "
+            "raised with a `Step 6 failed:` prefix so the failure context is preserved in "
+            "the result and bug description. "
+            + rerun_summary
+        )
+    if "rootCommentId` / `threadId` guard" in body or "reply payloads with `inReplyToId: null`" in body:
+        return (
+            "Fixed: `_discussion_threads()` now filters back to unresolved review threads "
+            "with real `rootCommentId` and `threadId` values, so "
+            "`outputs/review_replies.json` skips automation-only entries with null IDs. "
             + rerun_summary
         )
     return "Fixed: addressed the requested TS-463 reporting changes. " + rerun_summary
