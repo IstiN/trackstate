@@ -299,8 +299,8 @@ jobs:
           esac
 
           if [ ! -s "${CODEGRAPH_USAGE_LOG}" ]; then
-            if grep -q "outputs/response.md missing — CLI agent was interrupted\\|outputs/response.md missing - CLI agent was interrupted\\|\"path\":\"interrupted\"" "${GITHUB_WORKSPACE}/.dmtools/ai-run.log" 2>/dev/null; then
-              echo "CodeGraph usage not recorded because the CLI agent was interrupted before completing. Post-action reset the ticket for retry."
+            if grep -q "outputs/response.md missing — CLI agent was interrupted\\|outputs/response.md missing - CLI agent was interrupted\\|\"path\":\"interrupted\"\\|CLI command executed but did not produce output file\\|No review data found\\|No review data found in pr_review.json" "${GITHUB_WORKSPACE}/.dmtools/ai-run.log" 2>/dev/null; then
+              echo "CodeGraph usage not recorded because the CLI agent did not complete review/development output generation. Post-action reset the ticket for retry."
               exit 0
             fi
             echo "::error::${CONFIG_FILE} completed without invoking codegraph. Source-code agents must use CodeGraph for code navigation."
