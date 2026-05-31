@@ -10,9 +10,11 @@ import '../../../../data/services/issue_mutation_service.dart';
 import '../../../../data/services/jql_search_service.dart';
 import '../../../../data/services/startup_auth_probe_diagnostics.dart';
 import '../../../../data/services/trackstate_auth_store.dart';
+import '../../../../data/services/workspace_profile_service.dart';
 import '../../../../data/services/workspace_sync_service.dart';
 import '../../../../domain/models/issue_mutation_models.dart';
 import '../../../../domain/models/trackstate_models.dart';
+import '../../../../domain/models/workspace_profile_models.dart';
 import '../services/attachment_download_launcher.dart';
 
 enum TrackerSection { dashboard, board, search, hierarchy, settings }
@@ -311,12 +313,16 @@ class TrackerViewModel extends ChangeNotifier {
     IssueMutationService? issueMutationService,
     TrackStateAuthStore authStore =
         const SharedPreferencesTrackStateAuthStore(),
+    WorkspaceProfileService? workspaceProfileService,
     String? workspaceId,
     Uri Function()? currentUriProvider,
   }) : _repository = repository,
        _issueMutationService =
            issueMutationService ?? IssueMutationService(repository: repository),
        _authStore = authStore,
+       _workspaceProfileService =
+           workspaceProfileService ??
+           const SharedPreferencesWorkspaceProfileService(),
        _workspaceId = workspaceId,
        _currentUriProvider = currentUriProvider ?? (() => Uri.base) {
     _bindProviderSession();
@@ -325,6 +331,7 @@ class TrackerViewModel extends ChangeNotifier {
   final TrackStateRepository _repository;
   final IssueMutationService _issueMutationService;
   final TrackStateAuthStore _authStore;
+  final WorkspaceProfileService _workspaceProfileService;
   final Uri Function() _currentUriProvider;
   String? _workspaceId;
   ProviderSession? _boundProviderSession;
@@ -2391,19 +2398,92 @@ class TrackerViewModel extends ChangeNotifier {
     if (_repository case final ProviderBackedTrackStateRepository repository) {
       final resolvedBranch =
           (await repository.providerAdapter.resolveWriteBranch()).trim();
-      return (
-        repository: project?.repository.isNotEmpty == true
-            ? project!.repository
-            : repository.providerAdapter.repositoryLabel,
-        branch: resolvedBranch.isEmpty
-            ? repository.providerAdapter.dataRef
-            : resolvedBranch,
-      );
+      final branch = resolvedBranch.isEmpty
+          ? repository.providerAdapter.dataRef
+          : resolvedBranch;
+      if (usesLocalPersistence) {
+        final localHostedFallback = await _resolveLocalHostedConnectionTarget(
+          configuredRepository: project?.repository ?? '',
+          branch: branch,
+          localRepositoryLabel: repository.providerAdapter.repositoryLabel,
+        );
+        if (localHostedFallback != null) {
+          return localHostedFallback;
+        }
+      }
+      final configuredRepository = project?.repository.trim();
+      final repositoryTarget =
+          configuredRepository != null && configuredRepository.isNotEmpty
+          ? configuredRepository
+          : repository.providerAdapter.repositoryLabel.trim();
+      if (repositoryTarget.isEmpty) {
+        return null;
+      }
+      return (repository: repositoryTarget, branch: branch);
     }
     if (project != null) {
       return (repository: project.repository, branch: project.branch);
     }
     return null;
+  }
+
+  Future<({String repository, String branch})?>
+  _resolveLocalHostedConnectionTarget({
+    required String configuredRepository,
+    required String branch,
+    required String localRepositoryLabel,
+  }) async {
+    final normalizedRepository = configuredRepository.trim();
+    if (_looksLikeHostedRepository(normalizedRepository)) {
+      return (repository: normalizedRepository, branch: branch);
+    }
+
+    final hostedWorkspace = await _resolveHostedWorkspaceForLocalAccess(
+      branch: branch,
+    );
+    if (hostedWorkspace != null) {
+      return (
+        repository: hostedWorkspace.normalizedTarget,
+        branch: hostedWorkspace.normalizedWriteBranch,
+      );
+    }
+
+    final normalizedLocalRepositoryLabel = localRepositoryLabel.trim();
+    if (_looksLikeHostedRepository(normalizedLocalRepositoryLabel)) {
+      return (repository: normalizedLocalRepositoryLabel, branch: branch);
+    }
+    return null;
+  }
+
+  Future<WorkspaceProfile?> _resolveHostedWorkspaceForLocalAccess({
+    required String branch,
+  }) async {
+    final state = await _workspaceProfileService.loadState();
+    final hostedProfiles = state.profiles.where((profile) => profile.isHosted);
+    if (hostedProfiles.isEmpty) {
+      return null;
+    }
+
+    final normalizedBranch = branch.trim();
+    if (normalizedBranch.isNotEmpty) {
+      for (final profile in hostedProfiles) {
+        if (profile.normalizedWriteBranch == normalizedBranch ||
+            profile.normalizedDefaultBranch == normalizedBranch) {
+          return profile;
+        }
+      }
+    }
+    return hostedProfiles.first;
+  }
+
+  bool _looksLikeHostedRepository(String repository) {
+    final normalizedRepository = repository.trim();
+    if (normalizedRepository.isEmpty || normalizedRepository.startsWith('/')) {
+      return false;
+    }
+    final segments = normalizedRepository.split('/');
+    return segments.length == 2 &&
+        segments.every((segment) => segment.trim().isNotEmpty);
   }
 
   Future<void> _resumeStartupRecoveryAfterAuthentication() async {
