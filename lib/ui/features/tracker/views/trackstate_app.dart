@@ -689,6 +689,69 @@ class _TrackStateAppState extends State<TrackStateApp>
         continue;
       }
       final restoredWorkspaceId = prepared.workspace?.id ?? workspace.id;
+      final preservesUnavailableActiveLocalSelection =
+          kIsWeb &&
+          workspace.isLocal &&
+          workspace.id == activeWorkspaceId &&
+          prepared.workspace?.isHosted == true &&
+          restoredWorkspaceId != workspace.id;
+      if (preservesUnavailableActiveLocalSelection) {
+        final optimisticHostedAccessMode = _hostedWorkspaceAccessModeForViewModel(
+          prepared.viewModel,
+        );
+        final optimisticState = _workspaceState.copyWith(
+          profiles: [
+            for (final profile in _workspaceState.profiles)
+              if (profile.id == restoredWorkspaceId && profile.isHosted)
+                profile.copyWith(hostedAccessMode: optimisticHostedAccessMode)
+              else
+                profile,
+          ],
+          activeWorkspaceId: workspace.id,
+          unavailableLocalWorkspaceIds: {
+            ..._workspaceState.unavailableLocalWorkspaceIds,
+            workspace.id,
+          },
+        );
+        _pendingStartupLocalFallbackWorkspaceId = null;
+        _pendingWorkspaceRestoreFailure = null;
+        if (lastFailure != null) {
+          prepared.viewModel.showMessage(
+            TrackerMessage.workspaceRestoreSkipped(
+              workspaceName: lastFailure.workspaceName,
+              reason: lastFailure.reason,
+            ),
+          );
+        }
+        await _commitPreparedWorkspaceSwitch(
+          prepared,
+          previousViewModel: previousViewModel,
+          workspaceState: optimisticState,
+        );
+        var preservedState = await widget.workspaceProfileService.loadState();
+        preservedState = preservedState.copyWith(
+          activeWorkspaceId: workspace.id,
+          unavailableLocalWorkspaceIds: {
+            ...preservedState.unavailableLocalWorkspaceIds,
+            workspace.id,
+          },
+        );
+        preservedState =
+            await _persistPreparedHostedWorkspaceState(
+              prepared,
+              workspaceState: preservedState,
+              preserveActiveSelection: true,
+            ) ??
+            preservedState;
+        if (!mounted) {
+          return true;
+        }
+        setState(() {
+          _workspaceState = preservedState;
+        });
+        await _refreshWorkspaceSwitcherState(preservedState);
+        return true;
+      }
       final shouldCommitHostedFallbackBeforePersistence =
           deferAccessRestore &&
           kIsWeb &&
@@ -804,6 +867,7 @@ class _TrackStateAppState extends State<TrackStateApp>
   Future<WorkspaceProfilesState?> _persistPreparedHostedWorkspaceState(
     _PreparedWorkspaceSwitch prepared, {
     WorkspaceProfilesState? workspaceState,
+    bool preserveActiveSelection = false,
   }) async {
     if (widget.repository != null) {
       return workspaceState;
@@ -813,7 +877,9 @@ class _TrackStateAppState extends State<TrackStateApp>
       return workspaceState;
     }
     var nextState = workspaceState;
-    if (nextState == null || nextState.activeWorkspaceId != workspace.id) {
+    nextState ??= await widget.workspaceProfileService.loadState();
+    if (!preserveActiveSelection &&
+        nextState.activeWorkspaceId != workspace.id) {
       nextState = await widget.workspaceProfileService.selectProfile(
         workspace.id,
       );
@@ -1120,12 +1186,7 @@ class _TrackStateAppState extends State<TrackStateApp>
         _pendingStartupLocalFallbackWorkspaceId = null;
         return;
       }
-      _startupHostedFallbackWorkspaceId = prepared.workspace!.id;
-      _isPersistingStartupHostedFallbackSelection = true;
       _pendingStartupLocalFallbackWorkspaceId = null;
-      // Commit the UI immediately with an optimistic workspace state so the
-      // hosted restricted shell is visible before the persistence writes
-      // complete (which may require the /user auth probe to finish).
       final optimisticHostedAccessMode = _hostedWorkspaceAccessModeForViewModel(
         prepared.viewModel,
       );
@@ -1133,11 +1194,11 @@ class _TrackStateAppState extends State<TrackStateApp>
         profiles: [
           for (final profile in _workspaceState.profiles)
             if (profile.id == prepared.workspace!.id && profile.isHosted)
-              profile.copyWith(hostedAccessMode: optimisticHostedAccessMode)
+                profile.copyWith(hostedAccessMode: optimisticHostedAccessMode)
             else
               profile,
         ],
-        activeWorkspaceId: prepared.workspace!.id,
+        activeWorkspaceId: workspace.id,
         unavailableLocalWorkspaceIds: {
           ..._workspaceState.unavailableLocalWorkspaceIds,
           workspace.id,
@@ -1148,28 +1209,26 @@ class _TrackStateAppState extends State<TrackStateApp>
         previousViewModel: previousViewModel,
         workspaceState: optimisticState,
       );
-      // Persist after the shell is already visible.
-      try {
-        var selectedState = await widget.workspaceProfileService.selectProfile(
-          prepared.workspace!.id,
-        );
-        selectedState =
-            await _persistPreparedHostedWorkspaceState(
-              prepared,
-              workspaceState: selectedState,
-            ) ??
-            selectedState;
-        if (mounted) {
-          setState(() {
-            _workspaceState = selectedState;
-          });
-          await _refreshWorkspaceSwitcherState(selectedState);
-        }
-      } finally {
-        _isPersistingStartupHostedFallbackSelection = false;
-        if (viewModel.workspaceId == prepared.workspace!.id) {
-          _startupHostedFallbackWorkspaceId = null;
-        }
+      var preservedState = await widget.workspaceProfileService.loadState();
+      preservedState = preservedState.copyWith(
+        activeWorkspaceId: workspace.id,
+        unavailableLocalWorkspaceIds: {
+          ...preservedState.unavailableLocalWorkspaceIds,
+          workspace.id,
+        },
+      );
+      preservedState =
+          await _persistPreparedHostedWorkspaceState(
+            prepared,
+            workspaceState: preservedState,
+            preserveActiveSelection: true,
+          ) ??
+          preservedState;
+      if (mounted) {
+        setState(() {
+          _workspaceState = preservedState;
+        });
+        await _refreshWorkspaceSwitcherState(preservedState);
       }
     } finally {
       if (_pendingStartupLocalFallbackWorkspaceId == workspace.id &&
