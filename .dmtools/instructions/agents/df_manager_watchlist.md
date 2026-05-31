@@ -51,13 +51,12 @@ flowchart TD
     A[Ticket has sm_bug_creation_triggered] --> B{Issue type is Test Case?}
     B -- No --> Z[Use generic stale-label handling]
     B -- Yes --> C{Status is Failed?}
-    C -- Yes --> D{Linked Bug exists?}
-    D -- Yes --> E{Any linked Bug is open?}
+    C -- Yes --> D[Select linked Bugs with status NOT Done]
+    D --> E{Any matching non-Done Bug?}
     E -- Yes --> E1[Recover to Bug To Fix]
     E -- No --> E2{Latest run still fails on current main?}
     E2 -- Yes --> E3[Route to bug creation/linking, not Backlog loop]
     E2 -- No --> E4[Backlog re-automation is allowed]
-    D -- No --> F[Remove sm_bug_creation_triggered only and let bulk_bugs_creation own creation]
     C -- No --> G{Status is Passed, Done, Backlog, In Development, In Review, or In Rework?}
     G -- Yes --> H[Cleanup only: remove sm_bug_creation_triggered without triggering SM]
     G -- No --> Z
@@ -74,12 +73,14 @@ Rules from the diagram:
   `Passed`/`Backlog` Test Cases can create noise or restart unrelated queues.
 - If both `sm_bug_creation_triggered` and `sm_bulk_bugs_creation_triggered` are
   present outside `Failed`, remove both as cleanup labels.
-- If a Failed Test Case has linked Bugs, route through
+- For Failed Test Case recovery, ignore linked Bugs in `Done` when building the
+  active matching Bug set. Done Bugs are historical context only.
+- If a Failed Test Case has a matching non-Done Bug, route through
   `recover_failed_tc_bug_status` first; do not run `bug_creation`.
-- If all matching linked Bugs are `Done` but the latest Test Case run says the
-  failure still reproduces on current `main`, do not send the Test Case into a
-  blind Backlog re-automation loop. Treat it as current bug triage and create or
-  link a Bug.
+- If all linked Bugs are `Done` or there are no matching non-Done Bugs, and the
+  latest Test Case run says the failure still reproduces on current `main`, do
+  not send the Test Case into a blind Backlog re-automation loop. Treat it as
+  current bug triage and create or link a non-Done Bug.
 - A test review comment that explicitly calls the failed run a valid product
   failure is also current failure evidence. Do not override it with `fixedByBug`
   just because historical linked Bugs are Done.
