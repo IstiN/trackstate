@@ -134,6 +134,12 @@ class TrackStateTrackerPage:
             repository=repository,
         ):
             return True
+        if (
+            "workspace switcher:" in normalized_body
+            and "local git" in normalized_body
+            and "synced with git" in normalized_body
+        ):
+            return True
         return (
             "workspace switcher:" in normalized_body
             and repository.casefold() in normalized_body

@@ -179,13 +179,26 @@ def main() -> None:
                         message_fragment=SUMMARY_REQUIRED_FRAGMENT,
                     )
                 except Exception as error:
-                    result["post_step_2_body_text"] = edit_page.current_body_text()
+                    post_step_2_body_text = edit_page.current_body_text()
+                    result["post_step_2_body_text"] = post_step_2_body_text
                     _record_step(
                         result,
                         step=2,
                         status="failed",
                         action=REQUEST_STEPS[1],
                         observed=str(error),
+                    )
+                    _record_human_verification(
+                        result,
+                        check=(
+                            "Clicked Save with an empty Summary and observed what a user "
+                            "would see immediately after the submission attempt."
+                        ),
+                        observed=(
+                            "The Edit issue dialog closed and returned to the issue detail "
+                            "view without any visible `Summary is required` feedback. "
+                            f"Observed body text: {post_step_2_body_text}"
+                        ),
                     )
                     _mark_unreached_steps(result, first_unreached=3)
                     raise
@@ -744,11 +757,11 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
     lines = [
         f"## {TICKET_KEY} {status}",
         "",
-        "### Rework updates",
-        "- Matched Summary-validation message discovery to the ticket fragment `Summary is required`, so compliant shorter copy is still detected for contrast measurement.",
-        "- Tightened the accessibility assertion so Step 5 now requires the error text itself to be reachable through `aria-describedby`, `aria-errormessage`, a live region, or focused error content.",
-        "- Added an error-token assertion so the visible validation text must render with the TrackState error theme color (`#c25742` light / `#e8a085` dark), not just any readable color.",
-        "- Added the standard pass-path artifact writer, stale bug cleanup, and review-reply output so the workflow can record a real pass once the product bug is fixed.",
+        "### Automation assertions",
+        "- Matches visible validation feedback against the ticket fragment `Summary is required`, so equivalent compliant copy is still detected.",
+        "- Requires the visible validation text to use the TrackState error theme token colors (`#c25742` light / `#e8a085` dark).",
+        "- Requires the error text itself to be reachable to assistive technology through ARIA linkage, a live region, or focused error content.",
+        "- Writes the standard pass/fail pipeline artifacts, including a product bug report when the live flow fails.",
         "",
         "### Automation",
         "- Opened the deployed hosted TrackState app.",
@@ -792,11 +805,11 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
     lines = [
         f"## {TICKET_KEY} {status}",
         "",
-        "### What changed",
-        "- Matched visible-message discovery to the ticket fragment `Summary is required` so compliant shorter copy is still measured.",
-        "- Kept Step 5 strict: the error text itself must be reachable via ARIA linkage, a live region, or focused error content.",
-        "- Required the visible validation text to use the TrackState error theme token colors (`#c25742` / `#e8a085`).",
-        "- Kept pass/fail artifact writing aligned with the pipeline outputs.",
+        "### Automation assertions",
+        "- Matches visible validation feedback against the ticket fragment `Summary is required` so equivalent compliant copy is still detected.",
+        "- Requires the error text itself to be reachable via ARIA linkage, a live region, or focused error content.",
+        "- Requires the visible validation text to use the TrackState error theme token colors (`#c25742` / `#e8a085`).",
+        "- Writes the expected pass/fail pipeline artifacts.",
         "",
         "### Result",
         (

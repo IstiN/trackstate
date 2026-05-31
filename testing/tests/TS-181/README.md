@@ -13,7 +13,9 @@ The automation:
 5. returns to `Dashboard` and verifies the top bar reflects `Local Git`
    without a manual refresh
 6. verifies `Create issue` remains visible and user-reachable after the switch
-7. fails with top-bar, visible-text, and semantics snapshots when the runtime
+7. continues the post-switch checks even if the storage badge is wrong so the
+   result shows whether the create entry point still stayed visible
+8. fails with top-bar, visible-text, and semantics snapshots when the runtime
    label or create entry point does not match the expected user-facing state
 
 The ticket uses the shared `TrackStateAppComponent` abstraction and keeps all
