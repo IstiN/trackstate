@@ -416,6 +416,7 @@ def main() -> None:
                 mobile_after_path = OUTPUTS_DIR / "ts726_mobile_focus_after.png"
                 mobile_before_path.unlink(missing_ok=True)
                 mobile_after_path.unlink(missing_ok=True)
+                page.clear_focus()
                 page.screenshot(str(mobile_before_path))
                 mobile_focus = page.observe_mobile_trigger_focus(
                     tab_count=MOBILE_TAB_COUNT,
@@ -571,12 +572,21 @@ def _assert_sheet_accessibility(
         _is_remove_control_label(label) for label in relevant_labels
     )
     if not has_workspace_list_control or not has_add_workspace_control or not has_remove_control:
+        missing_groups: list[str] = []
+        if not has_workspace_list_control:
+            missing_groups.append("workspace-list controls")
+        if not has_add_workspace_control:
+            missing_groups.append("add-workspace controls")
+        if not has_remove_control:
+            missing_groups.append("remove controls")
         raise AssertionError(
             "Step 3 failed: real keyboard Tab navigation through the workspace switcher "
-            "surface did not reach the expected list, add-workspace, and remove controls.\n"
+            f"surface did not reach all required control groups: {', '.join(missing_groups)}.\n"
             f"Observed focus sequence: {_focus_sequence_summary(sequence)}\n"
             f"Observed relevant focus sequence: {_focus_sequence_summary(relevant_sequence)}\n"
             f"Observed keyboard tab stops: {_tab_stop_summary(tab_stops)}\n"
+            f"Visible remove controls: {_observable_remove_controls(tab_stops, surface)!r}\n"
+            f"Visible add-workspace controls: {_observable_add_workspace_controls(tab_stops, surface)!r}\n"
             f"Observed interactive labels: {[item.label for item in surface.interactive_elements]!r}",
         )
     _assert_logical_sheet_focus_order(relevant_sequence, tab_stops)
@@ -1017,6 +1027,36 @@ def _is_add_workspace_control_label(label: str) -> bool:
 
 def _is_remove_control_label(label: str) -> bool:
     return label == "Delete" or label.startswith("Delete:")
+
+
+def _observable_remove_controls(
+    tab_stops: tuple[WorkspaceSwitcherTabStopObservation, ...],
+    surface: WorkspaceSwitcherSurfaceObservation,
+) -> list[str]:
+    labels = {
+        label
+        for label in (
+            *(_tab_stop_label(tab_stop) for tab_stop in tab_stops),
+            *(item.label for item in surface.interactive_elements),
+        )
+        if _is_remove_control_label(label)
+    }
+    return sorted(labels)
+
+
+def _observable_add_workspace_controls(
+    tab_stops: tuple[WorkspaceSwitcherTabStopObservation, ...],
+    surface: WorkspaceSwitcherSurfaceObservation,
+) -> list[str]:
+    labels = {
+        label
+        for label in (
+            *(_tab_stop_label(tab_stop) for tab_stop in tab_stops),
+            *(item.label for item in surface.interactive_elements),
+        )
+        if _is_add_workspace_control_label(label)
+    }
+    return sorted(labels)
 
 
 def _badge_summary(badges: tuple[WorkspaceSwitcherBadgeObservation, ...]) -> str:
