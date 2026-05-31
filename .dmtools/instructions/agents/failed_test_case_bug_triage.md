@@ -58,5 +58,8 @@ Concrete TrackState examples observed in monitoring:
 - `TS-715`: latest run failed hosted workspace sync backoff timing on current
   `main`; all linked Bugs were Done; correct action is to create/reopen/link a
   Bug for the current backoff regression, not move the Test Case to Backlog.
+- `TS-893`: PR review approved the test and explicitly said the current FAILED
+  execution is a valid product-visible restore failure; correct action is
+  Bug creation/linking, even when many historical restore Bugs are Done.
 - `TS-732` / `TS-887`: latest run or review evidence said the product failure
   still reproduces; historical Done Bugs must not suppress Bug creation.
