@@ -207,6 +207,7 @@ def main() -> None:
                     overlap_state["pre_release_activity_events"],
                 )
                 result["pre_release_activity"] = overlap_state["pre_release_activity"]
+                result["pre_release_busy_state"] = overlap_state["pre_release_busy_state"]
                 result["pre_release_runtime_probe_captured"] = bool(
                     overlap_state["pre_release_runtime_probe_captured"],
                 )
@@ -276,6 +277,8 @@ def main() -> None:
                     + f"{result['pre_release_public_overlap_observed']}\n"
                     + "pre_release_activity="
                     + f"{json.dumps(result['pre_release_activity'], indent=2)}\n"
+                    + "pre_release_busy_state="
+                    + f"{json.dumps(result['pre_release_busy_state'], indent=2)}\n"
                     + "pre_release_all_activity_events="
                     + f"{json.dumps(result['pre_release_all_activity_events'], indent=2)}\n"
                     + "pre_release_activity_events="
@@ -340,6 +343,8 @@ def main() -> None:
                             f"{json.dumps(result['pre_release_public_overlap_state'], ensure_ascii=True)}; "
                             "Observed pre_release_activity="
                             f"{json.dumps(result['pre_release_activity'], ensure_ascii=True)}; "
+                            "Observed pre_release_busy_state="
+                            f"{json.dumps(result['pre_release_busy_state'], ensure_ascii=True)}; "
                             "Observed pre_release_runtime_probe="
                             f"{json.dumps(result['pre_release_runtime_probe'], ensure_ascii=True)}; "
                             "Observed pre_release_restore_message="
@@ -367,6 +372,8 @@ def main() -> None:
                             f"{json.dumps(result['pre_release_public_overlap_state'], ensure_ascii=True)}; "
                             "Observed pre_release_activity="
                             f"{json.dumps(result['pre_release_activity'], ensure_ascii=True)}; "
+                            "Observed pre_release_busy_state="
+                            f"{json.dumps(result['pre_release_busy_state'], ensure_ascii=True)}; "
                             "Observed pre_release_runtime_probe="
                             f"{json.dumps(result['pre_release_runtime_probe'], ensure_ascii=True)}; "
                             "Observed pre_release_restore_message="
@@ -422,6 +429,8 @@ def main() -> None:
                     observed=(
                         "pre_release_activity="
                         f"{json.dumps(result['pre_release_activity'], ensure_ascii=True)}; "
+                        "pre_release_busy_state="
+                        f"{json.dumps(result['pre_release_busy_state'], ensure_ascii=True)}; "
                         "pre_release_all_activity_events="
                         f"{json.dumps(result['pre_release_all_activity_events'], ensure_ascii=True)}; "
                         "pre_release_activity_events="
@@ -526,6 +535,41 @@ def main() -> None:
                         "Observed active local row: "
                         f"{json.dumps(_row_payload(local_row), indent=2)}\n"
                         f"Observed switcher text:\n{switcher.switcher_text}"
+                    )
+                elif not overlap_proof_sources:
+                    result["missing_overlap_proof_for_pass"] = True
+                    failure_message = (
+                        "Step 2 failed: startup never exposed a pre-release signal "
+                        "that the blocked saved-handle revalidation/retry path ran "
+                        "before the transient busy state was released, so this run "
+                        "cannot pass TS-893 even though the final workspace state "
+                        "recovered.\n"
+                        "Observed overlap proof sources: "
+                        f"{json.dumps(overlap_proof_sources, indent=2)}\n"
+                        "Observed pre-release busy state: "
+                        f"{json.dumps(result['pre_release_busy_state'], indent=2)}\n"
+                        f"Observed pre-release trigger label: {_trigger_label(pre_release_trigger)!r}\n"
+                        "Observed final trigger label: "
+                        f"{_trigger_label(trigger)!r}\n"
+                        "Observed selected row: "
+                        f"{json.dumps(_row_payload(selected_row), indent=2)}\n"
+                        "Observed active local row: "
+                        f"{json.dumps(_row_payload(local_row), indent=2)}"
+                    )
+                    _update_step_result(
+                        result,
+                        step=2,
+                        status="failed",
+                        observed=(
+                            step_2_observed
+                            + "\nscenario_result="
+                            + (
+                                "The final `Local Git` restore matched the ticket, but the "
+                                "run never proved that startup overlapped the blocked saved "
+                                "handle before release, so TS-893 cannot pass from this "
+                                "execution."
+                            )
+                        ),
                     )
                 if failure_message is not None:
                     raise AssertionError(failure_message)
@@ -933,7 +977,10 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         _review_replies_payload(result, passed=False),
         encoding="utf-8",
     )
-    BUG_DESCRIPTION_PATH.write_text(_bug_description(result), encoding="utf-8")
+    if _should_write_bug_description(result):
+        BUG_DESCRIPTION_PATH.write_text(_bug_description(result), encoding="utf-8")
+    else:
+        BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
 
 
 def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
@@ -1051,8 +1098,8 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
         "## Rework Summary",
         "",
         "### Fixed Issues",
-        "- Realigned TS-893 to the ticket's actual contract: the required product outcome is the post-release `Local Git` restore state, while blocked-window overlap probes are retained as diagnostic evidence.",
-        "- Changed the failure path so the test only reports a product gap when the public restore state regresses or when the deployed web surface never exercises saved local handle revalidation at all.",
+        "- Added a strict non-pass gate: TS-893 now requires pre-release evidence that startup actually overlapped the blocked saved-handle revalidation path before a successful final `Local Git` restore can pass.",
+        "- Kept blocked-window probes diagnostic-only for product bug filing: a no-overlap run now fails as scenario evidence instead of generating a synthetic product defect when the visible restore contract still passes.",
         "",
         "### Test Status",
         f"- Re-ran `{RUN_COMMAND}`",
@@ -1285,15 +1332,17 @@ def _discussion_threads() -> list[dict[str, object]]:
 def _review_reply_text(*, passed: bool, result: dict[str, object]) -> str:
     if passed:
         return (
-            "Updated TS-893 to keep blocked-window overlap capture as diagnostic "
-            "evidence only and to base the verdict on the ticket's public post-release "
-            "`Local Git` restore contract. "
+            "Updated TS-893 to require a pre-release blocked-handle overlap signal "
+            "before a successful final `Local Git` restore can pass, while still "
+            "keeping missing overlap evidence out of product-bug reporting when the "
+            "visible restore contract succeeds. "
             f"Re-ran `{RUN_COMMAND}`: passed (`1 passed, 0 failed`)."
         )
     return (
-        "Updated TS-893 to keep blocked-window overlap capture as diagnostic "
-        "evidence only and to base the verdict on the ticket's public post-release "
-        "`Local Git` restore contract. Re-ran "
+        "Updated TS-893 to require a pre-release blocked-handle overlap signal "
+        "before a successful final `Local Git` restore can pass, while keeping "
+        "no-overlap runs out of product-bug reporting when the visible restore "
+        "contract still succeeds. Re-ran "
         f"`{RUN_COMMAND}`: still failing. Current failure: {_exact_error_summary(result)}"
     )
 
@@ -1320,6 +1369,16 @@ def _failed_due_to_release_error(result: dict[str, object]) -> bool:
     return (
         _failed_step_number(result) == 2
         and result.get("busy_state_released") is not True
+    )
+
+
+def _failed_due_to_missing_overlap(result: dict[str, object]) -> bool:
+    return bool(result.get("missing_overlap_proof_for_pass"))
+
+
+def _should_write_bug_description(result: dict[str, object]) -> bool:
+    return not (
+        _failed_due_to_release_error(result) or _failed_due_to_missing_overlap(result)
     )
 
 
@@ -1423,6 +1482,7 @@ def _collect_pre_release_overlap_state(
     raw_activity_events = tuple(runtime.activity_console_events)
     activity_events = tuple(runtime.tracked_activity_console_events)
     runtime_probe_events = tuple(runtime.tracked_probe_console_events)
+    busy_state = runtime.transient_busy_state_snapshot()
     public_overlap_state = _observe_pre_release_public_overlap(page)
     pre_release_restore_message = _observe_restore_message(
         tracker_page,
@@ -1430,6 +1490,13 @@ def _collect_pre_release_overlap_state(
     )
 
     overlap_proof_sources: list[str] = []
+    if isinstance(busy_state, dict) and (
+        int(busy_state.get("gateHits", 0) or 0) > 0
+        or bool(busy_state.get("blockedMethods"))
+    ):
+        overlap_proof_sources.append(
+            "transient-busy gate blocked tracked saved-workspace handle methods",
+        )
     if activity_events:
         overlap_proof_sources.append(
             "tracked File System Access activity on the saved local workspace lineage",
@@ -1455,6 +1522,7 @@ def _collect_pre_release_overlap_state(
 
     return {
         "pre_release_activity_captured": bool(activity_events),
+        "pre_release_busy_state": busy_state,
         "pre_release_all_activity_events": [
             _console_event_payload(event) for event in raw_activity_events
         ],
@@ -1548,6 +1616,11 @@ def _bug_title(result: dict[str, object]) -> str:
             f"{TICKET_KEY} - Test automation could not release the transient busy "
             "workspace during startup"
         )
+    if _failed_due_to_missing_overlap(result):
+        return (
+            f"{TICKET_KEY} - Test automation did not prove blocked-startup overlap "
+            "before restore"
+        )
     return (
         f"{TICKET_KEY} - Startup retry does not restore the local workspace "
         "after transient busy access clears"
@@ -1560,6 +1633,12 @@ def _bug_expected_result(result: dict[str, object]) -> str:
             "The automation should release the temporary busy-state simulation so "
             "startup can continue into the post-release restore assertions."
         )
+    if _failed_due_to_missing_overlap(result):
+        return (
+            "The automation should capture a pre-release signal that startup hit "
+            "the blocked saved-handle revalidation path before a passing result is "
+            "reported."
+        )
     return EXPECTED_RESULT
 
 
@@ -1569,6 +1648,12 @@ def _bug_actual_result(result: dict[str, object]) -> str:
             "The automation could not restore access to the prepared local "
             "workspace during the simulated transient busy window, so the live "
             "post-release restore assertions did not run."
+        )
+    if _failed_due_to_missing_overlap(result):
+        return (
+            "The final local workspace restore completed, but the run never proved "
+            "that startup overlapped the blocked saved-handle revalidation path "
+            "before release."
         )
     if not _step_passed(result, 4):
         return (
@@ -1585,6 +1670,11 @@ def _bug_missing_capability(result: dict[str, object]) -> str:
         return (
             "The transient busy-state simulation could not be released by the test "
             "automation."
+        )
+    if _failed_due_to_missing_overlap(result):
+        return (
+            "The run did not capture any pre-release proof that startup actually "
+            "hit the blocked saved-workspace revalidation path."
         )
     return (
         "Startup retry did not restore the prepared local workspace as the active "
