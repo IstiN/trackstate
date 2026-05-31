@@ -15,17 +15,17 @@ The automation:
   startup has reached the visible recovery window
 5. records any restore-specific blocked-window diagnostics while the workspace
   is still blocked, such as tracked File System Access activity on the saved
-  local workspace lineage, a TS-893 runtime probe event, the visible restore
-  skip banner, or another public pre-release non-restored state
+  local workspace lineage or a TS-893 runtime probe event
 6. after the busy-state release, waits for the workspace switcher trigger to
    restore the saved local workspace instead of asserting immediately
 7. opens **Workspace switcher** and verifies the selected active row is the
    local workspace in the `Local Git` state rather than `Local Unavailable` or
    the hosted fallback
-8. requires a pre-release overlap signal before the run can count as a
-   trustworthy PASS, but treats a missing overlap signal as inconclusive
-   setup-only evidence instead of a product bug when the visible `Local Git`
-   restore contract still succeeds
+8. requires pre-release overlap evidence from the runtime instrumentation or
+   tracked console activity on the saved local workspace handle before the run
+   can count as a trustworthy PASS, but treats missing overlap evidence as
+   inconclusive setup-only evidence instead of a product bug when the visible
+   `Local Git` restore contract still succeeds
 9. records the pre-release trigger state, busy-gate activity, any visible
    restore banner, the final row state, and a screenshot if the live startup
    flow still lands on the hosted fallback or keeps the local row unavailable
