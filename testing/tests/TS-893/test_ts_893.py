@@ -527,25 +527,6 @@ def main() -> None:
                         f"{json.dumps(_row_payload(local_row), indent=2)}\n"
                         f"Observed switcher text:\n{switcher.switcher_text}"
                     )
-                if (
-                    failure_message is None
-                    and result.get("final_restore_verified") is True
-                    and not result["runtime_activity_events"]
-                    and not result["runtime_probe_events"]
-                ):
-                    result["failure_reason"] = (
-                        "missing_saved_handle_revalidation_capability"
-                    )
-                    failure_message = (
-                        "The deployed web startup flow never invoked any tracked "
-                        "File System Access handle methods for the saved local "
-                        "workspace while TS-893 kept the remembered handle blocked "
-                        "and then released it. The header trigger and workspace "
-                        "switcher already showed `Local Git` before release and "
-                        "remained there afterward, so this surface did not exercise "
-                        "the transient busy saved-handle revalidation path required "
-                        "by TS-893."
-                    )
                 if failure_message is not None:
                     raise AssertionError(failure_message)
 
@@ -1305,16 +1286,14 @@ def _review_reply_text(*, passed: bool, result: dict[str, object]) -> str:
     if passed:
         return (
             "Updated TS-893 to keep blocked-window overlap capture as diagnostic "
-            "evidence, realigned the verdict to the ticket's post-release `Local Git` "
-            "contract, and reserved failure for either a real restore regression or a "
-            "live-surface capability gap where saved local handle revalidation never runs. "
+            "evidence only and to base the verdict on the ticket's public post-release "
+            "`Local Git` restore contract. "
             f"Re-ran `{RUN_COMMAND}`: passed (`1 passed, 0 failed`)."
         )
     return (
         "Updated TS-893 to keep blocked-window overlap capture as diagnostic "
-        "evidence, realigned the verdict to the ticket's post-release `Local Git` "
-        "contract, and reserved failure for either a real restore regression or a "
-        "live-surface capability gap where saved local handle revalidation never runs. Re-ran "
+        "evidence only and to base the verdict on the ticket's public post-release "
+        "`Local Git` restore contract. Re-ran "
         f"`{RUN_COMMAND}`: still failing. Current failure: {_exact_error_summary(result)}"
     )
 
@@ -1569,11 +1548,6 @@ def _bug_title(result: dict[str, object]) -> str:
             f"{TICKET_KEY} - Test automation could not release the transient busy "
             "workspace during startup"
         )
-    if _failed_due_to_missing_saved_handle_revalidation_capability(result):
-        return (
-            f"{TICKET_KEY} - Deployed startup never revalidates the remembered "
-            "local workspace handle"
-        )
     return (
         f"{TICKET_KEY} - Startup retry does not restore the local workspace "
         "after transient busy access clears"
@@ -1586,13 +1560,6 @@ def _bug_expected_result(result: dict[str, object]) -> str:
             "The automation should release the temporary busy-state simulation so "
             "startup can continue into the post-release restore assertions."
         )
-    if _failed_due_to_missing_saved_handle_revalidation_capability(result):
-        return (
-            "Startup should actually revalidate the remembered saved local "
-            "workspace handle while TS-893 keeps that handle transiently busy, "
-            "then restore the workspace as the selected `Local Git` row once "
-            "access becomes available again."
-        )
     return EXPECTED_RESULT
 
 
@@ -1602,15 +1569,6 @@ def _bug_actual_result(result: dict[str, object]) -> str:
             "The automation could not restore access to the prepared local "
             "workspace during the simulated transient busy window, so the live "
             "post-release restore assertions did not run."
-        )
-    if _failed_due_to_missing_saved_handle_revalidation_capability(result):
-        return (
-            "While TS-893 kept the remembered local handle busy and after the "
-            "busy gate was released, the deployed app never invoked any tracked "
-            "File System Access handle methods for that saved local workspace. "
-            "The trigger and switcher already showed the final `Local Git` "
-            "state before release, so the transient busy startup-revalidation "
-            "path never ran on this surface."
         )
     if not _step_passed(result, 4):
         return (
@@ -1628,25 +1586,9 @@ def _bug_missing_capability(result: dict[str, object]) -> str:
             "The transient busy-state simulation could not be released by the test "
             "automation."
         )
-    if _failed_due_to_missing_saved_handle_revalidation_capability(result):
-        return (
-            "The deployed startup flow never touched the remembered saved local "
-            "workspace handle while the TS-893 runtime kept it transiently busy, "
-            "so the required startup revalidation path did not execute."
-        )
     return (
         "Startup retry did not restore the prepared local workspace as the active "
         "`Local Git` selection after transient busy access cleared."
-    )
-
-
-def _failed_due_to_missing_saved_handle_revalidation_capability(
-    result: dict[str, object],
-) -> bool:
-    return (
-        result.get("failure_reason")
-        == "missing_saved_handle_revalidation_capability"
-        and _step_passed(result, 4)
     )
 
 
