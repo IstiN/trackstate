@@ -117,6 +117,15 @@ jobs:
           restore-keys: |
             ${{ env.COPILOT_SESSION_CACHE_RESTORE_KEY }}
 
+      - name: Cache Copilot session
+        if: vars.AI_AGENT_PROVIDER == 'copilot'
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.COPILOT_SESSION_CACHE_PATH }}
+          key: ${{ env.COPILOT_SESSION_CACHE_KEY }}
+          restore-keys: |
+            ${{ env.COPILOT_SESSION_CACHE_RESTORE_KEY }}
+
       - name: Install Copilot CLI
         if: vars.AI_AGENT_PROVIDER == 'copilot'
         run: |
