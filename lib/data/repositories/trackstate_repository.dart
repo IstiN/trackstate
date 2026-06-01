@@ -1137,15 +1137,49 @@ class ProviderBackedTrackStateRepository
     final existingAttachment = currentIssue.attachments
         .where((candidate) => candidate.storagePath == attachmentPath)
         .firstOrNull;
-    final preserveRepositoryPathReplacement =
-        attachmentStorage.mode == AttachmentStorageMode.githubReleases &&
-        !permission.supportsReleaseAttachmentWrites &&
-        existingAttachment?.storageBackend == AttachmentStorageMode.repositoryPath;
-    if (attachmentStorage.mode == AttachmentStorageMode.githubReleases) {
-      final githubReleases = attachmentStorage.githubReleases!;
-      final writeBranch = await _provider.resolveWriteBranch();
-      if (!permission.supportsReleaseAttachmentWrites &&
-          !preserveRepositoryPathReplacement) {
+    final writeBranch = await _provider.resolveWriteBranch();
+    final attachmentMetadataPath = _attachmentMetadataPath(
+      _issueRoot(currentIssue.storagePath),
+    );
+    final existingRevision = await _existingArtifactRevision(
+      path: attachmentPath,
+      ref: writeBranch,
+      blobPaths: _snapshotBlobPaths,
+    );
+    final metadataRevision = await _existingRevision(
+      path: attachmentMetadataPath,
+      ref: writeBranch,
+      blobPaths: _snapshotBlobPaths,
+    );
+    final lfsTracked = await _provider.isLfsTracked(attachmentPath);
+    final shouldMigrateHostedLfsReplacementToReleaseStorage =
+        attachmentStorage.mode == AttachmentStorageMode.repositoryPath &&
+        existingAttachment?.storageBackend ==
+            AttachmentStorageMode.repositoryPath &&
+        lfsTracked &&
+        permission.attachmentUploadMode == AttachmentUploadMode.noLfs &&
+        permission.supportsReleaseAttachmentWrites;
+    final prefersReleaseStorage =
+        attachmentStorage.mode == AttachmentStorageMode.githubReleases ||
+        existingAttachment?.storageBackend ==
+            AttachmentStorageMode.githubReleases ||
+        shouldMigrateHostedLfsReplacementToReleaseStorage;
+    final githubReleases =
+        attachmentStorage.githubReleases ??
+        (prefersReleaseStorage
+            ? const GitHubReleasesAttachmentStorageSettings(
+                tagPrefix:
+                    GitHubReleasesAttachmentStorageSettings.defaultTagPrefix,
+              )
+            : null);
+    if (prefersReleaseStorage && githubReleases != null) {
+      if (!permission.supportsReleaseAttachmentWrites) {
+        if (attachmentStorage.mode != AttachmentStorageMode.githubReleases) {
+          throw TrackStateRepositoryException(
+            'This repository session cannot replace ${existingAttachment?.name ?? normalizedName} '
+            'because hosted GitHub Releases attachment writes are unavailable.',
+          );
+        }
         final inboxPath = _releaseAttachmentInboxPath(
           issue: currentIssue,
           fileName: resolveAttachmentStorageName(
@@ -1173,161 +1207,149 @@ class ProviderBackedTrackStateRepository
         _replaceCachedIssue(updatedIssue);
         return updatedIssue;
       }
-      if (!preserveRepositoryPathReplacement) {
-        final releaseStore = switch (_provider) {
-          final RepositoryReleaseAttachmentStore supported => supported,
-          _ => throw const TrackStateRepositoryException(
-            'This repository provider does not support GitHub Releases '
-            'attachment uploads.',
-          ),
-        };
-        final attachmentMetadataPath = _attachmentMetadataPath(
-          _issueRoot(currentIssue.storagePath),
-        );
-        final metadataRevision = await _existingRevision(
-          path: attachmentMetadataPath,
-          ref: writeBranch,
-          blobPaths: _snapshotBlobPaths,
-        );
-        final timestamp = DateTime.now().toUtc().toIso8601String();
-        final author = _defaultAuthor(_session.resolvedUserIdentity);
-        final releaseTag = githubReleases.releaseTagForIssue(currentIssue.key);
-        final assetName = attachmentPath.split('/').last;
-        final releaseAssetNames = {
-          for (final attachment in currentIssue.attachments)
-            if (attachment.storageBackend ==
+      final releaseStore = switch (_provider) {
+        final RepositoryReleaseAttachmentStore supported => supported,
+        _ => throw const TrackStateRepositoryException(
+          'This repository provider does not support GitHub Releases '
+          'attachment uploads.',
+        ),
+      };
+      final timestamp = DateTime.now().toUtc().toIso8601String();
+      final author = _defaultAuthor(_session.resolvedUserIdentity);
+      final existingReleaseAttachment =
+          existingAttachment?.storageBackend ==
+              AttachmentStorageMode.githubReleases
+          ? existingAttachment
+          : null;
+      final releaseTag =
+          existingReleaseAttachment?.githubReleaseTag ??
+          githubReleases.releaseTagForIssue(currentIssue.key);
+      final assetName =
+          existingReleaseAttachment?.githubReleaseAssetName ??
+          attachmentPath.split('/').last;
+      final releaseAssetNames = {
+        for (final attachment in currentIssue.attachments)
+          if (attachment.storageBackend ==
+                  AttachmentStorageMode.githubReleases &&
+              attachment.githubReleaseTag == releaseTag)
+            attachment.githubReleaseAssetName ?? attachment.name,
+      };
+      final previousReleaseAttachment = currentIssue.attachments
+          .where(
+            (attachment) =>
+                attachment.storagePath == attachmentPath &&
+                attachment.storageBackend ==
                     AttachmentStorageMode.githubReleases &&
-                attachment.githubReleaseTag == releaseTag)
-              attachment.githubReleaseAssetName ?? attachment.name,
-        };
-        final previousReleaseAttachment = currentIssue.attachments
-            .where(
-              (attachment) =>
-                  attachment.storagePath == attachmentPath &&
-                  attachment.storageBackend ==
-                      AttachmentStorageMode.githubReleases &&
-                  attachment.githubReleaseTag == releaseTag,
-            )
-            .firstOrNull;
-        final rollbackAttachment = previousReleaseAttachment == null
-            ? null
-            : await releaseStore.readReleaseAttachment(
-                RepositoryReleaseAttachmentReadRequest(
+                attachment.githubReleaseTag == releaseTag,
+          )
+          .firstOrNull;
+      final rollbackAttachment = previousReleaseAttachment == null
+          ? null
+          : await releaseStore.readReleaseAttachment(
+              RepositoryReleaseAttachmentReadRequest(
+                releaseTag: previousReleaseAttachment.githubReleaseTag!,
+                assetName:
+                    previousReleaseAttachment.githubReleaseAssetName ??
+                    previousReleaseAttachment.name,
+                assetId: previousReleaseAttachment.revisionOrOid,
+              ),
+            );
+      final releaseWriteResult = await releaseStore.writeReleaseAttachment(
+        RepositoryReleaseAttachmentWriteRequest(
+          issueKey: currentIssue.key,
+          releaseTag: releaseTag,
+          releaseTitle: githubReleases.releaseTitleForIssue(currentIssue.key),
+          assetName: assetName,
+          bytes: bytes,
+          mediaType: _mediaTypeForPath(assetName),
+          branch: writeBranch,
+          allowedAssetNames: releaseAssetNames,
+        ),
+      );
+      final updatedAttachment = IssueAttachment(
+        id: attachmentPath,
+        name: normalizedName,
+        mediaType: _mediaTypeForPath(attachmentPath),
+        sizeBytes: bytes.length,
+        author: author,
+        createdAt: timestamp,
+        storagePath: attachmentPath,
+        revisionOrOid: releaseWriteResult.assetId,
+        storageBackend: AttachmentStorageMode.githubReleases,
+        githubReleaseTag: releaseWriteResult.releaseTag,
+        githubReleaseAssetName: releaseWriteResult.assetName,
+      );
+      final updatedAttachments = [
+        for (final candidate in currentIssue.attachments)
+          if (candidate.storagePath == attachmentPath)
+            updatedAttachment
+          else
+            candidate,
+        if (!currentIssue.attachments.any(
+          (candidate) => candidate.storagePath == attachmentPath,
+        ))
+          updatedAttachment,
+      ]..sort(_sortAttachmentsNewestFirst);
+      final metadataWriteResult = await () async {
+        try {
+          return await _provider.writeTextFile(
+            RepositoryWriteRequest(
+              path: attachmentMetadataPath,
+              content:
+                  '${jsonEncode(_attachmentMetadataJson(updatedAttachments))}\n',
+              message: 'Update attachment metadata for ${currentIssue.key}',
+              branch: writeBranch,
+              expectedRevision: metadataRevision,
+            ),
+          );
+        } catch (error, stackTrace) {
+          try {
+            await releaseStore.deleteReleaseAttachment(
+              RepositoryReleaseAttachmentDeleteRequest(
+                releaseTag: releaseWriteResult.releaseTag,
+                assetId: releaseWriteResult.assetId,
+                assetName: releaseWriteResult.assetName,
+              ),
+            );
+            if (previousReleaseAttachment != null &&
+                rollbackAttachment != null) {
+              await releaseStore.writeReleaseAttachment(
+                RepositoryReleaseAttachmentWriteRequest(
+                  issueKey: currentIssue.key,
                   releaseTag: previousReleaseAttachment.githubReleaseTag!,
+                  releaseTitle: githubReleases.releaseTitleForIssue(
+                    currentIssue.key,
+                  ),
                   assetName:
                       previousReleaseAttachment.githubReleaseAssetName ??
                       previousReleaseAttachment.name,
-                  assetId: previousReleaseAttachment.revisionOrOid,
+                  bytes: rollbackAttachment.bytes,
+                  mediaType: previousReleaseAttachment.mediaType,
+                  branch: writeBranch,
+                  allowedAssetNames: releaseAssetNames,
                 ),
-              );
-        final releaseWriteResult = await releaseStore.writeReleaseAttachment(
-          RepositoryReleaseAttachmentWriteRequest(
-            issueKey: currentIssue.key,
-            releaseTag: releaseTag,
-            releaseTitle: githubReleases.releaseTitleForIssue(currentIssue.key),
-            assetName: assetName,
-            bytes: bytes,
-            mediaType: _mediaTypeForPath(assetName),
-            branch: writeBranch,
-            allowedAssetNames: releaseAssetNames,
-          ),
-        );
-        final updatedAttachment = IssueAttachment(
-          id: attachmentPath,
-          name: normalizedName,
-          mediaType: _mediaTypeForPath(attachmentPath),
-          sizeBytes: bytes.length,
-          author: author,
-          createdAt: timestamp,
-          storagePath: attachmentPath,
-          revisionOrOid: releaseWriteResult.assetId,
-          storageBackend: AttachmentStorageMode.githubReleases,
-          githubReleaseTag: releaseWriteResult.releaseTag,
-          githubReleaseAssetName: releaseWriteResult.assetName,
-        );
-        final updatedAttachments = [
-          for (final candidate in currentIssue.attachments)
-            if (candidate.storagePath == attachmentPath)
-              updatedAttachment
-            else
-              candidate,
-          if (!currentIssue.attachments.any(
-            (candidate) => candidate.storagePath == attachmentPath,
-          ))
-            updatedAttachment,
-        ]..sort(_sortAttachmentsNewestFirst);
-        final metadataWriteResult = await () async {
-          try {
-            return await _provider.writeTextFile(
-              RepositoryWriteRequest(
-                path: attachmentMetadataPath,
-                content:
-                    '${jsonEncode(_attachmentMetadataJson(updatedAttachments))}\n',
-                message: 'Update attachment metadata for ${currentIssue.key}',
-                branch: writeBranch,
-                expectedRevision: metadataRevision,
-              ),
-            );
-          } catch (error, stackTrace) {
-            try {
-              await releaseStore.deleteReleaseAttachment(
-                RepositoryReleaseAttachmentDeleteRequest(
-                  releaseTag: releaseWriteResult.releaseTag,
-                  assetId: releaseWriteResult.assetId,
-                  assetName: releaseWriteResult.assetName,
-                ),
-              );
-              if (previousReleaseAttachment != null &&
-                  rollbackAttachment != null) {
-                await releaseStore.writeReleaseAttachment(
-                  RepositoryReleaseAttachmentWriteRequest(
-                    issueKey: currentIssue.key,
-                    releaseTag: previousReleaseAttachment.githubReleaseTag!,
-                    releaseTitle: githubReleases.releaseTitleForIssue(
-                      currentIssue.key,
-                    ),
-                    assetName:
-                        previousReleaseAttachment.githubReleaseAssetName ??
-                        previousReleaseAttachment.name,
-                    bytes: rollbackAttachment.bytes,
-                    mediaType: previousReleaseAttachment.mediaType,
-                    branch: writeBranch,
-                    allowedAssetNames: releaseAssetNames,
-                  ),
-                );
-              }
-            } catch (rollbackError) {
-              throw TrackStateRepositoryException(
-                'Could not update attachment metadata for ${currentIssue.key} '
-                'after uploading GitHub release asset $assetName. '
-                'Rollback also failed: $rollbackError',
               );
             }
-            Error.throwWithStackTrace(error, stackTrace);
+          } catch (rollbackError) {
+            throw TrackStateRepositoryException(
+              'Could not update attachment metadata for ${currentIssue.key} '
+              'after uploading GitHub release asset $assetName. '
+              'Rollback also failed: $rollbackError',
+            );
           }
-        }();
-        _snapshotArtifactRevisions[attachmentMetadataPath] =
-            metadataWriteResult.revision;
-        _snapshotBlobPaths = {..._snapshotBlobPaths, attachmentMetadataPath};
-        final updatedIssue = currentIssue.copyWith(
-          hasAttachmentsLoaded: true,
-          attachments: updatedAttachments,
-        );
-        _replaceCachedIssue(updatedIssue);
-        return updatedIssue;
-      }
+          Error.throwWithStackTrace(error, stackTrace);
+        }
+      }();
+      _snapshotArtifactRevisions[attachmentMetadataPath] =
+          metadataWriteResult.revision;
+      _snapshotBlobPaths = {..._snapshotBlobPaths, attachmentMetadataPath};
+      final updatedIssue = currentIssue.copyWith(
+        hasAttachmentsLoaded: true,
+        attachments: updatedAttachments,
+      );
+      _replaceCachedIssue(updatedIssue);
+      return updatedIssue;
     }
-    final writeBranch = await _provider.resolveWriteBranch();
-    final attachmentMetadataPath = _attachmentMetadataPath(
-      _issueRoot(currentIssue.storagePath),
-    );
-    final existingRevision = _snapshotArtifactRevisions[attachmentPath];
-    final metadataRevision = await _existingRevision(
-      path: attachmentMetadataPath,
-      ref: writeBranch,
-      blobPaths: _snapshotBlobPaths,
-    );
-    final lfsTracked = await _provider.isLfsTracked(attachmentPath);
     if (lfsTracked &&
         permission.attachmentUploadMode == AttachmentUploadMode.noLfs) {
       throw const TrackStateRepositoryException(
