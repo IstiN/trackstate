@@ -704,7 +704,10 @@ class TrackerViewModel extends ChangeNotifier {
       if (!_isSearchRequestCurrent(requestToken)) {
         return;
       }
-      _applySearchPage(searchPage);
+      _applySearchPage(searchPage, retainSelectionWhenMissing: false);
+      if (_selectedIssue == null && _searchResults.isNotEmpty) {
+        _selectedIssue = _searchResults.first;
+      }
       _message = null;
     } on Object catch (error) {
       if (!_isSearchRequestCurrent(requestToken)) {
@@ -1703,15 +1706,75 @@ class TrackerViewModel extends ChangeNotifier {
       return 'archived != true';
     }
     final orderByIndex = _indexOfKeywordOutsideQuotes(trimmed, 'ORDER BY');
-    if (orderByIndex == null) {
-      return '$trimmed AND archived != true';
+    final filterSection = orderByIndex == null
+        ? trimmed
+        : trimmed.substring(0, orderByIndex).trim();
+    if (_filterSectionConstrainsArchived(filterSection)) {
+      return trimmed;
     }
-    final filterSection = trimmed.substring(0, orderByIndex).trim();
+    final activeSearchClause = 'archived != true';
+    if (orderByIndex == null) {
+      return '$trimmed AND $activeSearchClause';
+    }
     final orderSection = trimmed.substring(orderByIndex).trim();
     if (filterSection.isEmpty) {
-      return 'archived != true $orderSection';
+      return '$activeSearchClause $orderSection';
     }
-    return '$filterSection AND archived != true $orderSection';
+    return '$filterSection AND $activeSearchClause $orderSection';
+  }
+
+  bool _filterSectionConstrainsArchived(String filterSection) {
+    for (final rawClause in _splitByKeywordOutsideQuotes(
+      filterSection,
+      'AND',
+    )) {
+      final clause = rawClause.trim();
+      if (clause.isEmpty) {
+        continue;
+      }
+      if (RegExp(
+        r'^archived\s*(!=|=)\s*.+$',
+        caseSensitive: false,
+      ).hasMatch(clause)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  List<String> _splitByKeywordOutsideQuotes(String source, String keyword) {
+    final segments = <String>[];
+    final buffer = StringBuffer();
+    var inSingleQuotes = false;
+    var inDoubleQuotes = false;
+    var index = 0;
+    while (index < source.length) {
+      final char = source[index];
+      if (char == '\'' && !inDoubleQuotes) {
+        inSingleQuotes = !inSingleQuotes;
+        buffer.write(char);
+        index += 1;
+        continue;
+      }
+      if (char == '"' && !inSingleQuotes) {
+        inDoubleQuotes = !inDoubleQuotes;
+        buffer.write(char);
+        index += 1;
+        continue;
+      }
+      if (!inSingleQuotes &&
+          !inDoubleQuotes &&
+          _matchesKeywordBoundary(source, index, keyword)) {
+        segments.add(buffer.toString());
+        buffer.clear();
+        index += keyword.length;
+        continue;
+      }
+      buffer.write(char);
+      index += 1;
+    }
+    segments.add(buffer.toString());
+    return segments;
   }
 
   int? _indexOfKeywordOutsideQuotes(String source, String keyword) {

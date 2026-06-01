@@ -317,6 +317,40 @@ void main() {
     }
   });
 
+  testWidgets('explicit archived query still shows archived issues', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    try {
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      await tester.pumpWidget(
+        TrackStateApp(
+          repository: DemoTrackStateRepository(
+            snapshot: _searchPaginationSnapshot(archivedIssueIndexes: {1}),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.bySemanticsLabel(RegExp('JQL Search')).first);
+      await tester.pumpAndSettle();
+
+      final searchField = find.byType(TextField).first;
+      await tester.enterText(searchField, 'archived = true ORDER BY key ASC');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Paged issue 1'), findsWidgets);
+      expect(find.text('Paged issue 2'), findsNothing);
+      expect(find.text('1 issue'), findsOneWidget);
+    } finally {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+      semantics.dispose();
+    }
+  });
+
   testWidgets(
     'first hosted load keeps the shell visible and shows bootstrap-backed placeholders',
     (tester) async {

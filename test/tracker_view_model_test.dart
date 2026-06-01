@@ -297,6 +297,22 @@ void main() {
     expect(viewModel.selectedIssue?.key, 'TRACK-2');
   });
 
+  test('explicit archived query keeps archived issues discoverable', () async {
+    final viewModel = TrackerViewModel(
+      repository: DemoTrackStateRepository(
+        snapshot: _searchPaginationSnapshot(archivedIssueIndexes: {1}),
+      ),
+    );
+
+    await viewModel.load();
+    await viewModel.updateQuery('archived = true ORDER BY key ASC');
+
+    expect(viewModel.jql, 'archived = true ORDER BY key ASC');
+    expect(viewModel.totalSearchResults, 1);
+    expect(viewModel.searchResults.map((issue) => issue.key), ['TRACK-1']);
+    expect(viewModel.selectedIssue?.key, 'TRACK-1');
+  });
+
   test(
     'view model restores the last valid query after a search failure',
     () async {
