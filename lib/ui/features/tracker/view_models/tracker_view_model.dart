@@ -695,15 +695,19 @@ class TrackerViewModel extends ChangeNotifier {
     final requestToken = _beginSearchRequest();
     _invalidateIssueHydrationContext();
     _jql = query;
+    final effectiveQuery = _activeSearchJql(query);
     try {
       final searchPage = await _repository.searchIssuePage(
-        query,
+        effectiveQuery,
         maxResults: _maxResultsForQuery(query),
       );
       if (!_isSearchRequestCurrent(requestToken)) {
         return;
       }
-      _applySearchPage(searchPage);
+      _applySearchPage(searchPage, retainSelectionWhenMissing: false);
+      if (_selectedIssue == null && _searchResults.isNotEmpty) {
+        _selectedIssue = _searchResults.first;
+      }
       _message = null;
     } on Object catch (error) {
       if (!_isSearchRequestCurrent(requestToken)) {
@@ -727,7 +731,7 @@ class TrackerViewModel extends ChangeNotifier {
     notifyListeners();
     try {
       final searchPage = await _repository.searchIssuePage(
-        _jql,
+        _activeSearchJql(_jql),
         startAt: _searchPage.nextStartAt!,
         maxResults: _searchPageSize,
         continuationToken: _searchPage.nextPageToken,
@@ -1592,12 +1596,12 @@ class TrackerViewModel extends ChangeNotifier {
     final selectionStillVisible =
         previousSelectedIssueKey != null &&
         _searchResults.any((issue) => issue.key == previousSelectedIssueKey);
-    if (!retainSelectionWhenMissing &&
-        previousSelectedIssueKey != null &&
-        !selectionStillVisible) {
-      _selectedIssue = null;
+    if (!retainSelectionWhenMissing && previousSelectedIssueKey != null) {
+      if (!selectionStillVisible) {
+        _selectedIssue = null;
+      }
     } else if (retainSelectionWhenMissing &&
-        _selectedIssue == null &&
+        (_selectedIssue == null || _selectedIssue!.isArchived) &&
         _searchResults.isNotEmpty) {
       _selectedIssue = _searchResults.first;
     }
@@ -1620,8 +1624,9 @@ class TrackerViewModel extends ChangeNotifier {
       return;
     }
     try {
+      final effectiveQuery = _activeSearchJql(_jql);
       final searchPage = await _repository.searchIssuePage(
-        _jql,
+        effectiveQuery,
         maxResults: _maxResultsForQuery(
           _jql,
           fallbackMaxResults: _searchResults.isEmpty
@@ -1659,7 +1664,7 @@ class TrackerViewModel extends ChangeNotifier {
     final searchPage = const JqlSearchService().search(
       issues: snapshot.issues,
       project: snapshot.project,
-      jql: _jql,
+      jql: _activeSearchJql(_jql),
       maxResults: _maxResultsForQuery(
         _jql,
         snapshot: snapshot,
@@ -1694,6 +1699,124 @@ class TrackerViewModel extends ChangeNotifier {
     }
     return fallbackMaxResults;
   }
+
+  String _activeSearchJql(String query) {
+    final trimmed = query.trim();
+    if (trimmed.isEmpty) {
+      return 'archived != true';
+    }
+    final orderByIndex = _indexOfKeywordOutsideQuotes(trimmed, 'ORDER BY');
+    final filterSection = orderByIndex == null
+        ? trimmed
+        : trimmed.substring(0, orderByIndex).trim();
+    if (_filterSectionConstrainsArchived(filterSection)) {
+      return trimmed;
+    }
+    final activeSearchClause = 'archived != true';
+    if (orderByIndex == null) {
+      return '$trimmed AND $activeSearchClause';
+    }
+    final orderSection = trimmed.substring(orderByIndex).trim();
+    if (filterSection.isEmpty) {
+      return '$activeSearchClause $orderSection';
+    }
+    return '$filterSection AND $activeSearchClause $orderSection';
+  }
+
+  bool _filterSectionConstrainsArchived(String filterSection) {
+    for (final rawClause in _splitByKeywordOutsideQuotes(
+      filterSection,
+      'AND',
+    )) {
+      final clause = rawClause.trim();
+      if (clause.isEmpty) {
+        continue;
+      }
+      if (RegExp(
+        r'^archived\s*(!=|=)\s*.+$',
+        caseSensitive: false,
+      ).hasMatch(clause)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  List<String> _splitByKeywordOutsideQuotes(String source, String keyword) {
+    final segments = <String>[];
+    final buffer = StringBuffer();
+    var inSingleQuotes = false;
+    var inDoubleQuotes = false;
+    var index = 0;
+    while (index < source.length) {
+      final char = source[index];
+      if (char == '\'' && !inDoubleQuotes) {
+        inSingleQuotes = !inSingleQuotes;
+        buffer.write(char);
+        index += 1;
+        continue;
+      }
+      if (char == '"' && !inSingleQuotes) {
+        inDoubleQuotes = !inDoubleQuotes;
+        buffer.write(char);
+        index += 1;
+        continue;
+      }
+      if (!inSingleQuotes &&
+          !inDoubleQuotes &&
+          _matchesKeywordBoundary(source, index, keyword)) {
+        segments.add(buffer.toString());
+        buffer.clear();
+        index += keyword.length;
+        continue;
+      }
+      buffer.write(char);
+      index += 1;
+    }
+    segments.add(buffer.toString());
+    return segments;
+  }
+
+  int? _indexOfKeywordOutsideQuotes(String source, String keyword) {
+    var inSingleQuotes = false;
+    var inDoubleQuotes = false;
+    for (var index = 0; index <= source.length - keyword.length; index += 1) {
+      final char = source[index];
+      if (char == '\'' && !inDoubleQuotes) {
+        inSingleQuotes = !inSingleQuotes;
+        continue;
+      }
+      if (char == '"' && !inSingleQuotes) {
+        inDoubleQuotes = !inDoubleQuotes;
+        continue;
+      }
+      if (!inSingleQuotes &&
+          !inDoubleQuotes &&
+          _matchesKeywordBoundary(source, index, keyword)) {
+        return index;
+      }
+    }
+    return null;
+  }
+
+  bool _matchesKeywordBoundary(String source, int index, String keyword) {
+    if (index + keyword.length > source.length) {
+      return false;
+    }
+    final slice = source.substring(index, index + keyword.length);
+    if (slice.toUpperCase() != keyword) {
+      return false;
+    }
+    final hasLeadingBoundary =
+        index == 0 || _isBoundaryCharacter(source[index - 1]);
+    final nextIndex = index + keyword.length;
+    final hasTrailingBoundary =
+        nextIndex >= source.length || _isBoundaryCharacter(source[nextIndex]);
+    return hasLeadingBoundary && hasTrailingBoundary;
+  }
+
+  bool _isBoundaryCharacter(String char) =>
+      char.trim().isEmpty || char == ',' || char == '(' || char == ')';
 
   Future<bool> postIssueComment(TrackStateIssue issue, String body) async {
     if (_hostedWriteAccessException('post comments') case final error?) {
@@ -2323,8 +2446,9 @@ class TrackerViewModel extends ChangeNotifier {
   }) async {
     var shouldNotify = false;
     try {
+      final effectiveQuery = _activeSearchJql(_jql);
       final searchPage = await _repository.searchIssuePage(
-        _jql,
+        effectiveQuery,
         maxResults: _searchPageSize,
       );
       if (!_isSearchRequestCurrent(requestToken)) {
@@ -2370,7 +2494,17 @@ class TrackerViewModel extends ChangeNotifier {
       return null;
     }
     for (final issue in issues) {
+      if (!issue.isEpic && !issue.isArchived) {
+        return issue;
+      }
+    }
+    for (final issue in issues) {
       if (!issue.isEpic) {
+        return issue;
+      }
+    }
+    for (final issue in issues) {
+      if (!issue.isArchived) {
         return issue;
       }
     }
