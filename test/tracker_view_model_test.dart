@@ -259,6 +259,45 @@ void main() {
   );
 
   test(
+    'active search excludes archived issues from the default results',
+    () async {
+      final viewModel = TrackerViewModel(
+        repository: DemoTrackStateRepository(
+          snapshot: _searchPaginationSnapshot(archivedIssueIndexes: {1}),
+        ),
+      );
+
+      await viewModel.load();
+
+      expect(
+        viewModel.searchResults.any((issue) => issue.key == 'TRACK-1'),
+        isFalse,
+      );
+      expect(viewModel.selectedIssue?.key, 'TRACK-2');
+      expect(viewModel.totalSearchResults, 7);
+    },
+  );
+
+  test('empty JQL query excludes archived issues from active search', () async {
+    final viewModel = TrackerViewModel(
+      repository: DemoTrackStateRepository(
+        snapshot: _searchPaginationSnapshot(archivedIssueIndexes: {1}),
+      ),
+    );
+
+    await viewModel.load();
+    await viewModel.updateQuery('');
+
+    expect(viewModel.totalSearchResults, 7);
+    expect(viewModel.searchResults.length, 7);
+    expect(
+      viewModel.searchResults.any((issue) => issue.key == 'TRACK-1'),
+      isFalse,
+    );
+    expect(viewModel.selectedIssue?.key, 'TRACK-2');
+  });
+
+  test(
     'view model restores the last valid query after a search failure',
     () async {
       final viewModel = TrackerViewModel(
@@ -2989,7 +3028,9 @@ TrackerSnapshot _hostedBootstrapSnapshot(TrackerSnapshot snapshot) {
   );
 }
 
-TrackerSnapshot _searchPaginationSnapshot() {
+TrackerSnapshot _searchPaginationSnapshot({
+  Set<int> archivedIssueIndexes = const <int>{},
+}) {
   final issues = [
     for (var index = 1; index <= 8; index += 1)
       TrackStateIssue(
@@ -3020,7 +3061,7 @@ TrackerSnapshot _searchPaginationSnapshot() {
         comments: const [],
         links: const [],
         attachments: const [],
-        isArchived: false,
+        isArchived: archivedIssueIndexes.contains(index),
         hasDetailLoaded: false,
         hasCommentsLoaded: false,
         hasAttachmentsLoaded: false,
