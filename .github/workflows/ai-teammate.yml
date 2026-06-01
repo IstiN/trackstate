@@ -318,7 +318,11 @@ jobs:
           else
             dmtools --debug run "${{ inputs.config_file }}" --inputJql "${INPUT_JQL}" --ciRunUrl "${CI_RUN_URL}" 2>&1 | tee "${GITHUB_WORKSPACE}/.dmtools/ai-run.log"
           fi
-
+          LAST_JS_RESULT="$(grep 'JavaScriptExecutor - JavaScript executed successfully:' "${GITHUB_WORKSPACE}/.dmtools/ai-run.log" | tail -n 1 || true)"
+          if [ -n "${LAST_JS_RESULT}" ] && echo "${LAST_JS_RESULT}" | grep -q '"success":false'; then
+            echo "::error::${{ inputs.config_file }} JavaScript action returned success:false. See .dmtools/ai-run.log for details."
+            exit 1
+          fi
       - name: Verify CodeGraph usage
         if: ${{ always() && steps.run_ai.outcome == 'success' }}
         env:
