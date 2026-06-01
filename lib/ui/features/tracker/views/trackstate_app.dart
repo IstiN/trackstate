@@ -239,6 +239,7 @@ class _TrackStateAppState extends State<TrackStateApp>
   String? _startupHostedFallbackWorkspaceId;
   bool _isSwitchingStartupHostedFallback = false;
   bool _isPersistingStartupHostedFallbackSelection = false;
+  int _deferredStartupLocalWorkspaceRestoreVersion = 0;
 
   @override
   void initState() {
@@ -690,12 +691,69 @@ class _TrackStateAppState extends State<TrackStateApp>
         continue;
       }
       final restoredWorkspaceId = prepared.workspace?.id ?? workspace.id;
-      final preservesUnavailableActiveLocalSelection =
+      final preservesActiveLocalSelectionWithHostedShell =
           kIsWeb &&
           workspace.isLocal &&
           workspace.id == activeWorkspaceId &&
           prepared.workspace?.isHosted == true &&
           restoredWorkspaceId != workspace.id;
+      if (preservesActiveLocalSelectionWithHostedShell &&
+          prepared.preserveActiveLocalAvailability) {
+        final optimisticHostedAccessMode =
+            _hostedWorkspaceAccessModeForViewModel(prepared.viewModel);
+        final optimisticState = _workspaceState.copyWith(
+          profiles: [
+            for (final profile in _workspaceState.profiles)
+              if (profile.id == restoredWorkspaceId && profile.isHosted)
+                profile.copyWith(hostedAccessMode: optimisticHostedAccessMode)
+              else
+                profile,
+          ],
+          activeWorkspaceId: workspace.id,
+          unavailableLocalWorkspaceIds: _workspaceState
+              .unavailableLocalWorkspaceIds
+              .difference({workspace.id}),
+        );
+        _pendingStartupLocalFallbackWorkspaceId = null;
+        _pendingWorkspaceRestoreFailure = null;
+        if (lastFailure != null) {
+          prepared.viewModel.showMessage(
+            TrackerMessage.workspaceRestoreSkipped(
+              workspaceName: lastFailure.workspaceName,
+              reason: lastFailure.reason,
+            ),
+          );
+        }
+        await _commitPreparedWorkspaceSwitch(
+          prepared,
+          previousViewModel: previousViewModel,
+          workspaceState: optimisticState,
+        );
+        var preservedState = await widget.workspaceProfileService.loadState();
+        preservedState = preservedState.copyWith(
+          activeWorkspaceId: workspace.id,
+          unavailableLocalWorkspaceIds: preservedState
+              .unavailableLocalWorkspaceIds
+              .difference({workspace.id}),
+        );
+        preservedState =
+            await _persistPreparedHostedWorkspaceState(
+              prepared,
+              workspaceState: preservedState,
+              preserveActiveSelection: true,
+            ) ??
+            preservedState;
+        if (!mounted) {
+          return true;
+        }
+        setState(() {
+          _workspaceState = preservedState;
+        });
+        await _refreshWorkspaceSwitcherState(preservedState);
+        return true;
+      }
+      final preservesUnavailableActiveLocalSelection =
+          preservesActiveLocalSelectionWithHostedShell;
       if (preservesUnavailableActiveLocalSelection) {
         final optimisticHostedAccessMode =
             _hostedWorkspaceAccessModeForViewModel(prepared.viewModel);
@@ -1032,6 +1090,18 @@ class _TrackStateAppState extends State<TrackStateApp>
       final reason = _normalizeWorkspaceFailureReason(nextViewModel.message);
       if (preserveActiveLocalSelectionOnStartupFailure && workspace.isLocal) {
         nextViewModel.dispose();
+        if (kIsWeb && _shouldRetryActiveLocalWorkspaceRevalidation(reason)) {
+          final preserved = await _preserveActiveLocalWorkspaceSelection(
+            workspace,
+            previousViewModel,
+            deferAccessRestore: deferAccessRestore,
+            requireAuthenticatedHostedFallback: false,
+          );
+          if (preserved != null) {
+            _scheduleDeferredStartupLocalWorkspaceRestore(workspace);
+            return preserved;
+          }
+        }
         final requiresBrowserReselection =
             _requiresBrowserLocalWorkspaceReselection(reason);
         if (preserveActiveLocalSelectionOnUnsupportedAccess &&
@@ -1063,6 +1133,18 @@ class _TrackStateAppState extends State<TrackStateApp>
     } on Object catch (error) {
       final reason = _normalizeWorkspaceFailureReason(error);
       if (preserveActiveLocalSelectionOnStartupFailure && workspace.isLocal) {
+        if (kIsWeb && _shouldRetryActiveLocalWorkspaceRevalidation(reason)) {
+          final preserved = await _preserveActiveLocalWorkspaceSelection(
+            workspace,
+            previousViewModel,
+            deferAccessRestore: deferAccessRestore,
+            requireAuthenticatedHostedFallback: false,
+          );
+          if (preserved != null) {
+            _scheduleDeferredStartupLocalWorkspaceRestore(workspace);
+            return preserved;
+          }
+        }
         final requiresBrowserReselection =
             _requiresBrowserLocalWorkspaceReselection(reason);
         if (preserveActiveLocalSelectionOnUnsupportedAccess &&
@@ -1112,7 +1194,12 @@ class _TrackStateAppState extends State<TrackStateApp>
       } else {
         _workspaceValidationFailures.remove(workspace.id);
       }
-      return hostedFallbackSwitch;
+      return _PreparedWorkspaceSwitch(
+        viewModel: hostedFallbackSwitch.viewModel,
+        workspace: hostedFallbackSwitch.workspace,
+        localConfigurationKey: hostedFallbackSwitch.localConfigurationKey,
+        preserveActiveLocalAvailability: !markUnavailable,
+      );
     }
     if (requireAuthenticatedHostedFallback) {
       return null;
@@ -1252,6 +1339,118 @@ class _TrackStateAppState extends State<TrackStateApp>
       _workspaceState = nextState;
     });
     return nextState;
+  }
+
+  void _scheduleDeferredStartupLocalWorkspaceRestore(
+    WorkspaceProfile workspace,
+  ) {
+    if (!kIsWeb || widget.repository != null || !workspace.isLocal) {
+      return;
+    }
+    final restoreVersion = ++_deferredStartupLocalWorkspaceRestoreVersion;
+    unawaited(
+      _runDeferredStartupLocalWorkspaceRestore(
+        workspace,
+        restoreVersion: restoreVersion,
+      ),
+    );
+  }
+
+  bool _shouldContinueDeferredStartupLocalWorkspaceRestore(
+    WorkspaceProfile workspace, {
+    required int restoreVersion,
+  }) {
+    return mounted &&
+        restoreVersion == _deferredStartupLocalWorkspaceRestoreVersion &&
+        _workspaceState.activeWorkspaceId == workspace.id;
+  }
+
+  Future<void> _runDeferredStartupLocalWorkspaceRestore(
+    WorkspaceProfile workspace, {
+    required int restoreVersion,
+  }) async {
+    const retryDelays = <Duration>[
+      Duration(milliseconds: 100),
+      Duration(milliseconds: 150),
+      Duration(milliseconds: 250),
+      Duration(milliseconds: 400),
+      Duration(milliseconds: 600),
+    ];
+    const maxStartupRevalidationWait = Duration(seconds: 10);
+    var elapsedWait = Duration.zero;
+    var attempt = 0;
+    while (_shouldContinueDeferredStartupLocalWorkspaceRestore(
+      workspace,
+      restoreVersion: restoreVersion,
+    )) {
+      if (viewModel.workspaceId == workspace.id &&
+          viewModel.usesLocalPersistence) {
+        return;
+      }
+      final previousViewModel = viewModel;
+      final prepared = await _prepareBrowserLocalWorkspaceSwitch(
+        workspace,
+        previousViewModel: previousViewModel,
+      );
+      if (!_shouldContinueDeferredStartupLocalWorkspaceRestore(
+        workspace,
+        restoreVersion: restoreVersion,
+      )) {
+        prepared?.viewModel.dispose();
+        return;
+      }
+      if (prepared != null) {
+        var selectedState = await widget.workspaceProfileService.selectProfile(
+          workspace.id,
+        );
+        selectedState = await _saveLocalWorkspaceAvailability(
+          workspace.id,
+          isAvailable: true,
+        );
+        await _commitPreparedWorkspaceSwitch(
+          prepared,
+          previousViewModel: previousViewModel,
+          workspaceState: selectedState,
+        );
+        return;
+      }
+      final reason = _workspaceValidationFailureReason(workspace);
+      final retryable = _shouldRetryActiveLocalWorkspaceRevalidation(reason);
+      if (!retryable ||
+          _requiresBrowserLocalWorkspaceReselection(reason) ||
+          _isUnsupportedActiveLocalStartupAccess(reason)) {
+        await _saveLocalWorkspaceAvailability(workspace.id, isAvailable: false);
+        if (_shouldContinueDeferredStartupLocalWorkspaceRestore(
+          workspace,
+          restoreVersion: restoreVersion,
+        )) {
+          await _refreshWorkspaceSwitcherState();
+        }
+        return;
+      }
+      final remaining = maxStartupRevalidationWait - elapsedWait;
+      if (remaining <= Duration.zero) {
+        break;
+      }
+      final delay = retryDelays[math.min(attempt, retryDelays.length - 1)];
+      final appliedDelay = remaining < delay ? remaining : delay;
+      await Future<void>.delayed(appliedDelay);
+      elapsedWait += appliedDelay;
+      attempt += 1;
+    }
+    if (!_shouldContinueDeferredStartupLocalWorkspaceRestore(
+      workspace,
+      restoreVersion: restoreVersion,
+    )) {
+      return;
+    }
+    await _saveLocalWorkspaceAvailability(workspace.id, isAvailable: false);
+    if (_shouldContinueDeferredStartupLocalWorkspaceRestore(
+      workspace,
+      restoreVersion: restoreVersion,
+    )) {
+      await _refreshWorkspaceSwitcherState();
+    }
   }
 
   bool _isUnsupportedActiveLocalStartupAccess(String reason) {
@@ -5813,11 +6012,13 @@ class _PreparedWorkspaceSwitch {
     required this.viewModel,
     required this.workspace,
     required this.localConfigurationKey,
+    this.preserveActiveLocalAvailability = false,
   });
 
   final TrackerViewModel viewModel;
   final WorkspaceProfile? workspace;
   final String? localConfigurationKey;
+  final bool preserveActiveLocalAvailability;
 }
 
 class _WorkspaceRestoreFailure {
