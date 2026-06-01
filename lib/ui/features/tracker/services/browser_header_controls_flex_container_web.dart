@@ -130,6 +130,10 @@ void _wrapHeaderSemanticsNode({
   }
   if (parent.getAttribute(_wrapperAttributeName) == semanticsIdentifier) {
     _applyWrapperStyles(parent as web.HTMLElement);
+    _syncWrapperBounds(
+      wrapper: parent,
+      semanticsNode: semanticsNode as web.HTMLElement,
+    );
     return;
   }
   final wrapper = web.HTMLDivElement()
@@ -137,6 +141,10 @@ void _wrapHeaderSemanticsNode({
   _applyWrapperStyles(wrapper);
   parent.insertBefore(wrapper, semanticsNode);
   wrapper.append(semanticsNode);
+  _syncWrapperBounds(
+    wrapper: wrapper,
+    semanticsNode: semanticsNode as web.HTMLElement,
+  );
 }
 
 void _unwrapHeaderSemanticsNode(web.Element wrapper) {
@@ -159,7 +167,53 @@ void _applyWrapperStyles(web.HTMLElement wrapper) {
   style.display = 'flex';
   style.alignItems = 'center';
   style.justifyContent = 'flex-start';
+  style.flex = '0 0 auto';
   style.boxSizing = 'border-box';
   style.minWidth = '0';
   style.maxWidth = '100%';
+}
+
+void _syncWrapperBounds({
+  required web.HTMLElement wrapper,
+  required web.HTMLElement semanticsNode,
+}) {
+  final rect = semanticsNode.getBoundingClientRect();
+  final computedStyle = web.window.getComputedStyle(semanticsNode);
+  final width = _resolvedDimension(
+    cssValue: computedStyle.width,
+    fallbackPixels: rect.width,
+  );
+  final height = _resolvedDimension(
+    cssValue: computedStyle.height,
+    fallbackPixels: rect.height,
+  );
+
+  final style = wrapper.style;
+  style.width = width;
+  style.minWidth = width;
+  style.maxWidth = width;
+  style.height = height;
+  style.minHeight = height;
+  style.maxHeight = height;
+  style.marginLeft = _resolvedInset(computedStyle.left);
+  style.marginTop = _resolvedInset(computedStyle.top);
+}
+
+String _resolvedDimension({
+  required String cssValue,
+  required double fallbackPixels,
+}) {
+  final normalized = cssValue.trim();
+  if (normalized.isNotEmpty && normalized != 'auto' && normalized != '0px') {
+    return normalized;
+  }
+  return '${fallbackPixels}px';
+}
+
+String _resolvedInset(String cssValue) {
+  final normalized = cssValue.trim();
+  if (normalized.isEmpty || normalized == 'auto' || normalized == '0px') {
+    return '';
+  }
+  return normalized;
 }
