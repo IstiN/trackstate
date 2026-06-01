@@ -9013,6 +9013,7 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
                     semanticsLabel:
                         '${l10n.openWorkspace}: ${workspace.displayName}',
                     onPressed: onOpen,
+                    rowId: rowSemanticsIdentifier,
                     focusTargetId: _workspaceSwitcherActionFocusId(
                       workspace.id,
                       'open',
@@ -9031,6 +9032,7 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
                     label: primaryActionLabel,
                     semanticsLabel: primaryActionSemanticLabel!,
                     onPressed: onPrimaryAction,
+                    rowId: rowSemanticsIdentifier,
                     focusTargetId: _workspaceSwitcherActionFocusId(
                       workspace.id,
                       'primary',
@@ -9052,6 +9054,7 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
                     semanticsLabel: '${l10n.delete}: ${workspace.displayName}',
                     onPressed: onDelete,
                     destructive: true,
+                    rowId: rowSemanticsIdentifier,
                     focusTargetId: _workspaceSwitcherActionFocusId(
                       workspace.id,
                       'delete',
@@ -9239,6 +9242,7 @@ class _WorkspaceSwitcherActionButton extends StatelessWidget {
     required this.semanticsLabel,
     required this.onPressed,
     required this.focusTargetId,
+    required this.rowId,
     this.destructive = false,
   });
 
@@ -9247,6 +9251,7 @@ class _WorkspaceSwitcherActionButton extends StatelessWidget {
   final String semanticsLabel;
   final VoidCallback? onPressed;
   final String focusTargetId;
+  final String rowId;
   final bool destructive;
 
   @override
@@ -9306,6 +9311,7 @@ class _WorkspaceSwitcherActionButton extends StatelessWidget {
           onPressed: onPressed,
           focusTargetId: focusTargetId,
           panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+          rowId: rowId,
           child: buttonChild,
         ),
       ),
