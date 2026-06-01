@@ -786,7 +786,8 @@ class GitHubTrackStateProvider
     RepositoryAttachmentWriteRequest request,
   ) async {
     final connection = _requireConnection();
-    if (await _isLfsTracked(request.path, ref: request.branch)) {
+    final lfsTracked = await _isLfsTracked(request.path, ref: request.branch);
+    if (lfsTracked) {
       throw TrackStateProviderException(
         'GitHub LFS attachment uploads are not yet implemented for '
         '${request.path}.',
