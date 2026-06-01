@@ -12511,7 +12511,10 @@ class _IssueList extends StatelessWidget {
     final colors = context.ts;
     final searchResults = viewModel.searchResults;
     final bootstrapResults = viewModel.shouldUseBootstrapSearchFallback
-        ? viewModel.issues.take(6).toList(growable: false)
+        ? viewModel.issues
+              .where((issue) => !issue.isArchived)
+              .take(6)
+              .toList(growable: false)
         : const <TrackStateIssue>[];
     final visibleResults = searchResults.isEmpty
         ? bootstrapResults
