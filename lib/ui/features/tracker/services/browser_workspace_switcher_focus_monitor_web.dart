@@ -1034,13 +1034,17 @@ String? _workspaceSwitcherLogicalFocusTargetKey(
   if (!withinWorkspaceSwitcher && !isWorkspaceSwitcherTrigger) {
     return null;
   }
-  final browserFocusId = element.getAttribute(_browserFocusIdAttribute);
-  if (browserFocusId case final value? when value.trim().isNotEmpty) {
-    return 'focus:${value.trim()}';
+  final sharedIdentifier = _trimmedAttributeValue(
+    element.getAttribute(_browserFocusIdAttribute),
+  );
+  if (sharedIdentifier != null) {
+    return 'control:$sharedIdentifier';
   }
-  final semanticsIdentifier = element.getAttribute('flt-semantics-identifier');
-  if (semanticsIdentifier case final value? when value.trim().isNotEmpty) {
-    return 'semantics:${value.trim()}';
+  final semanticsIdentifier = _trimmedAttributeValue(
+    element.getAttribute('flt-semantics-identifier'),
+  );
+  if (semanticsIdentifier != null) {
+    return 'control:$semanticsIdentifier';
   }
   final rowIdentifier = element.getAttribute(_browserFocusRowIdAttribute);
   final normalizedLabel = _normalizeLabel(_elementAccessibleLabel(element));
@@ -1059,6 +1063,14 @@ String? _workspaceSwitcherLogicalFocusTargetKey(
     return 'row-label:$normalizedLabel';
   }
   return 'panel:$normalizedLabel';
+}
+
+String? _trimmedAttributeValue(String? value) {
+  final trimmedValue = value?.trim();
+  if (trimmedValue == null || trimmedValue.isEmpty) {
+    return null;
+  }
+  return trimmedValue;
 }
 
 bool _isMeaningfullyInteractiveFocusTarget(web.Element element) {
