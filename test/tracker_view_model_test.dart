@@ -1421,10 +1421,10 @@ void main() {
   );
 
   test(
-    'view model keeps hosted LFS duplicate uploads on the local Git restriction path',
+    'view model allows hosted LFS duplicate replacements when release uploads are available',
     () async {
       SharedPreferences.setMockInitialValues({
-        'trackstate.githubToken.trackstate.trackstate': 'limited-attachments',
+        'trackstate.githubToken.trackstate.trackstate': 'release-backed-token',
       });
       const attachmentRestrictedPermission = RepositoryPermission(
         canRead: true,
@@ -1433,6 +1433,7 @@ void main() {
         canCreateBranch: true,
         canManageAttachments: true,
         attachmentUploadMode: AttachmentUploadMode.noLfs,
+        supportsReleaseAttachmentWrites: true,
         canCheckCollaborators: false,
       );
       final viewModel = TrackerViewModel(
@@ -1457,7 +1458,7 @@ void main() {
 
       expect(inspection.isLfsTracked, isTrue);
       expect(inspection.existingAttachment, isNotNull);
-      expect(inspection.requiresLocalGitUpload, isTrue);
+      expect(inspection.requiresLocalGitUpload, isFalse);
       expect(inspection.resolvedName, 'sync-sequence.svg');
     },
   );

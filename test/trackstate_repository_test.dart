@@ -2554,74 +2554,6 @@ size 6
   );
 
   test(
-    'github provider blocks replacing an existing LFS-tracked attachment until hosted LFS writes exist',
-    () async {
-      var putAttempted = false;
-      Map<String, Object?>? uploadBody;
-      final provider = GitHubTrackStateProvider(
-        repositoryName: 'IstiN/trackstate',
-        dataRef: 'main',
-        client: MockClient((request) async {
-          final path = request.url.path;
-          if (path.endsWith('/repos/IstiN/trackstate') &&
-              request.method == 'GET') {
-            return http.Response(
-              '{"permissions":{"pull":true,"push":true,"admin":false}}',
-              200,
-            );
-          }
-          if (path.endsWith('/user') && request.method == 'GET') {
-            return http.Response('{"login":"octocat","name":"Mona"}', 200);
-          }
-          if (path.endsWith('/contents/.gitattributes') &&
-              request.method == 'GET') {
-            return _contentResponse(
-              '*.pdf filter=lfs diff=lfs merge=lfs -text\n',
-            );
-          }
-          if (path.endsWith('/contents/attachments/manual.pdf') &&
-              request.method == 'PUT') {
-            putAttempted = true;
-            uploadBody = jsonDecode(request.body) as Map<String, Object?>;
-            return http.Response('{"content":{"sha":"uploaded-sha"}}', 201);
-          }
-          return http.Response('', 404);
-        }),
-      );
-
-      await provider.authenticate(
-        const RepositoryConnection(
-          repository: 'IstiN/trackstate',
-          branch: 'main',
-          token: 'token',
-        ),
-      );
-
-      await expectLater(
-        () => provider.writeAttachment(
-          RepositoryAttachmentWriteRequest(
-            path: 'attachments/manual.pdf',
-            bytes: Uint8List.fromList(utf8.encode('replacement attachment')),
-            message: 'Replace attachment',
-            branch: 'main',
-            expectedRevision: 'existing-sha',
-          ),
-        ),
-        throwsA(
-          isA<TrackStateProviderException>().having(
-            (error) => error.message,
-            'message',
-            contains('not yet implemented'),
-          ),
-        ),
-      );
-
-      expect(putAttempted, isFalse);
-      expect(uploadBody, isNull);
-    },
-  );
-
-  test(
     'github provider evaluates LFS upload rules against the target branch',
     () async {
       var putAttempted = false;
@@ -2931,7 +2863,7 @@ size 6
   );
 
   test(
-    'provider-backed repository overwrites legacy repository-path attachments directly when hosted release writes are unavailable',
+    'provider-backed repository queues legacy repository-path replacements through the inbox when hosted release writes are unavailable',
     () async {
       final provider = _FakeReleaseAttachmentProvider(
         permission: const RepositoryPermission(
@@ -3038,15 +2970,15 @@ Nested release-backed attachment issue.
 
       expect(
         provider.lastAttachmentWriteRequest?.path,
-        'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
+        'DEMO/.trackstate/upload-inbox/DEMO-2/manual.pdf',
       );
       expect(
-        provider.binaryFiles['DEMO/DEMO-1/DEMO-2/attachments/manual.pdf'],
+        provider.binaryFiles['DEMO/.trackstate/upload-inbox/DEMO-2/manual.pdf'],
         Uint8List.fromList(utf8.encode('replacement attachment')),
       );
       expect(
         provider.binaryFiles.containsKey(
-          'DEMO/.trackstate/upload-inbox/DEMO-2/manual.pdf',
+          'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
         ),
         isFalse,
       );
@@ -3063,7 +2995,7 @@ Nested release-backed attachment issue.
   );
 
   test(
-    'provider-backed repository blocks replacing existing LFS-tracked repository-path attachments in hosted no-LFS sessions',
+    'provider-backed repository migrates duplicate hosted LFS replacements to GitHub Releases metadata',
     () async {
       final provider = _FakeReleaseAttachmentProvider(
         permission: const RepositoryPermission(
@@ -3073,6 +3005,7 @@ Nested release-backed attachment issue.
           canCreateBranch: true,
           canManageAttachments: true,
           attachmentUploadMode: AttachmentUploadMode.noLfs,
+          supportsReleaseAttachmentWrites: true,
           canCheckCollaborators: false,
         ),
         enforceExistingRevisionOnWrite: true,
@@ -3159,19 +3092,10 @@ Hosted repository-path attachment issue.
         scopes: const {IssueHydrationScope.attachments},
       );
 
-      await expectLater(
-        () => repository.uploadIssueAttachment(
-          issue: issue,
-          name: 'manual.pdf',
-          bytes: Uint8List.fromList(utf8.encode('replacement attachment')),
-        ),
-        throwsA(
-          isA<TrackStateRepositoryException>().having(
-            (error) => error.message,
-            'message',
-            contains('download-only for Git LFS attachments'),
-          ),
-        ),
+      final updated = await repository.uploadIssueAttachment(
+        issue: issue,
+        name: 'manual.pdf',
+        bytes: Uint8List.fromList(utf8.encode('replacement attachment')),
       );
 
       expect(provider.lastAttachmentWriteRequest, isNull);
@@ -3181,6 +3105,34 @@ Hosted repository-path attachment issue.
         ),
         isFalse,
       );
+      expect(updated.attachments, hasLength(1));
+      expect(
+        updated.attachments.single.storageBackend,
+        AttachmentStorageMode.githubReleases,
+      );
+      expect(
+        updated.attachments.single.githubReleaseTag,
+        'trackstate-attachments-DEMO-2',
+      );
+      expect(updated.attachments.single.githubReleaseAssetName, 'manual.pdf');
+      final metadata =
+          jsonDecode(provider.files['DEMO/DEMO-1/DEMO-2/attachments.json']!)
+              as List<Object?>;
+      expect(metadata, [
+        {
+          'id': 'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
+          'name': 'manual.pdf',
+          'mediaType': 'application/pdf',
+          'sizeBytes': utf8.encode('replacement attachment').length,
+          'author': 'demo-user',
+          'createdAt': updated.attachments.single.createdAt,
+          'storagePath': 'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
+          'revisionOrOid': '84',
+          'storageBackend': 'github-releases',
+          'githubReleaseTag': 'trackstate-attachments-DEMO-2',
+          'githubReleaseAssetName': 'manual.pdf',
+        },
+      ]);
     },
   );
 
