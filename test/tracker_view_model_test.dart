@@ -1421,7 +1421,7 @@ void main() {
   );
 
   test(
-    'view model keeps duplicate replacement flow available for existing hosted LFS attachments',
+    'view model keeps hosted LFS duplicate uploads on the local Git restriction path',
     () async {
       SharedPreferences.setMockInitialValues({
         'trackstate.githubToken.trackstate.trackstate': 'limited-attachments',
@@ -1457,7 +1457,7 @@ void main() {
 
       expect(inspection.isLfsTracked, isTrue);
       expect(inspection.existingAttachment, isNotNull);
-      expect(inspection.requiresLocalGitUpload, isFalse);
+      expect(inspection.requiresLocalGitUpload, isTrue);
       expect(inspection.resolvedName, 'sync-sequence.svg');
     },
   );

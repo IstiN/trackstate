@@ -1140,7 +1140,8 @@ class ProviderBackedTrackStateRepository
     final preserveRepositoryPathReplacement =
         attachmentStorage.mode == AttachmentStorageMode.githubReleases &&
         !permission.supportsReleaseAttachmentWrites &&
-        existingAttachment?.storageBackend == AttachmentStorageMode.repositoryPath;
+        existingAttachment?.storageBackend ==
+            AttachmentStorageMode.repositoryPath;
     if (attachmentStorage.mode == AttachmentStorageMode.githubReleases) {
       final githubReleases = attachmentStorage.githubReleases!;
       final writeBranch = await _provider.resolveWriteBranch();
@@ -1332,13 +1333,8 @@ class ProviderBackedTrackStateRepository
       blobPaths: _snapshotBlobPaths,
     );
     final lfsTracked = await _provider.isLfsTracked(attachmentPath);
-    final hostedLfsReplacementAllowed =
-        lfsTracked &&
-        permission.attachmentUploadMode == AttachmentUploadMode.noLfs &&
-        existingAttachment != null;
     if (lfsTracked &&
-        permission.attachmentUploadMode == AttachmentUploadMode.noLfs &&
-        !hostedLfsReplacementAllowed) {
+        permission.attachmentUploadMode == AttachmentUploadMode.noLfs) {
       throw const TrackStateRepositoryException(
         'This repository session is download-only for Git LFS attachments.',
       );

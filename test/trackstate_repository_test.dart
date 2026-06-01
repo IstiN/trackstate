@@ -2554,7 +2554,7 @@ size 6
   );
 
   test(
-    'github provider allows replacing an existing LFS-tracked attachment when the current revision is provided',
+    'github provider blocks replacing an existing LFS-tracked attachment until hosted LFS writes exist',
     () async {
       var putAttempted = false;
       Map<String, Object?>? uploadBody;
@@ -2597,19 +2597,27 @@ size 6
         ),
       );
 
-      final result = await provider.writeAttachment(
-        RepositoryAttachmentWriteRequest(
-          path: 'attachments/manual.pdf',
-          bytes: Uint8List.fromList(utf8.encode('replacement attachment')),
-          message: 'Replace attachment',
-          branch: 'main',
-          expectedRevision: 'existing-sha',
+      await expectLater(
+        () => provider.writeAttachment(
+          RepositoryAttachmentWriteRequest(
+            path: 'attachments/manual.pdf',
+            bytes: Uint8List.fromList(utf8.encode('replacement attachment')),
+            message: 'Replace attachment',
+            branch: 'main',
+            expectedRevision: 'existing-sha',
+          ),
+        ),
+        throwsA(
+          isA<TrackStateProviderException>().having(
+            (error) => error.message,
+            'message',
+            contains('not yet implemented'),
+          ),
         ),
       );
 
-      expect(putAttempted, isTrue);
-      expect(uploadBody?['sha'], 'existing-sha');
-      expect(result.revision, 'uploaded-sha');
+      expect(putAttempted, isFalse);
+      expect(uploadBody, isNull);
     },
   );
 
@@ -3055,7 +3063,7 @@ Nested release-backed attachment issue.
   );
 
   test(
-    'provider-backed repository overwrites existing LFS-tracked repository-path attachments in hosted no-LFS sessions',
+    'provider-backed repository blocks replacing existing LFS-tracked repository-path attachments in hosted no-LFS sessions',
     () async {
       final provider = _FakeReleaseAttachmentProvider(
         permission: const RepositoryPermission(
@@ -3151,28 +3159,27 @@ Hosted repository-path attachment issue.
         scopes: const {IssueHydrationScope.attachments},
       );
 
-      final updated = await repository.uploadIssueAttachment(
-        issue: issue,
-        name: 'manual.pdf',
-        bytes: Uint8List.fromList(utf8.encode('replacement attachment')),
+      await expectLater(
+        () => repository.uploadIssueAttachment(
+          issue: issue,
+          name: 'manual.pdf',
+          bytes: Uint8List.fromList(utf8.encode('replacement attachment')),
+        ),
+        throwsA(
+          isA<TrackStateRepositoryException>().having(
+            (error) => error.message,
+            'message',
+            contains('download-only for Git LFS attachments'),
+          ),
+        ),
       );
 
+      expect(provider.lastAttachmentWriteRequest, isNull);
       expect(
-        provider.lastAttachmentWriteRequest?.path,
-        'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
-      );
-      expect(
-        provider.lastAttachmentWriteRequest?.expectedRevision,
-        'attachment-sha',
-      );
-      expect(
-        provider.binaryFiles['DEMO/DEMO-1/DEMO-2/attachments/manual.pdf'],
-        Uint8List.fromList(utf8.encode('replacement attachment')),
-      );
-      expect(updated.attachments, hasLength(1));
-      expect(
-        updated.attachments.single.storageBackend,
-        AttachmentStorageMode.repositoryPath,
+        provider.binaryFiles.containsKey(
+          'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
+        ),
+        isFalse,
       );
     },
   );
@@ -4795,7 +4802,8 @@ class _FakeReleaseAttachmentProvider
   }
 
   @override
-  Future<bool> isLfsTracked(String path) async => lfsTrackedPaths.contains(path);
+  Future<bool> isLfsTracked(String path) async =>
+      lfsTrackedPaths.contains(path);
 
   @override
   Future<RepositoryAttachment> readReleaseAttachment(
