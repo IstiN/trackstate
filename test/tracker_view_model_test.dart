@@ -1421,6 +1421,49 @@ void main() {
   );
 
   test(
+    'view model allows hosted LFS duplicate replacements when release uploads are available',
+    () async {
+      SharedPreferences.setMockInitialValues({
+        'trackstate.githubToken.trackstate.trackstate': 'release-backed-token',
+      });
+      const attachmentRestrictedPermission = RepositoryPermission(
+        canRead: true,
+        canWrite: true,
+        isAdmin: false,
+        canCreateBranch: true,
+        canManageAttachments: true,
+        attachmentUploadMode: AttachmentUploadMode.noLfs,
+        supportsReleaseAttachmentWrites: true,
+        canCheckCollaborators: false,
+      );
+      final viewModel = TrackerViewModel(
+        repository: ReactiveIssueDetailTrackStateRepository(
+          permission: attachmentRestrictedPermission,
+          textFixtures: _repositoryPathProjectTextFixtures(),
+          lfsTrackedPaths: {'TRACK-12/attachments/sync-sequence.svg'},
+        ),
+      );
+
+      await viewModel.load();
+      final issue = viewModel.issues.firstWhere(
+        (candidate) => candidate.key == 'TRACK-12',
+      );
+      viewModel.selectIssue(issue);
+      await viewModel.ensureIssueAttachmentsLoaded(issue);
+      final hydratedIssue = viewModel.selectedIssue!;
+      final inspection = await viewModel.inspectIssueAttachmentUpload(
+        hydratedIssue,
+        'sync sequence.svg',
+      );
+
+      expect(inspection.isLfsTracked, isTrue);
+      expect(inspection.existingAttachment, isNotNull);
+      expect(inspection.requiresLocalGitUpload, isFalse);
+      expect(inspection.resolvedName, 'sync-sequence.svg');
+    },
+  );
+
+  test(
     'view model skips local Git warnings for LFS-tracked names when release-backed uploads are enabled',
     () async {
       SharedPreferences.setMockInitialValues({
