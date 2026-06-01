@@ -2863,7 +2863,7 @@ size 6
   );
 
   test(
-    'provider-backed repository overwrites legacy repository-path attachments directly when hosted release writes are unavailable',
+    'provider-backed repository queues legacy repository-path replacements through the inbox when hosted release writes are unavailable',
     () async {
       final provider = _FakeReleaseAttachmentProvider(
         permission: const RepositoryPermission(
@@ -2970,15 +2970,15 @@ Nested release-backed attachment issue.
 
       expect(
         provider.lastAttachmentWriteRequest?.path,
-        'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
+        'DEMO/.trackstate/upload-inbox/DEMO-2/manual.pdf',
       );
       expect(
-        provider.binaryFiles['DEMO/DEMO-1/DEMO-2/attachments/manual.pdf'],
+        provider.binaryFiles['DEMO/.trackstate/upload-inbox/DEMO-2/manual.pdf'],
         Uint8List.fromList(utf8.encode('replacement attachment')),
       );
       expect(
         provider.binaryFiles.containsKey(
-          'DEMO/.trackstate/upload-inbox/DEMO-2/manual.pdf',
+          'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
         ),
         isFalse,
       );
@@ -2991,6 +2991,148 @@ Nested release-backed attachment issue.
         updated.attachments.single.repositoryPath,
         'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
       );
+    },
+  );
+
+  test(
+    'provider-backed repository migrates duplicate hosted LFS replacements to GitHub Releases metadata',
+    () async {
+      final provider = _FakeReleaseAttachmentProvider(
+        permission: const RepositoryPermission(
+          canRead: true,
+          canWrite: true,
+          isAdmin: false,
+          canCreateBranch: true,
+          canManageAttachments: true,
+          attachmentUploadMode: AttachmentUploadMode.noLfs,
+          supportsReleaseAttachmentWrites: true,
+          canCheckCollaborators: false,
+        ),
+        enforceExistingRevisionOnWrite: true,
+        lfsTrackedPaths: {'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf'},
+        files: {
+          'DEMO/project.json': jsonEncode({
+            'key': 'DEMO',
+            'name': 'Demo Project',
+            'attachmentStorage': {'mode': 'repository-path'},
+          }),
+          'DEMO/config/statuses.json': jsonEncode([
+            {'id': 'todo', 'name': 'To Do'},
+          ]),
+          'DEMO/config/issue-types.json': jsonEncode([
+            {'id': 'story', 'name': 'Story'},
+          ]),
+          'DEMO/config/fields.json': jsonEncode([
+            {
+              'id': 'summary',
+              'name': 'Summary',
+              'type': 'string',
+              'required': true,
+            },
+          ]),
+          'DEMO/.trackstate/index/issues.json': jsonEncode([
+            {
+              'key': 'DEMO-2',
+              'path': 'DEMO/DEMO-1/DEMO-2/main.md',
+              'parent': null,
+              'epic': null,
+              'summary': 'Hosted repository-path attachment issue',
+              'issueType': 'story',
+              'status': 'todo',
+              'labels': [],
+              'updated': '2026-05-12T20:31:06Z',
+              'children': [],
+              'archived': false,
+            },
+          ]),
+          'DEMO/DEMO-1/DEMO-2/main.md': '''
+---
+key: DEMO-2
+project: DEMO
+issueType: story
+status: todo
+summary: Hosted repository-path attachment issue
+updated: 2026-05-12T20:31:06Z
+---
+
+# Description
+
+Hosted repository-path attachment issue.
+''',
+          'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf':
+              '%PDF-1.4\nlegacy repository attachment\n',
+          'DEMO/DEMO-1/DEMO-2/attachments.json': jsonEncode([
+            {
+              'id': 'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
+              'name': 'manual.pdf',
+              'mediaType': 'application/pdf',
+              'sizeBytes': 59,
+              'author': 'legacy-user',
+              'createdAt': '2026-05-12T20:31:06Z',
+              'storagePath': 'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
+              'revisionOrOid': '',
+              'storageBackend': 'repository-path',
+              'repositoryPath': 'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
+            },
+          ]),
+        },
+      );
+      final repository = ProviderBackedTrackStateRepository(provider: provider);
+
+      final snapshot = await repository.loadSnapshot();
+      await repository.connect(
+        const RepositoryConnection(
+          repository: 'IstiN/trackstate',
+          branch: 'main',
+          token: 'token',
+        ),
+      );
+      final issue = await repository.hydrateIssue(
+        snapshot.issues.single,
+        scopes: const {IssueHydrationScope.attachments},
+      );
+
+      final updated = await repository.uploadIssueAttachment(
+        issue: issue,
+        name: 'manual.pdf',
+        bytes: Uint8List.fromList(utf8.encode('replacement attachment')),
+      );
+
+      expect(provider.lastAttachmentWriteRequest, isNull);
+      expect(
+        provider.binaryFiles.containsKey(
+          'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
+        ),
+        isFalse,
+      );
+      expect(updated.attachments, hasLength(1));
+      expect(
+        updated.attachments.single.storageBackend,
+        AttachmentStorageMode.githubReleases,
+      );
+      expect(
+        updated.attachments.single.githubReleaseTag,
+        'trackstate-attachments-DEMO-2',
+      );
+      expect(updated.attachments.single.githubReleaseAssetName, 'manual.pdf');
+      final metadata =
+          jsonDecode(provider.files['DEMO/DEMO-1/DEMO-2/attachments.json']!)
+              as List<Object?>;
+      expect(metadata, [
+        {
+          'id': 'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
+          'name': 'manual.pdf',
+          'mediaType': 'application/pdf',
+          'sizeBytes': utf8.encode('replacement attachment').length,
+          'author': 'demo-user',
+          'createdAt': updated.attachments.single.createdAt,
+          'storagePath': 'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
+          'revisionOrOid': '84',
+          'storageBackend': 'github-releases',
+          'githubReleaseTag': 'trackstate-attachments-DEMO-2',
+          'githubReleaseAssetName': 'manual.pdf',
+        },
+      ]);
     },
   );
 
@@ -4436,12 +4578,14 @@ class _FakeReleaseAttachmentProvider
     required this.permission,
     required Map<String, String> files,
     this.enforceExistingRevisionOnWrite = false,
+    this.lfsTrackedPaths = const <String>{},
   }) : files = {...files};
 
   final RepositoryPermission permission;
   final Map<String, String> files;
   final Map<String, Uint8List> binaryFiles = <String, Uint8List>{};
   final bool enforceExistingRevisionOnWrite;
+  final Set<String> lfsTrackedPaths;
   final List<String> readTextFilePaths = <String>[];
   RepositoryAttachmentWriteRequest? lastAttachmentWriteRequest;
   RepositoryFileChangeRequest? lastFileChangeRequest;
@@ -4610,7 +4754,8 @@ class _FakeReleaseAttachmentProvider
   }
 
   @override
-  Future<bool> isLfsTracked(String path) async => false;
+  Future<bool> isLfsTracked(String path) async =>
+      lfsTrackedPaths.contains(path);
 
   @override
   Future<RepositoryAttachment> readReleaseAttachment(

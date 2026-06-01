@@ -1935,6 +1935,10 @@ class TrackerViewModel extends ChangeNotifier {
         break;
       }
     }
+    final canUseHostedReleaseReplacement =
+        existingAttachment != null &&
+        isLfsTracked &&
+        supportsHostedReleaseAttachmentWrites;
     return AttachmentUploadInspection(
       storagePath: storagePath,
       resolvedName: storagePath.split('/').last,
@@ -1942,7 +1946,8 @@ class TrackerViewModel extends ChangeNotifier {
       requiresLocalGitUpload:
           !usesGitHubReleasesAttachmentStorage &&
           hasAttachmentUploadRestriction &&
-          isLfsTracked,
+          isLfsTracked &&
+          !canUseHostedReleaseReplacement,
       existingAttachment: existingAttachment,
     );
   }
