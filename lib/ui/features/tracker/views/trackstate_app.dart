@@ -415,11 +415,13 @@ class _TrackStateAppState extends State<TrackStateApp>
   Future<_PreparedWorkspaceSwitch?> _prepareBrowserLocalWorkspaceSwitch(
     WorkspaceProfile workspace, {
     required TrackerViewModel previousViewModel,
+    bool deferAccessRestore = false,
   }) async {
     return _prepareBrowserLocalWorkspaceSwitchWithLoader(
       workspace,
       previousViewModel: previousViewModel,
       repositoryLoader: widget.openBrowserLocalRepository,
+      deferAccessRestore: deferAccessRestore,
     );
   }
 
@@ -428,6 +430,7 @@ class _TrackStateAppState extends State<TrackStateApp>
     WorkspaceProfile workspace, {
     required TrackerViewModel previousViewModel,
     required BrowserLocalRepositoryLoader repositoryLoader,
+    bool deferAccessRestore = false,
   }) async {
     try {
       final repository = await repositoryLoader(
@@ -444,7 +447,7 @@ class _TrackStateAppState extends State<TrackStateApp>
         autoLoad: false,
         workspaceId: workspace.id,
       );
-      await nextViewModel.load();
+      await nextViewModel.load(deferAccessRestore: deferAccessRestore);
       if (nextViewModel.snapshot == null) {
         final reason = _normalizeWorkspaceFailureReason(nextViewModel.message);
         nextViewModel.dispose();
@@ -1391,6 +1394,7 @@ class _TrackStateAppState extends State<TrackStateApp>
       final prepared = await _prepareBrowserLocalWorkspaceSwitch(
         workspace,
         previousViewModel: previousViewModel,
+        deferAccessRestore: true,
       );
       if (!_shouldContinueDeferredStartupLocalWorkspaceRestore(
         workspace,
