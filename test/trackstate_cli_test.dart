@@ -4,9 +4,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
-import 'package:http/testing.dart';
 import 'package:trackstate/cli/trackstate_cli.dart';
-import 'package:trackstate/data/providers/github/github_trackstate_provider.dart';
 import 'package:trackstate/data/providers/local/local_git_trackstate_provider.dart';
 import 'package:trackstate/data/providers/trackstate_provider.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
@@ -149,48 +147,51 @@ void main() {
       expect(data['projectConfig'], isA<Map<String, Object?>>());
     });
 
-    test('accepts root target flags as a session shorthand for local targets', () async {
-      final cli = TrackStateCli(
-        environment: TrackStateCliEnvironment(
-          workingDirectory: '/workspace/repo',
-          resolvePath: (path) => path,
-        ),
-        providerFactory: _FakeTrackStateCliProviderFactory(
-          localProvider: _FakeLocalGitTrackStateProvider(
-            repositoryPath: '/workspace/repo',
-            branch: 'feature/local',
-            user: const RepositoryUser(
-              login: 'local@example.com',
-              displayName: 'Local User',
-            ),
-            permission: const RepositoryPermission(
-              canRead: true,
-              canWrite: true,
-              isAdmin: false,
-              canCreateBranch: true,
-              canManageAttachments: true,
-              canCheckCollaborators: false,
+    test(
+      'accepts root target flags as a session shorthand for local targets',
+      () async {
+        final cli = TrackStateCli(
+          environment: TrackStateCliEnvironment(
+            workingDirectory: '/workspace/repo',
+            resolvePath: (path) => path,
+          ),
+          providerFactory: _FakeTrackStateCliProviderFactory(
+            localProvider: _FakeLocalGitTrackStateProvider(
+              repositoryPath: '/workspace/repo',
+              branch: 'feature/local',
+              user: const RepositoryUser(
+                login: 'local@example.com',
+                displayName: 'Local User',
+              ),
+              permission: const RepositoryPermission(
+                canRead: true,
+                canWrite: true,
+                isAdmin: false,
+                canCreateBranch: true,
+                canManageAttachments: true,
+                canCheckCollaborators: false,
+              ),
             ),
           ),
-        ),
-        repositoryFactory: _FakeTrackStateCliRepositoryFactory(
-          localRepository: _FakeSearchRepository(snapshot: _sampleSnapshot()),
-        ),
-      );
+          repositoryFactory: _FakeTrackStateCliRepositoryFactory(
+            localRepository: _FakeSearchRepository(snapshot: _sampleSnapshot()),
+          ),
+        );
 
-      final result = await cli.run(const <String>['--target', 'local']);
-      final json = jsonDecode(result.stdout) as Map<String, Object?>;
-      final data = json['data']! as Map<String, Object?>;
+        final result = await cli.run(const <String>['--target', 'local']);
+        final json = jsonDecode(result.stdout) as Map<String, Object?>;
+        final data = json['data']! as Map<String, Object?>;
 
-      expect(result.exitCode, 0);
-      expect(json['provider'], 'local-git');
-      expect(json['target'], <String, Object?>{
-        'type': 'local',
-        'value': '/workspace/repo',
-      });
-      expect(data['branch'], 'feature/local');
-      expect(data['authSource'], 'none');
-    });
+        expect(result.exitCode, 0);
+        expect(json['provider'], 'local-git');
+        expect(json['target'], <String, Object?>{
+          'type': 'local',
+          'value': '/workspace/repo',
+        });
+        expect(data['branch'], 'feature/local');
+        expect(data['authSource'], 'none');
+      },
+    );
 
     test(
       'accepts root target flags as a session shorthand for hosted targets',
@@ -216,7 +217,9 @@ void main() {
             hostedProvider: hostedProvider,
           ),
           repositoryFactory: _FakeTrackStateCliRepositoryFactory(
-            hostedRepository: _FakeSearchRepository(snapshot: _sampleSnapshot()),
+            hostedRepository: _FakeSearchRepository(
+              snapshot: _sampleSnapshot(),
+            ),
           ),
         );
 
@@ -363,67 +366,6 @@ void main() {
           'id': 'in-review',
           'name': 'In Review',
         });
-      },
-    );
-
-    test(
-      'hosted CLI provider factory enables cache-busted session reads',
-      () async {
-        Uri? branchRequestUri;
-        final providerFactory = DefaultTrackStateCliProviderFactory();
-        final provider = providerFactory.createHosted(
-          provider: 'github',
-          repository: 'owner/repo',
-          branch: 'main',
-          client: MockClient((request) async {
-            switch (request.url.path) {
-              case '/repos/owner/repo':
-                return http.Response(
-                  jsonEncode({
-                    'full_name': 'owner/repo',
-                    'permissions': <String, Object?>{
-                      'pull': true,
-                      'push': true,
-                      'admin': false,
-                    },
-                  }),
-                  200,
-                );
-              case '/user':
-                return http.Response(
-                  jsonEncode({
-                    'login': 'workspace-tester',
-                    'name': 'Workspace Tester',
-                  }),
-                  200,
-                );
-              case '/repos/owner/repo/branches/main':
-                branchRequestUri = request.url;
-                return http.Response(
-                  jsonEncode({
-                    'commit': <String, Object?>{'sha': 'new-revision'},
-                  }),
-                  200,
-                );
-            }
-            throw StateError('Unexpected request: ${request.url}');
-          }),
-        ) as GitHubTrackStateProvider;
-
-        await provider.authenticate(
-          const RepositoryConnection(
-            repository: 'owner/repo',
-            branch: 'main',
-            token: 'token',
-          ),
-        );
-        await provider.checkSync();
-
-        expect(branchRequestUri, isNotNull);
-        expect(
-          branchRequestUri!.queryParameters['_trackstate_refresh'],
-          isNotEmpty,
-        );
       },
     );
 

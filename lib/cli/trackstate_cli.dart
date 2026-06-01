@@ -7066,7 +7066,6 @@ class DefaultTrackStateCliProviderFactory
       repositoryName: repository,
       sourceRef: branch,
       dataRef: branch,
-      disableHostedSyncRequestCaching: true,
     );
   }
 }
