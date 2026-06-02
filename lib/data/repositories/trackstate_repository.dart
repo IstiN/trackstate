@@ -1123,6 +1123,11 @@ class ProviderBackedTrackStateRepository
     final existingAttachment = currentIssue.attachments
         .where((candidate) => candidate.storagePath == attachmentPath)
         .firstOrNull;
+    final preserveRepositoryPathReplacement =
+        attachmentStorage.mode == AttachmentStorageMode.githubReleases &&
+        !permission.supportsReleaseAttachmentWrites &&
+        existingAttachment?.storageBackend ==
+            AttachmentStorageMode.repositoryPath;
     final writeBranch = await _provider.resolveWriteBranch();
     final attachmentMetadataPath = _attachmentMetadataPath(
       _issueRoot(currentIssue.storagePath),
@@ -1146,10 +1151,11 @@ class ProviderBackedTrackStateRepository
         permission.attachmentUploadMode == AttachmentUploadMode.noLfs &&
         permission.supportsReleaseAttachmentWrites;
     final prefersReleaseStorage =
-        attachmentStorage.mode == AttachmentStorageMode.githubReleases ||
-        existingAttachment?.storageBackend ==
-            AttachmentStorageMode.githubReleases ||
-        shouldMigrateHostedLfsReplacementToReleaseStorage;
+        !preserveRepositoryPathReplacement &&
+        (attachmentStorage.mode == AttachmentStorageMode.githubReleases ||
+            existingAttachment?.storageBackend ==
+                AttachmentStorageMode.githubReleases ||
+            shouldMigrateHostedLfsReplacementToReleaseStorage);
     final githubReleases =
         attachmentStorage.githubReleases ??
         (prefersReleaseStorage
