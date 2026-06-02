@@ -35,26 +35,15 @@ void main() {
         'response = await Promise.race([',
       ),
     );
+    expect(workflow, contains('let readinessTimeoutId;'));
     expect(
       workflow,
       contains("runner-inventory-timeout"),
     );
-    expect(
-      workflow,
-      contains('const readinessStartedAt = Date.now();'),
-    );
-    expect(
-      workflow,
-      contains('const remainingDelayMs = Math.max('),
-    );
-    expect(
-      workflow,
-      contains('if (remainingDelayMs > 0) {'),
-    );
-    expect(
-      workflow,
-      contains('setTimeout(resolve, remainingDelayMs)'),
-    );
+    expect(workflow, contains('readinessTimeoutId = setTimeout('));
+    expect(workflow, contains('readinessTimeoutId.unref?.();'));
+    expect(workflow, contains('} finally {'));
+    expect(workflow, contains('clearTimeout(readinessTimeoutId);'));
     expect(
       workflow,
       contains('[self-hosted, macOS, trackstate-release, ARM64]'),
