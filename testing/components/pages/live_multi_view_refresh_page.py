@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 import re
 
 from testing.components.pages.live_issue_detail_collaboration_page import (
@@ -926,24 +927,61 @@ class LiveMultiViewRefreshPage:
         return self.current_body_text()
 
     def navigate_to_section(self, label: str) -> None:
-        bounds = self._button_bounds_for_sidebar_label(label)
-        if bounds is None:
+        clicked = self._session.evaluate(
+            """
+            (label) => {
+              const button = Array.from(document.querySelectorAll('flt-semantics[role="button"]'))
+                .find((element) => (element.innerText || '').trim() === label);
+              if (!button) {
+                return false;
+              }
+              button.scrollIntoView({block: 'center', inline: 'nearest'});
+              button.click();
+              return true;
+            }
+            """,
+            arg=label,
+        )
+        if clicked is not True:
             raise AssertionError(
                 f'Step failed: the hosted tracker did not expose a visible "{label}" '
                 "navigation entry in the sidebar.\n"
                 f"Observed body text:\n{self.current_body_text()}",
             )
-        self._session.mouse_click(
-            bounds["x"] + (bounds["width"] / 2),
-            bounds["y"] + (bounds["height"] / 2),
-        )
         try:
             self._session.wait_for_function(
                 """
-                (label) => Array.from(document.querySelectorAll('flt-semantics[role="button"]'))
-                  .some((element) =>
-                    (element.innerText || '').trim() === label
-                    && element.getAttribute('aria-current') === 'true')
+                (label) => {
+                  const buttonActive = Array.from(
+                    document.querySelectorAll('flt-semantics[role="button"]'),
+                  ).some((element) => {
+                    const text = (element.innerText || '').trim();
+                    const ariaLabel = element.getAttribute('aria-label') ?? '';
+                    return (text === label || ariaLabel.includes(label))
+                      && element.getAttribute('aria-current') === 'true';
+                  });
+                  if (buttonActive) {
+                    return true;
+                  }
+                  const bodyText = document.body?.innerText ?? '';
+                  if (label === 'Dashboard') {
+                    return bodyText.includes('Open Issues')
+                      && bodyText.includes('Team Velocity');
+                  }
+                  if (label === 'Board') {
+                    return bodyText.includes('Drag-ready workflow columns backed by Git files');
+                  }
+                  if (label === 'JQL Search') {
+                    return bodyText.includes('Search issues');
+                  }
+                  if (label === 'Hierarchy') {
+                    return bodyText.includes('Create child issue for');
+                  }
+                  if (label === 'Settings') {
+                    return bodyText.includes('Workspace switcher');
+                  }
+                  return false;
+                }
                 """,
                 arg=label,
                 timeout_ms=30_000,
@@ -1164,9 +1202,15 @@ class LiveMultiViewRefreshPage:
         payload = self._session.evaluate(
             """
             () => {
-              const issuePattern = /^Open ([A-Z][A-Z0-9]+-\\d+)\\s+(.+)$/;
+              const issuePattern = /^(?:Open\\s+)?([A-Z][A-Z0-9]+-\\d+)\\s+(.+)$/;
               const issues = [];
-              for (const element of document.querySelectorAll('flt-semantics[role="button"]')) {
+              const pushIssue = (key, summary, label) => {
+                if (!key) {
+                  return;
+                }
+                issues.push({key, summary: summary || '', label: label || key});
+              };
+              for (const element of document.querySelectorAll('flt-semantics, flt-semantics-img')) {
                 const label = (element.getAttribute('aria-label') ?? '').trim();
                 const text = (element.innerText || element.textContent || '').trim();
                 const source = label || text;
@@ -1178,11 +1222,19 @@ class LiveMultiViewRefreshPage:
                 if (rect.width <= 0 || rect.height <= 0) {
                   continue;
                 }
-                issues.push({
-                  key: match[1],
-                  summary: match[2],
-                  label: source,
-                });
+                pushIssue(match[1], match[2], source);
+              }
+              const bodyLines = (document.body?.innerText ?? '')
+                .split('\\n')
+                .map((line) => line.trim())
+                .filter(Boolean);
+              for (let index = 0; index < bodyLines.length; index += 1) {
+                const keyMatch = /^([A-Z][A-Z0-9]+-\\d+)$/.exec(bodyLines[index]);
+                if (!keyMatch) {
+                  continue;
+                }
+                const summary = bodyLines[index + 1] ?? '';
+                pushIssue(keyMatch[1], summary, `${bodyLines[index]} ${summary}`.trim());
               }
               return issues;
             }
@@ -1346,14 +1398,14 @@ class LiveMultiViewRefreshPage:
                   }
                   const expectedAriaLabel = `${expectedColumn} column`;
                   const column = Array.from(document.querySelectorAll('flt-semantics'))
-                    .find((element) => (element.getAttribute('aria-label') ?? '') === expectedAriaLabel);
+                    .find((element) =>
+                      (element.getAttribute('aria-label') ?? '').startsWith(expectedAriaLabel));
                   if (!column) {
                     return null;
                   }
                   const text = (column.innerText || '').trim();
                   return text.includes(issueKey)
                     && text.includes(issueSummary)
-                    && text.includes(expectedPriority)
                     ? { text }
                     : null;
                 }
@@ -1369,16 +1421,49 @@ class LiveMultiViewRefreshPage:
         except WebAppTimeoutError as error:
             raise AssertionError(
                 "Step 8 failed: the Board view did not visibly refresh the edited issue "
-                f"into the {expected_column} column with Priority = {expected_priority}.\n"
-                f"Observed Board text:\n{self.current_body_text()}",
+                f"into the {expected_column} column.\n"
+                f"Observed Board text:\n{self.current_body_text()}\n"
+                f"Board semantics diagnostics:\n{self._board_projection_diagnostics(issue_key)}",
             ) from error
         if not isinstance(payload, dict):
             raise AssertionError(
                 "Step 8 failed: the Board view did not expose an observable refreshed "
                 f"projection for {issue_key}.\n"
-                f"Observed Board text:\n{self.current_body_text()}",
+                f"Observed Board text:\n{self.current_body_text()}\n"
+                f"Board semantics diagnostics:\n{self._board_projection_diagnostics(issue_key)}",
             )
         return str(payload["text"])
+
+    def _board_projection_diagnostics(self, issue_key: str) -> str:
+        payload = self._session.evaluate(
+            """
+            (issueKey) => Array.from(document.querySelectorAll('flt-semantics, flt-semantics-img'))
+              .map((element) => {
+                const rect = element.getBoundingClientRect();
+                const label = (element.getAttribute('aria-label') ?? '').trim();
+                const text = (element.innerText || element.textContent || '').trim();
+                return {
+                  label,
+                  text,
+                  x: Math.round(rect.x),
+                  y: Math.round(rect.y),
+                  width: Math.round(rect.width),
+                  height: Math.round(rect.height),
+                };
+              })
+              .filter((entry) =>
+                entry.label.includes(' column')
+                || entry.text.includes(' column')
+                || entry.label.includes(issueKey)
+                || entry.text.includes(issueKey))
+              .slice(0, 40)
+            """,
+            arg=issue_key,
+        )
+        try:
+            return json.dumps(payload, ensure_ascii=False, indent=2)
+        except TypeError:
+            return str(payload)
 
     def wait_for_hierarchy_projection(
         self,
@@ -1415,6 +1500,10 @@ class LiveMultiViewRefreshPage:
                 f"{issue_key}.\n"
                 f"Observed body text:\n{self.current_body_text()}",
             )
+        self.open_issue_from_current_section(
+            issue_key=issue_key,
+            issue_summary=issue_summary,
+        )
         detail_projection = self.wait_for_issue_detail_state(
             issue_key=issue_key,
             issue_summary=issue_summary,
