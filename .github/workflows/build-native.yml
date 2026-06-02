@@ -96,9 +96,9 @@ jobs:
               );
             } catch (error) {
               if (error.status === 403) {
-                core.warning(
-                  'Skipping macOS runner availability preflight because the token cannot read repository runners. ' +
-                  'The build job will still target the required self-hosted labels and GitHub Actions will queue it until a matching runner is available.',
+                core.setFailed(
+                  'Unable to verify TrackState runner labels because the token cannot read repository runners. ' +
+                  'Failing closed instead of queueing the macOS release job.',
                 );
                 return;
               }
