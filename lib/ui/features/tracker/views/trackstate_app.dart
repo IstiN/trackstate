@@ -237,6 +237,7 @@ class _TrackStateAppState extends State<TrackStateApp>
   bool _isEnsuringCurrentContextWorkspaceMigration = false;
   String? _pendingStartupLocalFallbackWorkspaceId;
   String? _startupHostedFallbackWorkspaceId;
+  _HostedRepositoryConfiguration? _lastHostedRepositoryConfiguration;
   bool _isSwitchingStartupHostedFallback = false;
   bool _isPersistingStartupHostedFallbackSelection = false;
   int _deferredStartupLocalWorkspaceRestoreVersion = 0;
@@ -252,6 +253,7 @@ class _TrackStateAppState extends State<TrackStateApp>
       _handleDesktopWorkspaceSwitcherFocusChange,
     );
     viewModel = _createViewModel(autoLoad: false);
+    _rememberHostedRepositoryConfiguration(viewModel);
     viewModel.addListener(_handleViewModelChanged);
     unawaited(_initializeWorkspaceProfiles());
   }
@@ -1820,6 +1822,7 @@ class _TrackStateAppState extends State<TrackStateApp>
 
     _pendingLocalGitConfigurationKey = configurationKey;
     final previousViewModel = viewModel;
+    _rememberHostedRepositoryConfiguration(previousViewModel);
     try {
       WorkspaceProfile? workspace;
       if (widget.repository == null) {
@@ -1966,6 +1969,59 @@ class _TrackStateAppState extends State<TrackStateApp>
     );
   }
 
+  Future<void> _switchToLastHostedRepository() async {
+    final configuration = _lastHostedRepositoryConfiguration;
+    if (configuration == null) {
+      return;
+    }
+    if (widget.repository != null) {
+      final previousViewModel = viewModel;
+      final nextViewModel = _createViewModel(
+        repository: widget.repository,
+        previous: previousViewModel,
+        autoLoad: false,
+        workspaceId: null,
+      );
+      await nextViewModel.load();
+      if (!mounted) {
+        nextViewModel.dispose();
+        return;
+      }
+      setState(() {
+        viewModel = nextViewModel;
+        _rememberHostedRepositoryConfiguration(nextViewModel);
+        _activeLocalGitConfigurationKey = null;
+        _isCreateIssueVisible = false;
+        _createIssuePrefill = null;
+        _pendingWorkspaceRestoreFailure = null;
+      });
+      if (!identical(previousViewModel, nextViewModel)) {
+        previousViewModel.dispose();
+      }
+      return;
+    }
+    await _switchToHostedRepository(
+      repository: configuration.repository,
+      defaultBranch: configuration.defaultBranch,
+      writeBranch: configuration.writeBranch,
+    );
+  }
+
+  void _rememberHostedRepositoryConfiguration(TrackerViewModel model) {
+    if (model.usesLocalPersistence) {
+      return;
+    }
+    final project = model.project;
+    if (project == null || project.repository.trim().isEmpty) {
+      return;
+    }
+    _lastHostedRepositoryConfiguration = _HostedRepositoryConfiguration(
+      repository: project.repository,
+      defaultBranch: project.branch,
+      writeBranch: project.branch,
+    );
+  }
+
   Future<void> _switchToWorkspace(
     WorkspaceProfile workspace, {
     String? workspaceSwitcherFocusWorkspaceId,
@@ -2032,6 +2088,7 @@ class _TrackStateAppState extends State<TrackStateApp>
     }
     setState(() {
       viewModel = prepared.viewModel;
+      _rememberHostedRepositoryConfiguration(prepared.viewModel);
       _activeLocalGitConfigurationKey = prepared.localConfigurationKey;
       _isCreateIssueVisible = false;
       _createIssuePrefill = null;
@@ -3111,6 +3168,7 @@ class _TrackStateAppState extends State<TrackStateApp>
                   canOpenWorkspaceOnboarding:
                       !kIsWeb && widget.repository == null,
                   onApplyLocalGitConfiguration: _switchToLocalRepository,
+                  onApplyHostedConfiguration: _switchToLastHostedRepository,
                   onSelectWorkspace: _selectWorkspaceProfile,
                   onDeleteWorkspace: _deleteWorkspaceProfile,
                   onMoveWorkspaceSelection: (step) =>
@@ -3151,6 +3209,7 @@ class _TrackerHome extends StatelessWidget {
     required this.onOpenWorkspaceOnboarding,
     required this.canOpenWorkspaceOnboarding,
     required this.onApplyLocalGitConfiguration,
+    required this.onApplyHostedConfiguration,
     required this.onSelectWorkspace,
     required this.onDeleteWorkspace,
     required this.onMoveWorkspaceSelection,
@@ -3183,6 +3242,7 @@ class _TrackerHome extends StatelessWidget {
   final VoidCallback onOpenWorkspaceOnboarding;
   final bool canOpenWorkspaceOnboarding;
   final LocalRepositoryConfigurationApplier onApplyLocalGitConfiguration;
+  final Future<void> Function() onApplyHostedConfiguration;
   final ValueChanged<WorkspaceProfile> onSelectWorkspace;
   final ValueChanged<WorkspaceProfile> onDeleteWorkspace;
   final ValueChanged<int> onMoveWorkspaceSelection;
@@ -3298,6 +3358,8 @@ class _TrackerHome extends StatelessWidget {
                               canOpenWorkspaceOnboarding,
                           onApplyLocalGitConfiguration:
                               onApplyLocalGitConfiguration,
+                          onApplyHostedConfiguration:
+                              onApplyHostedConfiguration,
                           onSelectWorkspace: onSelectWorkspace,
                           onDeleteWorkspace: onDeleteWorkspace,
                           onMoveWorkspaceSelection: onMoveWorkspaceSelection,
@@ -3383,6 +3445,8 @@ class _TrackerHome extends StatelessWidget {
                                 canOpenWorkspaceOnboarding,
                             onApplyLocalGitConfiguration:
                                 onApplyLocalGitConfiguration,
+                            onApplyHostedConfiguration:
+                                onApplyHostedConfiguration,
                             onSelectWorkspace: onSelectWorkspace,
                             onDeleteWorkspace: onDeleteWorkspace,
                             onMoveWorkspaceSelection: onMoveWorkspaceSelection,
@@ -4959,6 +5023,7 @@ class _DesktopShell extends StatelessWidget {
     required this.onOpenWorkspaceOnboarding,
     required this.canOpenWorkspaceOnboarding,
     required this.onApplyLocalGitConfiguration,
+    required this.onApplyHostedConfiguration,
     required this.onSelectWorkspace,
     required this.onDeleteWorkspace,
     required this.onMoveWorkspaceSelection,
@@ -4991,6 +5056,7 @@ class _DesktopShell extends StatelessWidget {
   final VoidCallback onOpenWorkspaceOnboarding;
   final bool canOpenWorkspaceOnboarding;
   final LocalRepositoryConfigurationApplier onApplyLocalGitConfiguration;
+  final Future<void> Function() onApplyHostedConfiguration;
   final ValueChanged<WorkspaceProfile> onSelectWorkspace;
   final ValueChanged<WorkspaceProfile> onDeleteWorkspace;
   final ValueChanged<int> onMoveWorkspaceSelection;
@@ -5038,6 +5104,7 @@ class _DesktopShell extends StatelessWidget {
             onOpenWorkspaceOnboarding: onOpenWorkspaceOnboarding,
             canOpenWorkspaceOnboarding: canOpenWorkspaceOnboarding,
             onApplyLocalGitConfiguration: onApplyLocalGitConfiguration,
+            onApplyHostedConfiguration: onApplyHostedConfiguration,
             workspaces: workspaces,
             onSelectWorkspace: onSelectWorkspace,
             onDeleteWorkspace: onDeleteWorkspace,
@@ -5078,6 +5145,7 @@ class _MobileShell extends StatelessWidget {
     required this.onOpenWorkspaceOnboarding,
     required this.canOpenWorkspaceOnboarding,
     required this.onApplyLocalGitConfiguration,
+    required this.onApplyHostedConfiguration,
     required this.onSelectWorkspace,
     required this.onDeleteWorkspace,
     required this.onMoveWorkspaceSelection,
@@ -5110,6 +5178,7 @@ class _MobileShell extends StatelessWidget {
   final VoidCallback onOpenWorkspaceOnboarding;
   final bool canOpenWorkspaceOnboarding;
   final LocalRepositoryConfigurationApplier onApplyLocalGitConfiguration;
+  final Future<void> Function() onApplyHostedConfiguration;
   final ValueChanged<WorkspaceProfile> onSelectWorkspace;
   final ValueChanged<WorkspaceProfile> onDeleteWorkspace;
   final ValueChanged<int> onMoveWorkspaceSelection;
@@ -5143,6 +5212,7 @@ class _MobileShell extends StatelessWidget {
       onOpenWorkspaceOnboarding: onOpenWorkspaceOnboarding,
       canOpenWorkspaceOnboarding: canOpenWorkspaceOnboarding,
       onApplyLocalGitConfiguration: onApplyLocalGitConfiguration,
+      onApplyHostedConfiguration: onApplyHostedConfiguration,
       workspaces: workspaces,
       onSelectWorkspace: onSelectWorkspace,
       onDeleteWorkspace: onDeleteWorkspace,
@@ -5178,6 +5248,7 @@ class _TrackerMainPane extends StatelessWidget {
     required this.onOpenWorkspaceOnboarding,
     required this.canOpenWorkspaceOnboarding,
     required this.onApplyLocalGitConfiguration,
+    required this.onApplyHostedConfiguration,
     required this.workspaces,
     required this.onSelectWorkspace,
     required this.onDeleteWorkspace,
@@ -5212,6 +5283,7 @@ class _TrackerMainPane extends StatelessWidget {
   final VoidCallback onOpenWorkspaceOnboarding;
   final bool canOpenWorkspaceOnboarding;
   final LocalRepositoryConfigurationApplier onApplyLocalGitConfiguration;
+  final Future<void> Function() onApplyHostedConfiguration;
   final WorkspaceProfilesState workspaces;
   final ValueChanged<WorkspaceProfile> onSelectWorkspace;
   final ValueChanged<WorkspaceProfile> onDeleteWorkspace;
@@ -5265,6 +5337,7 @@ class _TrackerMainPane extends StatelessWidget {
                     compact: compact,
                     onOpenCreateIssue: onOpenCreateIssue,
                     onApplyLocalGitConfiguration: onApplyLocalGitConfiguration,
+                    onApplyHostedConfiguration: onApplyHostedConfiguration,
                     workspaces: workspaces,
                     authenticatedWorkspaceIds: authenticatedWorkspaceIds,
                     onSelectWorkspace: onSelectWorkspace,
@@ -6019,6 +6092,18 @@ class _PreparedWorkspaceSwitch {
   final WorkspaceProfile? workspace;
   final String? localConfigurationKey;
   final bool preserveActiveLocalAvailability;
+}
+
+class _HostedRepositoryConfiguration {
+  const _HostedRepositoryConfiguration({
+    required this.repository,
+    required this.defaultBranch,
+    required this.writeBranch,
+  });
+
+  final String repository;
+  final String defaultBranch;
+  final String writeBranch;
 }
 
 class _WorkspaceRestoreFailure {
@@ -7299,6 +7384,7 @@ class _SectionBody extends StatelessWidget {
     required this.viewModel,
     required this.onOpenCreateIssue,
     required this.onApplyLocalGitConfiguration,
+    required this.onApplyHostedConfiguration,
     required this.workspaces,
     required this.authenticatedWorkspaceIds,
     required this.onSelectWorkspace,
@@ -7313,6 +7399,7 @@ class _SectionBody extends StatelessWidget {
   final TrackerViewModel viewModel;
   final _CreateIssueLauncher onOpenCreateIssue;
   final LocalRepositoryConfigurationApplier onApplyLocalGitConfiguration;
+  final Future<void> Function() onApplyHostedConfiguration;
   final WorkspaceProfilesState workspaces;
   final Set<String> authenticatedWorkspaceIds;
   final ValueChanged<WorkspaceProfile> onSelectWorkspace;
@@ -7343,6 +7430,7 @@ class _SectionBody extends StatelessWidget {
       TrackerSection.settings => _Settings(
         viewModel: viewModel,
         onApplyLocalGitConfiguration: onApplyLocalGitConfiguration,
+        onApplyHostedConfiguration: onApplyHostedConfiguration,
         workspaces: workspaces,
         authenticatedWorkspaceIds: authenticatedWorkspaceIds,
         onSelectWorkspace: onSelectWorkspace,
@@ -7909,6 +7997,7 @@ class _Settings extends StatefulWidget {
   const _Settings({
     required this.viewModel,
     required this.onApplyLocalGitConfiguration,
+    required this.onApplyHostedConfiguration,
     required this.workspaces,
     required this.authenticatedWorkspaceIds,
     required this.onSelectWorkspace,
@@ -7920,6 +8009,7 @@ class _Settings extends StatefulWidget {
 
   final TrackerViewModel viewModel;
   final LocalRepositoryConfigurationApplier onApplyLocalGitConfiguration;
+  final Future<void> Function() onApplyHostedConfiguration;
   final WorkspaceProfilesState workspaces;
   final Set<String> authenticatedWorkspaceIds;
   final ValueChanged<WorkspaceProfile> onSelectWorkspace;
@@ -7964,12 +8054,16 @@ class _SettingsState extends State<_Settings> {
   @override
   void didUpdateWidget(covariant _Settings oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (!widget.viewModel.supportsGitHubAuth &&
+    if (!_canSelectHostedProvider &&
         _selectedProvider != _SettingsProviderSelection.localGit) {
       _selectedProvider = _SettingsProviderSelection.localGit;
     }
     _syncLocalGitDraftFromState();
   }
+
+  bool get _canSelectHostedProvider =>
+      widget.viewModel.supportsGitHubAuth ||
+      widget.viewModel.usesLocalPersistence;
 
   _SettingsProviderSelection _initialProvider(TrackerViewModel viewModel) {
     return viewModel.usesLocalPersistence
@@ -8046,13 +8140,19 @@ class _SettingsState extends State<_Settings> {
       }
       _selectedProvider = selection;
     });
+    if (selection == _SettingsProviderSelection.hosted &&
+        widget.viewModel.usesLocalPersistence) {
+      unawaited(widget.onApplyHostedConfiguration());
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final project = widget.viewModel.project!;
-    final hostedLabel = _repositoryAccessLabel(l10n, widget.viewModel);
+    final hostedLabel = widget.viewModel.usesLocalPersistence
+        ? l10n.workspaceTargetTypeHosted
+        : _repositoryAccessLabel(l10n, widget.viewModel);
     final workspaceRestoreFailure = widget.workspaceRestoreFailure;
     final activeLocalWorkspaceId =
         widget.workspaces.selectedWorkspace?.isLocal == true
@@ -8067,7 +8167,7 @@ class _SettingsState extends State<_Settings> {
         widget.workspaces.profiles.any((profile) => profile.isHosted) ||
         hasLocalHostedAccess;
     final selectorChildren = <Widget>[
-      if (widget.viewModel.supportsGitHubAuth) ...[
+      if (_canSelectHostedProvider) ...[
         _SettingsProviderButton(
           label: hostedLabel,
           selected: _selectedProvider == _SettingsProviderSelection.hosted,
