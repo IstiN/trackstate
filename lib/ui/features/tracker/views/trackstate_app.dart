@@ -1386,10 +1386,6 @@ class _TrackStateAppState extends State<TrackStateApp>
       workspace,
       restoreVersion: restoreVersion,
     )) {
-      if (viewModel.workspaceId == workspace.id &&
-          viewModel.usesLocalPersistence) {
-        return;
-      }
       final previousViewModel = viewModel;
       final prepared = await _prepareBrowserLocalWorkspaceSwitch(
         workspace,
