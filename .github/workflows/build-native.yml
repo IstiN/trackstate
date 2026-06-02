@@ -82,11 +82,16 @@ jobs:
           github-token: ${{ secrets.PAT_TOKEN || github.token }}
           script: |
             const requiredLabels = process.env.REQUIRED_LABELS.split(',');
+            const readinessTimeoutMs = 5 * 60 * 1000;
+            const readinessFailureMessage =
+              'Unable to verify TrackState runner labels because the token cannot read repository runners.';
+            const readinessStartedAt = Date.now();
+            let readinessTimeoutId;
             const { owner, repo } = context.repo;
 
             let response;
             try {
-              response = await github.request(
+              const runnerInventoryPromise = github.request(
                 'GET /repos/{owner}/{repo}/actions/runners',
                 {
                   owner,
@@ -94,15 +99,50 @@ jobs:
                   per_page: 100,
                 },
               );
+              const readinessTimeoutPromise = new Promise((_, reject) => {
+                readinessTimeoutId = setTimeout(
+                  () => reject(new Error('runner-inventory-timeout')),
+                  readinessTimeoutMs,
+                );
+                readinessTimeoutId.unref?.();
+              });
+
+              response = await Promise.race([
+                runnerInventoryPromise,
+                readinessTimeoutPromise,
+              ]);
             } catch (error) {
-              if (error.status === 403) {
+              if (error.message === 'runner-inventory-timeout') {
                 core.setFailed(
-                  'Unable to verify TrackState runner labels because the token cannot read repository runners. ' +
-                  'Failing closed instead of queueing the macOS release job.',
+                  `${readinessFailureMessage} Failing closed after the readiness timeout expired.`,
+                );
+                return;
+              }
+
+              if (error.status === 403) {
+                const elapsedMs = Date.now() - readinessStartedAt;
+                const remainingDelayMs = Math.max(
+                  0,
+                  readinessTimeoutMs - elapsedMs,
+                );
+                core.warning(
+                  `${readinessFailureMessage} Waiting out the readiness timeout before failing closed.`,
+                );
+                if (remainingDelayMs > 0) {
+                  await new Promise((resolve) =>
+                    setTimeout(resolve, remainingDelayMs),
+                  );
+                }
+                core.setFailed(
+                  `${readinessFailureMessage} Failing closed after the readiness timeout expired.`,
                 );
                 return;
               }
               throw error;
+            } finally {
+              if (readinessTimeoutId) {
+                clearTimeout(readinessTimeoutId);
+              }
             }
 
             const matchingRunners = response.data.runners.filter((runner) =>
