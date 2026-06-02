@@ -262,6 +262,26 @@ class _ErroringContextManager:
         return None
 
 
+class _BlobPageStub:
+    def __init__(self, observation) -> None:
+        self._observation = observation
+
+    def open_blob_page(self, **kwargs):
+        del kwargs
+        return self._observation
+
+
+class _BlobPageContextStub:
+    def __init__(self, blob_page) -> None:
+        self._blob_page = blob_page
+
+    def __enter__(self):
+        return self._blob_page
+
+    def __exit__(self, exc_type, exc, exc_tb) -> None:
+        return None
+
+
 class PullRequestTemplateChecklistVerifierTest(unittest.TestCase):
     def setUp(self) -> None:
         self.verifier = PullRequestTemplateChecklistVerifier(_FakeProbe())
@@ -643,6 +663,48 @@ class Ts909ReviewRegressionTest(unittest.TestCase):
         self.assertIn(
             "product defect",
             result["human_verification"][0]["observed"],
+        )
+
+    def test_human_template_verification_records_blocked_evidence_when_browser_auth_is_missing(
+        self,
+    ) -> None:
+        result = self._result()
+        result["steps"] = [
+            {
+                "step": 1,
+                "status": "failed",
+                "action": "Create a new Pull Request for a UI layout change.",
+                "observed": "The automation did not have an authenticated GitHub browser session.",
+            }
+        ]
+        result["failure_kind"] = "setup"
+
+        observation = SimpleNamespace(
+            url="https://github.com/octocat/example/blob/main/.github/PULL_REQUEST_TEMPLATE.md",
+            matched_text="Accessibility checklist",
+            body_text=(
+                "## Accessibility checklist\n"
+                "- Manual verification: DOM order matches visual hierarchy for "
+                "keyboard-accessible elements."
+            ),
+            screenshot_path=None,
+        )
+
+        with patch.object(
+            self.module,
+            "create_github_repository_blob_page",
+            return_value=_BlobPageContextStub(_BlobPageStub(observation)),
+        ):
+            self.module._perform_human_template_verification(  # type: ignore[attr-defined]
+                result=result,
+                config=self.config,
+            )
+
+        self.assertEqual(len(result["human_verification"]), 1)
+        self.assertEqual(result["evidence_url"], observation.url)
+        self.assertIn(
+            "required checklist item is visible",
+            result["human_verification"][0]["check"],
         )
 
 

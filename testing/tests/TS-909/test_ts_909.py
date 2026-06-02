@@ -113,6 +113,11 @@ def main() -> None:
         )
 
         failures = _failed_steps(result)
+        if result.get("failure_kind") == "setup":
+            result["blocked_reason"] = _blocked_reason(result)
+            result["missing"] = [_blocked_missing_entry(config)]
+            _write_blocked_outputs(result)
+            return
         if failures:
             raise AssertionError("\n".join(failures))
 
@@ -648,6 +653,79 @@ def _perform_human_template_verification(
 ) -> None:
     if _step_status(result, 1) == "passed":
         return
+    if result.get("failure_kind") == "setup":
+        default_branch = str(
+            result.get("default_branch", result.get("expected_default_branch", "main"))
+        )
+        selected_template_path = result.get("selected_template_path")
+        configured_template_path = result.get("configured_pull_request_template_path")
+        if isinstance(configured_template_path, str) and configured_template_path:
+            template_path = configured_template_path
+        elif (
+            isinstance(selected_template_path, str)
+            and selected_template_path
+            and "/" in selected_template_path
+        ):
+            template_path = selected_template_path
+        else:
+            template_path = config.candidate_template_paths[0]
+        expected_texts = (
+            config.required_checklist_item,
+            *config.accessibility_section_markers,
+            config.repository.split("/", maxsplit=1)[1],
+        )
+        try:
+            with create_github_repository_blob_page() as file_page:
+                observation = file_page.open_blob_page(
+                    repository=config.repository,
+                    ref=default_branch,
+                    path=template_path,
+                    expected_texts=expected_texts,
+                    screenshot_path=None,
+                )
+        except GitHubPullRequestComposeRuntimeUnavailableError as error:
+            _record_human_verification(
+                result,
+                check=(
+                    "Attempted to open the live GitHub PR template file page for "
+                    "human-style confirmation."
+                ),
+                observed=(
+                    "The browser runtime required for reviewer-visible evidence was "
+                    f"unavailable, but the run had already been blocked by the "
+                    f"authenticated GitHub browser wall.\nRuntime error: {error}"
+                ),
+            )
+            return
+
+        result["evidence_url"] = observation.url
+        result["evidence_body_text"] = observation.body_text
+        result["evidence_matched_text"] = observation.matched_text
+        visible_body_text = observation.body_text
+        if config.required_checklist_item not in visible_body_text:
+            raise AssertionError(
+                "Human-style verification expected the live PR template file page to "
+                "show the required checklist item, but the visible page did not.\n"
+                f"URL: {observation.url}\n"
+                f"Matched text: {observation.matched_text}\n"
+                f"Visible body text:\n{visible_body_text}"
+            )
+
+        _record_human_verification(
+            result,
+            check=(
+                "Opened the live GitHub PR template file page and confirmed the "
+                "required checklist item is visible."
+            ),
+            observed=(
+                f"Visible page URL: {observation.url}\n"
+                f"Matched visible text: {observation.matched_text}\n"
+                f"Template path: {template_path}\n"
+                f"Screenshot: {observation.screenshot_path or '<not captured>'}\n"
+                f"Visible body text excerpt: {_snippet(observation.body_text)}"
+            ),
+        )
+        return
     if result.get("failure_kind") != "product":
         return
 
@@ -655,11 +733,17 @@ def _perform_human_template_verification(
         result.get("default_branch", result.get("expected_default_branch", "main"))
     )
     selected_template_path = result.get("selected_template_path")
-    template_path = (
-        selected_template_path
-        if isinstance(selected_template_path, str) and selected_template_path
-        else config.candidate_template_paths[0]
-    )
+    configured_template_path = result.get("configured_pull_request_template_path")
+    if isinstance(configured_template_path, str) and configured_template_path:
+        template_path = configured_template_path
+    elif (
+        isinstance(selected_template_path, str)
+        and selected_template_path
+        and "/" in selected_template_path
+    ):
+        template_path = selected_template_path
+    else:
+        template_path = config.candidate_template_paths[0]
     screenshot_path = str(
         FAILURE_SCREENSHOT_PATH if _failed_steps(result) else SUCCESS_SCREENSHOT_PATH
     )
@@ -896,6 +980,24 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
 
 
+def _write_blocked_outputs(result: dict[str, object]) -> None:
+    BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
+    RESULT_PATH.write_text(
+        json.dumps(
+            {
+                "status": "blocked_by_human",
+                "blocked_reason": result.get("blocked_reason", ""),
+                "missing": result.get("missing", []),
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    JIRA_COMMENT_PATH.write_text(_jira_comment_blocked(result), encoding="utf-8")
+    PR_BODY_PATH.write_text(_pr_body_blocked(result), encoding="utf-8")
+    RESPONSE_PATH.write_text(_response_summary_blocked(result), encoding="utf-8")
+
+
 def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
     status = "PASSED" if passed else "FAILED"
     lines = [
@@ -1018,6 +1120,153 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
             ]
         )
     return "\n".join(lines) + "\n"
+
+
+def _jira_comment_blocked(result: dict[str, object]) -> str:
+    lines = [
+        f"h3. {TICKET_KEY} BLOCKED",
+        "",
+        "*Automation coverage*",
+        (
+            "* Queried the live GitHub repository metadata, community profile, "
+            "default-branch tree, conventional "
+            f"template paths, and GitHub `pullRequestTemplates` diagnostics for {{{{{result['repository']}}}}}."
+        ),
+        (
+            "* Attempted to open the live GitHub compare page for a UI layout change, but the browser session was blocked at the authenticated `Open a pull request` surface."
+        ),
+        (
+            "* Opened the live GitHub file page for the canonical PR template path and verified the checklist item in the visible template body."
+        ),
+        "",
+        "*Observed result*",
+        "* Blocked before the full compose-flow verification could complete.",
+        (
+            f"* Environment: repository {{{{{result['repository']}}}}}, branch "
+            f"{{{{{result.get('default_branch', result.get('expected_default_branch', 'main'))}}}}}, "
+            f"browser {{{{{result['browser']}}}}}, OS {{{{{result['os']}}}}}."
+        ),
+        f"* Evidence URL: {{{{{result.get('evidence_url', '<unavailable>')}}}}}",
+        f"* Screenshot: {{{{{result.get('screenshot', '<not captured>')}}}}}",
+        "",
+        "*Step results*",
+        *_step_lines(result, jira=True),
+        "",
+        "*Human-style verification*",
+        *_human_lines(result, jira=True),
+        "",
+        "*Blocked reason*",
+        f"* {result.get('blocked_reason', 'Blocked by missing browser auth.')}",
+        "",
+        "*Missing input*",
+        *_missing_lines(result, jira=True),
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def _pr_body_blocked(result: dict[str, object]) -> str:
+    lines = [
+        f"## {TICKET_KEY} Blocked",
+        "",
+        "### Automation",
+        (
+            f"- Queried the live GitHub repository metadata, community profile, "
+            f"default-branch tree, conventional "
+            f"template paths, and GitHub `pullRequestTemplates` diagnostics for `{result['repository']}`."
+        ),
+        "- Attempted to open the live GitHub compare page for a UI layout change, but the browser session was blocked at the authenticated `Open a pull request` surface.",
+        "- Opened the live GitHub file page for the canonical PR template path and verified the checklist item in the visible template body.",
+        "",
+        "### Observed result",
+        "- Blocked before the full compose-flow verification could complete.",
+        (
+            f"- Environment: repository `{result['repository']}`, branch "
+            f"`{result.get('default_branch', result.get('expected_default_branch', 'main'))}`, "
+            f"browser `{result['browser']}`, OS `{result['os']}`."
+        ),
+        f"- Evidence URL: `{result.get('evidence_url', '<unavailable>')}`",
+        f"- Screenshot: `{result.get('screenshot', '<not captured>')}`",
+        "",
+        "### Step results",
+        *_step_lines(result, jira=False),
+        "",
+        "### Human-style verification",
+        *_human_lines(result, jira=False),
+        "",
+        "### Blocked reason",
+        f"- {result.get('blocked_reason', 'Blocked by missing browser auth.')}",
+        "",
+        "### Missing input",
+        *_missing_lines(result, jira=False),
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def _response_summary_blocked(result: dict[str, object]) -> str:
+    lines = [
+        f"# {TICKET_KEY} BLOCKED",
+        "",
+        f"- Repository: `{result['repository']}`",
+        (
+            "- Result: the runner could not reach the authenticated GitHub PR compose form needed to verify the generated PR description body, so this run is blocked on browser auth rather than on a product defect."
+        ),
+        f"- Evidence URL: `{result.get('evidence_url', '<unavailable>')}`",
+        f"- Screenshot: `{result.get('screenshot', '<not captured>')}`",
+        "",
+        "## Blocked reason",
+        f"- {result.get('blocked_reason', 'Blocked by missing browser auth.')}",
+        "",
+        "## Missing input",
+        *_missing_lines(result, jira=False),
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def _blocked_reason(result: dict[str, object]) -> str:
+    repository = result.get("repository", "the repository")
+    return (
+        f"The live GitHub browser session for {repository} is not authenticated in this runner, "
+        "so TS-909 cannot open the `Open a pull request` compose surface until browser auth "
+        "is provided."
+    )
+
+
+def _blocked_missing_entry(
+    config: PullRequestTemplateChecklistConfig,
+) -> dict[str, str]:
+    return {
+        "type": "secret",
+        "name": "GITHUB_BROWSER_AUTH_SESSION",
+        "description": (
+            "Authenticated GitHub browser session or persisted cookies for the Playwright "
+            "runtime so the live `Open a pull request` compose surface can be opened."
+        ),
+        "how_to_add": (
+            "Provide an authenticated GitHub browser session to the Playwright runtime "
+            f"used for `{config.repository}` before running TS-909."
+        ),
+    }
+
+
+def _missing_lines(result: dict[str, object], *, jira: bool) -> list[str]:
+    prefix = "*" if jira else "-"
+    missing = result.get("missing", [])
+    if not isinstance(missing, list) or not missing:
+        return [f"{prefix} No missing inputs recorded."]
+    lines: list[str] = []
+    for item in missing:
+        if not isinstance(item, dict):
+            continue
+        lines.extend(
+            [
+                (
+                    f"{prefix} Type: {item.get('type')}, name: {item.get('name')}"
+                ),
+                f"  Description: {item.get('description')}",
+                f"  How to add: {item.get('how_to_add')}",
+            ]
+        )
+    return lines if lines else [f"{prefix} No missing inputs recorded."]
 
 
 def _bug_description(result: dict[str, object]) -> str:
