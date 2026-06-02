@@ -15,8 +15,11 @@ void syncBrowserTextFieldValue({
   required String value,
   required bool enabled,
   required bool readOnly,
+  String? errorText,
+  String? errorColor,
 }) {
   final escapedLabel = label.replaceAll(r'\', r'\\').replaceAll('"', r'\"');
+  final errorMessageId = _errorMessageIdFor(label);
   final selector = [
     'input[aria-label="$escapedLabel"][data-semantics-role="text-field"]',
     'textarea[aria-label="$escapedLabel"][data-semantics-role="text-field"]',
@@ -46,6 +49,9 @@ void syncBrowserTextFieldValue({
         value: value,
         enabled: enabled,
         readOnly: readOnly,
+        errorText: errorText,
+        errorColor: errorColor,
+        errorMessageId: errorMessageId,
       );
     }
     return syncedAny;
@@ -69,6 +75,15 @@ _BrowserTextFieldBinding _bindingForInput(web.HTMLInputElement element) =>
 
 _BrowserTextFieldBinding _bindingForTextarea(web.HTMLTextAreaElement element) =>
     _textareaBindings[element] ??= _BrowserTextFieldBinding.textarea(element);
+
+String _errorMessageIdFor(String label) {
+  final normalized = label
+      .toLowerCase()
+      .replaceAll(RegExp(r'[^a-z0-9]+'), '-')
+      .replaceAll(RegExp(r'^-+|-+$'), '');
+  final idSegment = normalized.isEmpty ? 'field' : normalized;
+  return 'trackstate-text-field-$idSegment-error';
+}
 
 class _BrowserTextFieldBinding {
   _BrowserTextFieldBinding.input(this.input) : textarea = null;
@@ -104,6 +119,9 @@ class _BrowserTextFieldBinding {
     required String value,
     required bool enabled,
     required bool readOnly,
+    required String? errorText,
+    required String? errorColor,
+    required String errorMessageId,
   }) {
     if (_readValue() != value) {
       _writeValue(value);
@@ -117,6 +135,12 @@ class _BrowserTextFieldBinding {
       if (input.readOnly != readOnly) {
         input.readOnly = readOnly;
       }
+      _syncErrorState(
+        input,
+        errorText: errorText,
+        errorColor: errorColor,
+        errorMessageId: errorMessageId,
+      );
       return;
     }
     final textarea = this.textarea;
@@ -128,6 +152,44 @@ class _BrowserTextFieldBinding {
       if (textarea.readOnly != readOnly) {
         textarea.readOnly = readOnly;
       }
+      _syncErrorState(
+        textarea,
+        errorText: errorText,
+        errorColor: errorColor,
+        errorMessageId: errorMessageId,
+      );
+    }
+  }
+
+  void _syncErrorState(
+    web.HTMLElement element, {
+    required String? errorText,
+    required String? errorColor,
+    required String errorMessageId,
+  }) {
+    final normalizedError = errorText?.trim() ?? '';
+    if (normalizedError.isEmpty) {
+      element.removeAttribute('aria-invalid');
+      element.removeAttribute('aria-errormessage');
+      web.document.getElementById(errorMessageId)?.remove();
+      return;
+    }
+    element.setAttribute('aria-invalid', 'true');
+    element.setAttribute('aria-errormessage', errorMessageId);
+    final existing = web.document.getElementById(errorMessageId);
+    final message = existing ?? (web.HTMLSpanElement()..id = errorMessageId);
+    message
+      ..textContent = normalizedError
+      ..setAttribute('role', 'alert')
+      ..setAttribute('aria-live', 'assertive');
+    message.setAttribute(
+      'style',
+      'position:absolute;left:-10000px;top:0;width:max-content;'
+          'height:auto;padding:1px;color:${errorColor ?? '#c25742'};'
+          'background-color:rgb(0, 0, 0);pointer-events:none;',
+    );
+    if (existing == null) {
+      element.parentElement?.append(message);
     }
   }
 
