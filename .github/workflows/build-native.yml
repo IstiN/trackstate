@@ -82,6 +82,7 @@ jobs:
           github-token: ${{ secrets.PAT_TOKEN || github.token }}
           script: |
             const requiredLabels = process.env.REQUIRED_LABELS.split(',');
+            const readinessTimeoutMs = 5 * 60 * 1000;
             const { owner, repo } = context.repo;
 
             let response;
@@ -96,9 +97,14 @@ jobs:
               );
             } catch (error) {
               if (error.status === 403) {
+                core.warning(
+                  'Unable to verify TrackState runner labels because the token cannot read repository runners. ' +
+                  'Waiting out the readiness timeout before failing closed.',
+                );
+                await new Promise((resolve) => setTimeout(resolve, readinessTimeoutMs));
                 core.setFailed(
                   'Unable to verify TrackState runner labels because the token cannot read repository runners. ' +
-                  'Failing closed instead of queueing the macOS release job.',
+                  'Failing closed after the readiness timeout expired.',
                 );
                 return;
               }
