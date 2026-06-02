@@ -232,4 +232,7 @@ class _BrowserTextFieldBinding {
 }
 
 web.Element? _nearestDialogElement(web.HTMLElement element) =>
-    element.closest('[role="dialog"]') ?? element.parentElement;
+    element.closest(
+      'flt-semantics[role="group"][aria-label="Edit issue"], [role="dialog"]',
+    ) ??
+    element.parentElement;

@@ -160,4 +160,49 @@ void main() {
       expect(errorMessage!.textContent, 'Summary is required before saving.');
     },
   );
+
+  testWidgets(
+    'browser text-field sync attaches alerts to the active Flutter semantics dialog',
+    (tester) async {
+      final controller = TextEditingController();
+      addTearDown(controller.dispose);
+
+      final input = web.HTMLInputElement()
+        ..setAttribute('aria-label', 'Summary')
+        ..setAttribute('data-semantics-role', 'text-field');
+      final semanticsDialog = web.document.createElement('flt-semantics')
+        ..setAttribute('role', 'group')
+        ..setAttribute('aria-label', 'Edit issue');
+      semanticsDialog.append(input);
+      web.document.body!.append(semanticsDialog);
+      addTearDown(() {
+        web.document
+            .getElementById('trackstate-text-field-summary-error')
+            ?.remove();
+        semanticsDialog.remove();
+      });
+
+      browser_text_field_value_sync.syncBrowserTextFieldValue(
+        label: 'Summary',
+        controller: controller,
+        value: controller.text,
+        enabled: true,
+        readOnly: false,
+        errorText: 'Summary is required before saving.',
+      );
+      await tester.pump();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+
+      final errorMessage = web.document.getElementById(
+        'trackstate-text-field-summary-error',
+      );
+      expect(errorMessage, isNotNull);
+      expect(semanticsDialog.contains(errorMessage), isTrue);
+      expect(
+        semanticsDialog.querySelector('[role="alert"]')?.textContent,
+        'Summary is required before saving.',
+      );
+    },
+  );
 }
