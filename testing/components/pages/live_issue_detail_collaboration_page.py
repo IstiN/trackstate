@@ -1197,8 +1197,10 @@ class LiveIssueDetailCollaborationPage:
         )
 
     def download_attachment(self, attachment_name: str) -> str:
-        return self._session.wait_for_download_after_click(
-            self._download_button_selector(attachment_name),
+        selector = self._download_button_selector(attachment_name)
+        self._session.focus(selector, timeout_ms=30_000)
+        return self._session.save_download_after_keypress(
+            "Enter",
             timeout_ms=60_000,
         )
 

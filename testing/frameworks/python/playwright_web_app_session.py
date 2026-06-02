@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import AbstractContextManager
 from datetime import datetime, timezone
 import json
+import tempfile
 from typing import Any, Sequence
 
 try:
@@ -567,6 +568,29 @@ class PlaywrightWebAppSession(WebAppSession):
             ) from error
         return download.suggested_filename
 
+    def save_download_after_keypress(
+        self,
+        key: str,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> str:
+        try:
+            with self._page.expect_download(timeout=timeout_ms) as download_info:
+                self._page.keyboard.press(key)
+            download = download_info.value
+            destination = tempfile.NamedTemporaryFile(
+                prefix="trackstate-download-",
+                suffix=f"-{download.suggested_filename}",
+                delete=False,
+            )
+            destination.close()
+            download.save_as(destination.name)
+            return destination.name
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                f'Timed out waiting for a saved download after pressing "{key}".',
+            ) from error
+
     def wait_for_download_after_click(
         self,
         selector: str,
@@ -586,6 +610,33 @@ class PlaywrightWebAppSession(WebAppSession):
                 f'Timed out waiting for a download after clicking selector "{selector}".',
             ) from error
         return download.suggested_filename
+
+    def save_download_after_click(
+        self,
+        selector: str,
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> str:
+        try:
+            locator = self._locator(selector, has_text=has_text, index=index)
+            locator.wait_for(state="visible", timeout=timeout_ms)
+            with self._page.expect_download(timeout=timeout_ms) as download_info:
+                locator.click(timeout=timeout_ms)
+            download = download_info.value
+            destination = tempfile.NamedTemporaryFile(
+                prefix="trackstate-download-",
+                suffix=f"-{download.suggested_filename}",
+                delete=False,
+            )
+            destination.close()
+            download.save_as(destination.name)
+            return destination.name
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                f'Timed out waiting for a saved download after clicking selector "{selector}".',
+            ) from error
 
     def wait_for_new_page_after_keypress(
         self,

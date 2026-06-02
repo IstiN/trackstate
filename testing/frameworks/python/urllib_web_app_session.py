@@ -364,6 +364,17 @@ class UrllibWebAppSession(WebAppSession):
             "Download capture is not supported by the urllib web session fallback."
         )
 
+    def save_download_after_keypress(
+        self,
+        key: str,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> str:
+        del key, timeout_ms
+        raise NotImplementedError(
+            "Saved download capture is not supported by the urllib web session fallback."
+        )
+
     def wait_for_download_after_click(
         self,
         selector: str,
@@ -375,6 +386,19 @@ class UrllibWebAppSession(WebAppSession):
         del selector, has_text, index, timeout_ms
         raise NotImplementedError(
             "Download capture is not supported by the urllib web session fallback."
+        )
+
+    def save_download_after_click(
+        self,
+        selector: str,
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> str:
+        del selector, has_text, index, timeout_ms
+        raise NotImplementedError(
+            "Saved download capture is not supported by the urllib web session fallback."
         )
 
     def start_network_recording(self, *, name: str, url_fragment: str) -> None:
