@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-import re
 import unittest
 
 from testing.core.config.actionlint_workflow_gate_config import (
@@ -129,18 +128,17 @@ class ActionlintTimeoutMinutesGateTest(unittest.TestCase):
         )
         assert observation.actionlint_log_excerpt is not None
         self.assertIn(
-            self.config.target_workflow_path,
+            "Workflow jobs must declare timeout-minutes:",
             observation.actionlint_log_excerpt,
-            "Step 4 failed: the visible actionlint log did not mention the changed "
-            "workflow file.\n"
-            f"Expected file path: {self.config.target_workflow_path}\n"
+            "Step 4 failed: the visible actionlint log did not surface the expected "
+            "timeout-minutes policy error.\n"
             f"Observed log excerpt:\n{observation.actionlint_log_excerpt}",
         )
-        self.assertRegex(
+        self.assertIn(
+            "job `probe` is missing timeout-minutes",
             observation.actionlint_log_excerpt,
-            re.compile(r"(timeout-minutes|required|must)", re.IGNORECASE),
-            "Step 4 failed: the visible actionlint log did not surface a timeout-minutes "
-            "policy error.\n"
+            "Step 4 failed: the visible actionlint log did not name the workflow job "
+            "missing timeout-minutes.\n"
             f"Observed log excerpt:\n{observation.actionlint_log_excerpt}",
         )
         self.assertTrue(

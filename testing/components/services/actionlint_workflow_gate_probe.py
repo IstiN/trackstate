@@ -553,7 +553,7 @@ class ActionlintWorkflowGateProbeService:
             if any(marker in lines[match_index].lower() for marker in fallback_markers):
                 excerpt_lines = lines[max(0, match_index - 3) : min(len(lines), match_index + 8)]
             else:
-                excerpt_lines = lines[max(0, match_index - 1) : min(len(lines), match_index + 15)]
+                excerpt_lines = lines[max(0, match_index - 1) : min(len(lines), match_index + 200)]
 
         excerpt = "\n".join(excerpt_lines).strip()
         if len(excerpt) <= 4000:
