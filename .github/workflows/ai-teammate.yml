@@ -1,6 +1,6 @@
 name: AI Teammate
 
-run-name: "${{ inputs.config_file }} : ${{ inputs.concurrency_key }}"
+run-name: "${{ inputs.config_file }} : ${{ inputs.display_key || inputs.concurrency_key }} : ${{ inputs.concurrency_key }}"
 
 on:
   workflow_dispatch:
@@ -14,6 +14,9 @@ on:
       concurrency_key:
         description: "Ticket key for concurrency grouping (e.g., TS-1)"
         required: true
+      display_key:
+        description: "Ticket key to show in the workflow run name"
+        required: false
       input_jql:
         description: "Optional Jira input JQL; defaults to key = concurrency_key"
         required: false
@@ -51,17 +54,6 @@ jobs:
           submodules: true
           token: ${{ secrets.PAT_TOKEN || github.token }}
 
-      - name: Set up Java 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -79,43 +71,19 @@ jobs:
       - name: Cache Playwright browsers
         uses: actions/cache@v4
         with:
-          path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-browsers-${{ hashFiles('.github/workflows/ai-teammate.yml') }}
+          path: ${{ env.PLAYWRIGHT_CACHE_PATH }}
+          key: ${{ env.PLAYWRIGHT_CACHE_KEY }}
           restore-keys: |
-            ${{ runner.os }}-playwright-browsers-
+            playwright-browsers-
 
-      - name: Install Playwright and Chromium
-        run: |
-          python3 -m pip install --upgrade pip
-          python3 -m pip install playwright pytest
-          python3 -m playwright install --with-deps chromium
-
-      - name: Configure npm global prefix
-        run: |
-          npm config set prefix ~/.npm-global
-          echo "$HOME/.npm-global/bin" >> "$GITHUB_PATH"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-
-      - name: Cache npm global packages
+      - name: Cache Copilot CLI
         if: vars.AI_AGENT_PROVIDER == 'copilot'
         uses: actions/cache@v4
         with:
-          path: |
-            ~/.npm-global
-            ~/.local/bin
-          key: ${{ runner.os }}-npm-global-copilot-1.0.44
+          path: ${{ env.COPILOT_CACHE_PATH }}
+          key: ${{ env.COPILOT_CACHE_KEY }}
           restore-keys: |
-            ${{ runner.os }}-npm-global-copilot-
-            ${{ runner.os }}-npm-global-
-
-      - name: Cache Copilot session
-        if: vars.AI_AGENT_PROVIDER == 'copilot'
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.COPILOT_SESSION_CACHE_PATH }}
-          key: ${{ env.COPILOT_SESSION_CACHE_KEY }}
-          restore-keys: |
-            ${{ env.COPILOT_SESSION_CACHE_RESTORE_KEY }}
+            npm-global-copilot-
 
       - name: Cache Copilot session
         if: vars.AI_AGENT_PROVIDER == 'copilot'
@@ -128,12 +96,7 @@ jobs:
 
       - name: Install Copilot CLI
         if: vars.AI_AGENT_PROVIDER == 'copilot'
-        run: |
-          if ! command -v copilot >/dev/null 2>&1; then
-            npm install -g @github/copilot@1.0.44
-          fi
-          copilot --version
-          echo "Copilot CLI ready"
+        run: bash agents/setup/install.sh node:20 copilot:1.0.44
 
       - name: Verify Copilot CLI installation
         if: vars.AI_AGENT_PROVIDER == 'copilot'
@@ -152,9 +115,6 @@ jobs:
             exit 1
           fi
           echo "Using Copilot model: ${COPILOT_MODEL}"
-
-      - name: Export tool cache keys
-        run: bash agents/setup/cache.sh keys dmtools:v1.7.196 codegraph
 
       - name: Cache DMTools
         uses: actions/cache@v4
@@ -182,16 +142,13 @@ jobs:
             ${{ env.CODEGRAPH_INDEX_CACHE_KEY }}-${{ github.ref_name }}-
             ${{ env.CODEGRAPH_INDEX_CACHE_KEY }}-
 
-      - name: Install DMTools v1.7.196
-        run: bash agents/setup/install.sh dmtools:v1.7.196
-
-      - name: Install and init CodeGraph
-        run: bash agents/setup/codegraph.sh
+      - name: Install AI Teammate tools
+        run: bash agents/setup/install.sh java:17 node:20 dmtools:v1.7.196 codegraph playwright
 
       - name: Install CodeGraph usage guard
         run: |
           real_codegraph="$(command -v codegraph)"
-          guard_dir="${GITHUB_WORKSPACE}/.agent-bin"
+          guard_dir="${RUNNER_TEMP}/agent-bin"
           mkdir -p "${guard_dir}" "${GITHUB_WORKSPACE}/.dmtools"
           cat > "${guard_dir}/codegraph" <<EOF
           #!/usr/bin/env bash
@@ -318,11 +275,13 @@ jobs:
           else
             dmtools --debug run "${{ inputs.config_file }}" --inputJql "${INPUT_JQL}" --ciRunUrl "${CI_RUN_URL}" 2>&1 | tee "${GITHUB_WORKSPACE}/.dmtools/ai-run.log"
           fi
+
           LAST_JS_RESULT="$(grep 'JavaScriptExecutor - JavaScript executed successfully:' "${GITHUB_WORKSPACE}/.dmtools/ai-run.log" | tail -n 1 || true)"
           if [ -n "${LAST_JS_RESULT}" ] && echo "${LAST_JS_RESULT}" | grep -q '"success":false'; then
             echo "::error::${{ inputs.config_file }} JavaScript action returned success:false. See .dmtools/ai-run.log for details."
             exit 1
           fi
+
       - name: Verify CodeGraph usage
         if: ${{ always() && steps.run_ai.outcome == 'success' }}
         env:

@@ -259,6 +259,61 @@ void main() {
   );
 
   test(
+    'active search excludes archived issues from the default results',
+    () async {
+      final viewModel = TrackerViewModel(
+        repository: DemoTrackStateRepository(
+          snapshot: _searchPaginationSnapshot(archivedIssueIndexes: {1}),
+        ),
+      );
+
+      await viewModel.load();
+
+      expect(
+        viewModel.searchResults.any((issue) => issue.key == 'TRACK-1'),
+        isFalse,
+      );
+      expect(viewModel.selectedIssue?.key, 'TRACK-2');
+      expect(viewModel.totalSearchResults, 7);
+    },
+  );
+
+  test('empty JQL query excludes archived issues from active search', () async {
+    final viewModel = TrackerViewModel(
+      repository: DemoTrackStateRepository(
+        snapshot: _searchPaginationSnapshot(archivedIssueIndexes: {1}),
+      ),
+    );
+
+    await viewModel.load();
+    await viewModel.updateQuery('');
+
+    expect(viewModel.totalSearchResults, 7);
+    expect(viewModel.searchResults.length, 7);
+    expect(
+      viewModel.searchResults.any((issue) => issue.key == 'TRACK-1'),
+      isFalse,
+    );
+    expect(viewModel.selectedIssue?.key, 'TRACK-2');
+  });
+
+  test('explicit archived query keeps archived issues discoverable', () async {
+    final viewModel = TrackerViewModel(
+      repository: DemoTrackStateRepository(
+        snapshot: _searchPaginationSnapshot(archivedIssueIndexes: {1}),
+      ),
+    );
+
+    await viewModel.load();
+    await viewModel.updateQuery('archived = true ORDER BY key ASC');
+
+    expect(viewModel.jql, 'archived = true ORDER BY key ASC');
+    expect(viewModel.totalSearchResults, 1);
+    expect(viewModel.searchResults.map((issue) => issue.key), ['TRACK-1']);
+    expect(viewModel.selectedIssue?.key, 'TRACK-1');
+  });
+
+  test(
     'view model restores the last valid query after a search failure',
     () async {
       final viewModel = TrackerViewModel(
@@ -1362,6 +1417,49 @@ void main() {
       expect(inspection.isLfsTracked, isTrue);
       expect(inspection.requiresLocalGitUpload, isTrue);
       expect(inspection.resolvedName, 'release-notes.pdf');
+    },
+  );
+
+  test(
+    'view model allows hosted LFS duplicate replacements when release uploads are available',
+    () async {
+      SharedPreferences.setMockInitialValues({
+        'trackstate.githubToken.trackstate.trackstate': 'release-backed-token',
+      });
+      const attachmentRestrictedPermission = RepositoryPermission(
+        canRead: true,
+        canWrite: true,
+        isAdmin: false,
+        canCreateBranch: true,
+        canManageAttachments: true,
+        attachmentUploadMode: AttachmentUploadMode.noLfs,
+        supportsReleaseAttachmentWrites: true,
+        canCheckCollaborators: false,
+      );
+      final viewModel = TrackerViewModel(
+        repository: ReactiveIssueDetailTrackStateRepository(
+          permission: attachmentRestrictedPermission,
+          textFixtures: _repositoryPathProjectTextFixtures(),
+          lfsTrackedPaths: {'TRACK-12/attachments/sync-sequence.svg'},
+        ),
+      );
+
+      await viewModel.load();
+      final issue = viewModel.issues.firstWhere(
+        (candidate) => candidate.key == 'TRACK-12',
+      );
+      viewModel.selectIssue(issue);
+      await viewModel.ensureIssueAttachmentsLoaded(issue);
+      final hydratedIssue = viewModel.selectedIssue!;
+      final inspection = await viewModel.inspectIssueAttachmentUpload(
+        hydratedIssue,
+        'sync sequence.svg',
+      );
+
+      expect(inspection.isLfsTracked, isTrue);
+      expect(inspection.existingAttachment, isNotNull);
+      expect(inspection.requiresLocalGitUpload, isFalse);
+      expect(inspection.resolvedName, 'sync-sequence.svg');
     },
   );
 
@@ -2989,7 +3087,9 @@ TrackerSnapshot _hostedBootstrapSnapshot(TrackerSnapshot snapshot) {
   );
 }
 
-TrackerSnapshot _searchPaginationSnapshot() {
+TrackerSnapshot _searchPaginationSnapshot({
+  Set<int> archivedIssueIndexes = const <int>{},
+}) {
   final issues = [
     for (var index = 1; index <= 8; index += 1)
       TrackStateIssue(
@@ -3020,7 +3120,7 @@ TrackerSnapshot _searchPaginationSnapshot() {
         comments: const [],
         links: const [],
         attachments: const [],
-        isArchived: false,
+        isArchived: archivedIssueIndexes.contains(index),
         hasDetailLoaded: false,
         hasCommentsLoaded: false,
         hasAttachmentsLoaded: false,

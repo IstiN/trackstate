@@ -692,4 +692,114 @@ void main() {
       );
     },
   );
+
+  test(
+    'Tab from a duplicated workspace-row action skips later DOM duplicates of the same logical control',
+    () {
+      expect(
+        browserWorkspaceSwitcherTabHandoffIndex(
+          focusStops: const [
+            BrowserWorkspaceSwitcherTabStopSnapshot(
+              isFocusable: true,
+              isWithinWorkspaceSwitcher: true,
+              isWithinWorkspaceRow: true,
+              isSelectedWorkspaceRow: true,
+              isWorkspaceSwitcherTrigger: false,
+              logicalKey: 'row:active',
+              visualTop: 0,
+              visualLeft: 0,
+            ),
+            BrowserWorkspaceSwitcherTabStopSnapshot(
+              isFocusable: true,
+              isWithinWorkspaceSwitcher: true,
+              isWithinWorkspaceRow: true,
+              isSelectedWorkspaceRow: false,
+              isWorkspaceSwitcherTrigger: false,
+              logicalKey: 'open:demo',
+              visualTop: 96,
+              visualLeft: 0,
+            ),
+            BrowserWorkspaceSwitcherTabStopSnapshot(
+              isFocusable: true,
+              isWithinWorkspaceSwitcher: true,
+              isWithinWorkspaceRow: true,
+              isSelectedWorkspaceRow: false,
+              isWorkspaceSwitcherTrigger: false,
+              logicalKey: 'open:demo',
+              visualTop: 96,
+              visualLeft: 0,
+            ),
+            BrowserWorkspaceSwitcherTabStopSnapshot(
+              isFocusable: true,
+              isWithinWorkspaceSwitcher: true,
+              isWithinWorkspaceRow: true,
+              isSelectedWorkspaceRow: false,
+              isWorkspaceSwitcherTrigger: false,
+              logicalKey: 'delete:demo',
+              visualTop: 96,
+              visualLeft: 196,
+            ),
+          ],
+          currentIndex: 1,
+          backwards: false,
+        ),
+        3,
+      );
+    },
+  );
+
+  test(
+    'native DOM order is trusted when the browser next focusable stop only differs by duplicate logical wrappers',
+    () {
+      expect(
+        browserWorkspaceSwitcherTabHandoffIndex(
+          focusStops: const [
+            BrowserWorkspaceSwitcherTabStopSnapshot(
+              isFocusable: true,
+              isWithinWorkspaceSwitcher: true,
+              isWithinWorkspaceRow: true,
+              isSelectedWorkspaceRow: true,
+              isWorkspaceSwitcherTrigger: false,
+              logicalKey: 'row:active',
+              visualTop: 0,
+              visualLeft: 0,
+            ),
+            BrowserWorkspaceSwitcherTabStopSnapshot(
+              isFocusable: true,
+              isWithinWorkspaceSwitcher: true,
+              isWithinWorkspaceRow: false,
+              isSelectedWorkspaceRow: false,
+              isWorkspaceSwitcherTrigger: false,
+              logicalKey: 'toggle:hosted',
+              visualTop: 120,
+              visualLeft: 0,
+            ),
+            BrowserWorkspaceSwitcherTabStopSnapshot(
+              isFocusable: true,
+              isWithinWorkspaceSwitcher: true,
+              isWithinWorkspaceRow: false,
+              isSelectedWorkspaceRow: false,
+              isWorkspaceSwitcherTrigger: false,
+              logicalKey: 'toggle:hosted',
+              visualTop: 120,
+              visualLeft: 0,
+            ),
+            BrowserWorkspaceSwitcherTabStopSnapshot(
+              isFocusable: true,
+              isWithinWorkspaceSwitcher: true,
+              isWithinWorkspaceRow: false,
+              isSelectedWorkspaceRow: false,
+              isWorkspaceSwitcherTrigger: false,
+              logicalKey: 'toggle:local',
+              visualTop: 120,
+              visualLeft: 112,
+            ),
+          ],
+          currentIndex: 1,
+          backwards: false,
+        ),
+        isNull,
+      );
+    },
+  );
 }

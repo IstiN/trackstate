@@ -34,7 +34,7 @@ migrate_working_dir/
 /coverage/
 /cacheBasicJiraClient/
 /.codegraph/
-/.dmtools/copilot-sessions/
+/.dmtools/copilot-sessions/**
 /input/
 /node_modules/
 /outputs/

@@ -370,7 +370,7 @@ void main() {
     );
 
     test(
-      'hosted session cache-busts the projectConfig reload after settings changes',
+      'hosted session sees saved status and workflow changes on the same repository',
       () async {
         final sampleSnapshot = _sampleSnapshot();
         final sampleProject = sampleSnapshot.project;
@@ -397,15 +397,9 @@ void main() {
           repositoryIndex: sampleSnapshot.repositoryIndex,
           issues: sampleSnapshot.issues,
         );
-        final freshSnapshot = TrackerSnapshot(
-          project: ProjectConfig(
-            key: sampleProject.key,
-            name: sampleProject.name,
-            repository: sampleProject.repository,
-            branch: sampleProject.branch,
-            defaultLocale: sampleProject.defaultLocale,
-            supportedLocales: sampleProject.supportedLocales,
-            issueTypeDefinitions: sampleProject.issueTypeDefinitions,
+        final hostedRepository = _FakeSearchRepository(snapshot: staleSnapshot);
+        await hostedRepository.saveProjectSettings(
+          sampleProject.settingsCatalog.copyWith(
             statusDefinitions: <TrackStateConfigEntry>[
               const TrackStateConfigEntry(id: 'todo', name: 'To Do'),
               const TrackStateConfigEntry(
@@ -414,7 +408,6 @@ void main() {
                 category: 'indeterminate',
               ),
             ],
-            fieldDefinitions: sampleProject.fieldDefinitions,
             workflowDefinitions: const <TrackStateWorkflowDefinition>[
               TrackStateWorkflowDefinition(
                 id: 'delivery',
@@ -430,16 +423,8 @@ void main() {
                 ],
               ),
             ],
-            priorityDefinitions: sampleProject.priorityDefinitions,
-            versionDefinitions: sampleProject.versionDefinitions,
-            componentDefinitions: sampleProject.componentDefinitions,
-            resolutionDefinitions: sampleProject.resolutionDefinitions,
-            attachmentStorage: sampleProject.attachmentStorage,
           ),
-          repositoryIndex: sampleSnapshot.repositoryIndex,
-          issues: sampleSnapshot.issues,
         );
-        final hostedRepository = _FakeSearchRepository(snapshot: staleSnapshot);
         final providerFactory = _FakeTrackStateCliProviderFactory(
           hostedProvider: _FakeHostedTrackStateProvider(
             user: const RepositoryUser(
@@ -457,12 +442,7 @@ void main() {
           ),
         );
         final repositoryFactory = _FakeTrackStateCliRepositoryFactory(
-          hostedRepositoryBuilder: (disableHostedSyncRequestCaching) {
-            hostedRepository.snapshot = disableHostedSyncRequestCaching
-                ? freshSnapshot
-                : staleSnapshot;
-            return hostedRepository;
-          },
+          hostedRepository: hostedRepository,
         );
         final cli = TrackStateCli(
           environment: const TrackStateCliEnvironment(
@@ -3460,13 +3440,10 @@ class _FakeTrackStateCliRepositoryFactory
   _FakeTrackStateCliRepositoryFactory({
     this.localRepository,
     this.hostedRepository,
-    this.hostedRepositoryBuilder,
   });
 
   final TrackStateRepository? localRepository;
   final TrackStateRepository? hostedRepository;
-  final TrackStateRepository Function(bool disableHostedSyncRequestCaching)?
-  hostedRepositoryBuilder;
   String? lastRepositoryPath;
   String? lastDataRef;
   http.Client? lastLocalClient;
@@ -3503,10 +3480,6 @@ class _FakeTrackStateCliRepositoryFactory
     lastHostedRepository = repository;
     lastHostedBranch = branch;
     lastDisableHostedSyncRequestCaching = disableHostedSyncRequestCaching;
-    final builder = hostedRepositoryBuilder;
-    if (builder != null) {
-      return builder(disableHostedSyncRequestCaching);
-    }
     final hosted = hostedRepository;
     if (hosted == null) {
       throw StateError('Expected a fake hosted repository.');
@@ -3515,7 +3488,8 @@ class _FakeTrackStateCliRepositoryFactory
   }
 }
 
-class _FakeSearchRepository implements TrackStateRepository {
+class _FakeSearchRepository
+    implements TrackStateRepository, ProjectSettingsRepository {
   _FakeSearchRepository({
     this.page = const TrackStateIssueSearchPage.empty(),
     this.snapshot = const TrackerSnapshot(
@@ -3581,6 +3555,38 @@ class _FakeSearchRepository implements TrackStateRepository {
 
   @override
   Future<TrackerSnapshot> loadSnapshot() async => snapshot;
+
+  @override
+  Future<TrackerSnapshot> saveProjectSettings(
+    ProjectSettingsCatalog settings,
+  ) async {
+    final currentSnapshot = snapshot;
+    snapshot = TrackerSnapshot(
+      project: ProjectConfig(
+        key: currentSnapshot.project.key,
+        name: currentSnapshot.project.name,
+        repository: currentSnapshot.project.repository,
+        branch: currentSnapshot.project.branch,
+        defaultLocale: settings.defaultLocale,
+        supportedLocales: settings.effectiveSupportedLocales,
+        issueTypeDefinitions: settings.issueTypeDefinitions,
+        statusDefinitions: settings.statusDefinitions,
+        fieldDefinitions: settings.fieldDefinitions,
+        workflowDefinitions: settings.workflowDefinitions,
+        priorityDefinitions: settings.priorityDefinitions,
+        versionDefinitions: settings.versionDefinitions,
+        componentDefinitions: settings.componentDefinitions,
+        resolutionDefinitions: settings.resolutionDefinitions,
+        attachmentStorage: settings.attachmentStorage,
+      ),
+      repositoryIndex: currentSnapshot.repositoryIndex,
+      issues: currentSnapshot.issues,
+      loadWarnings: currentSnapshot.loadWarnings,
+      readiness: currentSnapshot.readiness,
+      startupRecovery: currentSnapshot.startupRecovery,
+    );
+    return snapshot;
+  }
 
   @override
   Future<TrackStateIssueSearchPage> searchIssuePage(
