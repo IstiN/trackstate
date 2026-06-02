@@ -111,4 +111,53 @@ void main() {
       );
     },
   );
+
+  testWidgets(
+    'browser text-field sync moves stale validation alerts into the active dialog',
+    (tester) async {
+      final controller = TextEditingController();
+      addTearDown(controller.dispose);
+
+      final staleContainer = web.HTMLDivElement();
+      final staleAlert = web.HTMLSpanElement()
+        ..id = 'trackstate-text-field-summary-error'
+        ..textContent = 'Old error';
+      staleContainer.append(staleAlert);
+      web.document.body!.append(staleContainer);
+
+      final input = web.HTMLInputElement()
+        ..setAttribute('aria-label', 'Summary')
+        ..setAttribute('data-semantics-role', 'text-field');
+      final dialog = web.HTMLDivElement()..setAttribute('role', 'dialog');
+      dialog.append(input);
+      web.document.body!.append(dialog);
+      addTearDown(() {
+        web.document
+            .getElementById('trackstate-text-field-summary-error')
+            ?.remove();
+        staleContainer.remove();
+        dialog.remove();
+      });
+
+      browser_text_field_value_sync.syncBrowserTextFieldValue(
+        label: 'Summary',
+        controller: controller,
+        value: controller.text,
+        enabled: true,
+        readOnly: false,
+        errorText: 'Summary is required before saving.',
+      );
+      await tester.pump();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+
+      final errorMessage = web.document.getElementById(
+        'trackstate-text-field-summary-error',
+      );
+      expect(errorMessage, same(staleAlert));
+      expect(dialog.contains(errorMessage), isTrue);
+      expect(staleContainer.contains(errorMessage), isFalse);
+      expect(errorMessage!.textContent, 'Summary is required before saving.');
+    },
+  );
 }
