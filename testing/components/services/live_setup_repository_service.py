@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 import urllib.error
 from urllib.parse import quote
 import urllib.request
@@ -855,8 +856,18 @@ class LiveSetupRepositoryService:
                 ),
             },
         )
-        with urllib.request.urlopen(request, timeout=60) as response:
-            return json.loads(response.read().decode("utf-8"))
+        last_error = None
+        for attempt in range(3):
+            try:
+                with urllib.request.urlopen(request, timeout=60) as response:
+                    return json.loads(response.read().decode("utf-8"))
+            except (TimeoutError, urllib.error.URLError) as error:
+                last_error = error
+                if attempt == 2:
+                    break
+                time.sleep(1.5 * (attempt + 1))
+        assert last_error is not None
+        raise last_error
 
     def _fallback_repo_path(self, relative_path: str) -> Path:
         sanitized_relative_path = relative_path.strip("/")
