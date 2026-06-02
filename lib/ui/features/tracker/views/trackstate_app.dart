@@ -6163,13 +6163,17 @@ Future<void> _showIssueEditDialog(
   required TrackStateIssue issue,
   required TrackerViewModel viewModel,
   required bool workflowOnly,
-}) {
+}) async {
+  final editIssue = await viewModel.prepareIssueForEdit(issue);
+  if (!context.mounted) {
+    return;
+  }
   return showDialog<void>(
     context: context,
     barrierColor: Colors.black.withValues(alpha: 0.12),
     builder: (dialogContext) {
       return _IssueEditDialog(
-        issue: issue,
+        issue: editIssue,
         viewModel: viewModel,
         workflowOnly: workflowOnly,
       );

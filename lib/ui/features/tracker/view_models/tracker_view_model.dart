@@ -408,6 +408,19 @@ class TrackerViewModel extends ChangeNotifier {
   bool get isSaving => _isSaving;
   TrackerLoadState loadStateForDomain(TrackerDataDomain domain) =>
       _snapshot?.readiness.domainState(domain) ?? TrackerLoadState.loading;
+
+  TrackStateIssue currentIssueFor(TrackStateIssue issue) =>
+      _snapshot?.issues.firstWhere(
+        (candidate) => candidate.key == issue.key,
+        orElse: () => issue,
+      ) ??
+      issue;
+
+  Future<TrackStateIssue> prepareIssueForEdit(TrackStateIssue issue) async {
+    await ensureIssueDetailLoaded(issue);
+    return currentIssueFor(issue);
+  }
+
   TrackerLoadState loadStateForSection(TrackerSection section) =>
       _snapshot?.readiness.sectionState(_sectionKey(section)) ??
       TrackerLoadState.loading;
@@ -2308,6 +2321,9 @@ class TrackerViewModel extends ChangeNotifier {
       return;
     }
     if (loadingSet.contains(issue.key)) {
+      while (!_disposed && loadingSet.contains(issue.key)) {
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      }
       return;
     }
     loadingSet.add(issue.key);
