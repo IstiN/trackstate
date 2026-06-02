@@ -70,7 +70,8 @@ module.exports = {
             answerField: 'Answer'
         },
         fields: {
-            acceptanceCriteria: 'Acceptance Criteria'
+            acceptanceCriteria: 'Acceptance Criteria',
+            bugSolution: 'customfield_10400'
         }
     },
 
