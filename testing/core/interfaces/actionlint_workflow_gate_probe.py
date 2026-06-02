@@ -34,6 +34,7 @@ class ActionlintWorkflowGateObservation:
     actionlint_step_conclusion: str | None
     actionlint_log_excerpt: str | None
     mutated_line_preview: str
+    changed_workflow_text: str
     cleanup_deleted_branch: bool
 
     def to_dict(self) -> dict[str, Any]:

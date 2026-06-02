@@ -1,0 +1,36 @@
+test_id: TS-1324
+type: ci
+framework: unittest
+platform: python
+dependencies:
+  - gh CLI authenticated with push access to IstiN/trackstate-setup
+  - network access to GitHub REST APIs and GitHub Actions logs
+runtime_inputs:
+  repository: IstiN/trackstate-setup
+  base_branch: main
+  target_workflow_name: TS-1324 timeout-minutes probe
+  target_workflow_path: .github/workflows/ts1324-timeout-minutes-probe.yml
+  branch_prefix: ts1324-actionlint-timeout-minutes
+  commit_message: "TS-1324 probe: add workflow without timeout-minutes"
+  mutation_mode: create_file
+  created_workflow_contents: |
+    name: TS-1324 Timeout Minutes Probe
+
+    on:
+      workflow_dispatch:
+
+    jobs:
+      probe:
+        runs-on: ubuntu-latest
+        steps:
+          - run: echo "TS-1324 probe"
+  expected_actionlint_marker: actionlint
+  expected_log_markers:
+    - .github/workflows/ts1324-timeout-minutes-probe.yml
+    - timeout-minutes
+    - required
+  poll_interval_seconds: 5
+  run_timeout_seconds: 120
+notes:
+  - Adds a disposable workflow file under .github/workflows/ that intentionally omits a job-level timeout-minutes setting.
+  - The test asserts the pushed workflow text itself lacks timeout-minutes before checking the live actionlint result.
