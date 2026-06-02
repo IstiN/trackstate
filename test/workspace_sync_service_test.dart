@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trackstate/data/providers/trackstate_provider.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
@@ -293,9 +292,6 @@ void main() {
   test(
     'workspace sync service keeps hosted web retries at the full backoff interval',
     () async {
-      if (!kIsWeb) {
-        return;
-      }
       final repository = _ThrowingWorkspaceSyncRepository(
         error: const TrackStateProviderException(
           'GitHub API request failed for /repos/IstiN/trackstate-setup/branches/main (401): {"message":"Bad credentials"}',
@@ -317,6 +313,7 @@ void main() {
       try {
         await service.checkNow(force: true);
         expect(statuses.last.health, WorkspaceSyncHealth.unavailable);
+        expect(statuses.last.nextRetryAt, DateTime.utc(2026, 5, 14, 10, 1));
         expect(timers.lastScheduledDuration, const Duration(minutes: 1));
       } finally {
         service.dispose();
