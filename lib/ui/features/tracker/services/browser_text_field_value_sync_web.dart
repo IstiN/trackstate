@@ -58,16 +58,16 @@ void syncBrowserTextFieldValue({
   }
 
   if (applySync()) {
-    return;
+    _retrySync(applySync);
+  } else {
+    _retrySync(applySync);
   }
-  Timer.run(() {
-    if (applySync()) {
-      return;
-    }
-    Timer.run(() {
-      applySync();
-    });
-  });
+}
+
+void _retrySync(bool Function() applySync) {
+  Timer.run(applySync);
+  Timer(const Duration(milliseconds: 50), applySync);
+  Timer(const Duration(milliseconds: 150), applySync);
 }
 
 _BrowserTextFieldBinding _bindingForInput(web.HTMLInputElement element) =>
@@ -185,11 +185,12 @@ class _BrowserTextFieldBinding {
     message.setAttribute(
       'style',
       'position:absolute;left:-10000px;top:0;width:max-content;'
-          'height:auto;padding:1px;color:${errorColor ?? '#c25742'};'
+          'min-width:1px;height:auto;min-height:1px;padding:1px;'
+          'color:${errorColor ?? '#c25742'};'
           'background-color:rgb(0, 0, 0);pointer-events:none;',
     );
     if (existing == null) {
-      element.parentElement?.append(message);
+      _nearestDialogElement(element)?.append(message);
     }
   }
 
@@ -233,3 +234,6 @@ class _BrowserTextFieldBinding {
     }
   }
 }
+
+web.Element? _nearestDialogElement(web.HTMLElement element) =>
+    element.closest('[role="dialog"]') ?? element.parentElement;
