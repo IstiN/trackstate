@@ -750,23 +750,9 @@ class ProviderBackedTrackStateRepository
         );
       }
     }
-    final currentSnapshot = _snapshot;
-    if (currentSnapshot == null) {
-      return loadSnapshot();
-    }
-    final updatedSnapshot = TrackerSnapshot(
-      project: _projectConfigWithSavedSettings(
-        current: currentSnapshot.project,
-        settings: persistedSettings,
-      ),
-      issues: currentSnapshot.issues,
-      repositoryIndex: currentSnapshot.repositoryIndex,
-      loadWarnings: currentSnapshot.loadWarnings,
-      readiness: currentSnapshot.readiness,
-      startupRecovery: currentSnapshot.startupRecovery,
-    );
-    _snapshot = updatedSnapshot;
-    return updatedSnapshot;
+    final refreshedSnapshot = await loadSnapshot();
+    _snapshot = refreshedSnapshot;
+    return refreshedSnapshot;
   }
 
   @override
@@ -4663,29 +4649,6 @@ Map<String, Object?> _localizedLabelsJson(
     locale,
   ),
 };
-
-ProjectConfig _projectConfigWithSavedSettings({
-  required ProjectConfig current,
-  required ProjectSettingsCatalog settings,
-}) {
-  return ProjectConfig(
-    key: current.key,
-    name: current.name,
-    repository: current.repository,
-    branch: current.branch,
-    defaultLocale: settings.defaultLocale,
-    supportedLocales: settings.effectiveSupportedLocales,
-    issueTypeDefinitions: settings.issueTypeDefinitions,
-    statusDefinitions: settings.statusDefinitions,
-    fieldDefinitions: settings.fieldDefinitions,
-    workflowDefinitions: settings.workflowDefinitions,
-    priorityDefinitions: settings.priorityDefinitions,
-    versionDefinitions: settings.versionDefinitions,
-    componentDefinitions: settings.componentDefinitions,
-    resolutionDefinitions: settings.resolutionDefinitions,
-    attachmentStorage: settings.attachmentStorage,
-  );
-}
 
 Map<String, Object?> _configLocalizedLabelsJson(
   List<TrackStateConfigEntry> entries,

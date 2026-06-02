@@ -217,7 +217,17 @@ Minimal issue fixture for project settings tests.
 
       expect(
         provider.readTextFilePaths,
-        equals(const ['DEMO/project.json', 'DEMO/config/fields.json']),
+        containsAll(<String>[
+          'DEMO/project.json',
+          'DEMO/config/statuses.json',
+          'DEMO/config/issue-types.json',
+          'DEMO/config/fields.json',
+          'DEMO/config/workflows.json',
+          'DEMO/config/priorities.json',
+          'DEMO/config/versions.json',
+          'DEMO/config/components.json',
+          'DEMO/config/resolutions.json',
+        ]),
       );
       expect(provider.lastFileChangeRequest, isNotNull);
       expect(
