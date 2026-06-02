@@ -84,9 +84,18 @@ def main() -> None:
     }
 
     try:
+        pre_reset_fixture = _reset_live_issue_fixture_for_fresh_edit(
+            service=service,
+            visible_issue_keys=PREFERRED_ISSUE_KEYS,
+        )
+        result["pre_reset_issue_key"] = pre_reset_fixture.key
+        result["pre_reset_issue_path"] = pre_reset_fixture.path
+
         with create_live_tracker_app_with_stored_token(
             config,
             token=token,
+            viewport_width=2200,
+            viewport_height=1100,
         ) as tracker_page:
             page = LiveMultiViewRefreshPage(tracker_page)
             try:
