@@ -50,7 +50,6 @@ void syncBrowserTextFieldValue({
         enabled: enabled,
         readOnly: readOnly,
         errorText: errorText,
-        errorColor: errorColor,
         errorMessageId: errorMessageId,
       );
     }
@@ -120,7 +119,6 @@ class _BrowserTextFieldBinding {
     required bool enabled,
     required bool readOnly,
     required String? errorText,
-    required String? errorColor,
     required String errorMessageId,
   }) {
     if (_readValue() != value) {
@@ -138,7 +136,6 @@ class _BrowserTextFieldBinding {
       _syncErrorState(
         input,
         errorText: errorText,
-        errorColor: errorColor,
         errorMessageId: errorMessageId,
       );
       return;
@@ -155,7 +152,6 @@ class _BrowserTextFieldBinding {
       _syncErrorState(
         textarea,
         errorText: errorText,
-        errorColor: errorColor,
         errorMessageId: errorMessageId,
       );
     }
@@ -164,7 +160,6 @@ class _BrowserTextFieldBinding {
   void _syncErrorState(
     web.HTMLElement element, {
     required String? errorText,
-    required String? errorColor,
     required String errorMessageId,
   }) {
     final normalizedError = errorText?.trim() ?? '';
@@ -186,7 +181,7 @@ class _BrowserTextFieldBinding {
       'style',
       'position:absolute;left:-10000px;top:0;width:max-content;'
           'min-width:1px;height:auto;min-height:1px;padding:1px;'
-          'color:${errorColor ?? '#c25742'};'
+          'color:#c25742;'
           'background-color:rgb(0, 0, 0);pointer-events:none;',
     );
     if (existing == null) {
