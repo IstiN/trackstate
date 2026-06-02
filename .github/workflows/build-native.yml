@@ -83,28 +83,53 @@ jobs:
           script: |
             const requiredLabels = process.env.REQUIRED_LABELS.split(',');
             const readinessTimeoutMs = 5 * 60 * 1000;
+            const readinessFailureMessage =
+              'Unable to verify TrackState runner labels because the token cannot read repository runners.';
+            const readinessStartedAt = Date.now();
             const { owner, repo } = context.repo;
 
             let response;
             try {
-              response = await github.request(
-                'GET /repos/{owner}/{repo}/actions/runners',
-                {
-                  owner,
-                  repo,
-                  per_page: 100,
-                },
-              );
+              response = await Promise.race([
+                github.request(
+                  'GET /repos/{owner}/{repo}/actions/runners',
+                  {
+                    owner,
+                    repo,
+                    per_page: 100,
+                  },
+                ),
+                new Promise((_, reject) => {
+                  setTimeout(
+                    () => reject(new Error('runner-inventory-timeout')),
+                    readinessTimeoutMs,
+                  );
+                }),
+              ]);
             } catch (error) {
-              if (error.status === 403) {
-                core.warning(
-                  'Unable to verify TrackState runner labels because the token cannot read repository runners. ' +
-                  'Waiting out the readiness timeout before failing closed.',
-                );
-                await new Promise((resolve) => setTimeout(resolve, readinessTimeoutMs));
+              if (error.message === 'runner-inventory-timeout') {
                 core.setFailed(
-                  'Unable to verify TrackState runner labels because the token cannot read repository runners. ' +
-                  'Failing closed after the readiness timeout expired.',
+                  `${readinessFailureMessage} Failing closed after the readiness timeout expired.`,
+                );
+                return;
+              }
+
+              if (error.status === 403) {
+                const elapsedMs = Date.now() - readinessStartedAt;
+                const remainingDelayMs = Math.max(
+                  0,
+                  readinessTimeoutMs - elapsedMs,
+                );
+                core.warning(
+                  `${readinessFailureMessage} Waiting out the readiness timeout before failing closed.`,
+                );
+                if (remainingDelayMs > 0) {
+                  await new Promise((resolve) =>
+                    setTimeout(resolve, remainingDelayMs),
+                  );
+                }
+                core.setFailed(
+                  `${readinessFailureMessage} Failing closed after the readiness timeout expired.`,
                 );
                 return;
               }

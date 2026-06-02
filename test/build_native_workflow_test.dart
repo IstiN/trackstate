@@ -32,8 +32,28 @@ void main() {
     expect(
       workflow,
       contains(
-        'await new Promise((resolve) => setTimeout(resolve, readinessTimeoutMs));',
+        'response = await Promise.race([',
       ),
+    );
+    expect(
+      workflow,
+      contains("runner-inventory-timeout"),
+    );
+    expect(
+      workflow,
+      contains('const readinessStartedAt = Date.now();'),
+    );
+    expect(
+      workflow,
+      contains('const remainingDelayMs = Math.max('),
+    );
+    expect(
+      workflow,
+      contains('if (remainingDelayMs > 0) {'),
+    );
+    expect(
+      workflow,
+      contains('setTimeout(resolve, remainingDelayMs)'),
     );
     expect(
       workflow,
