@@ -184,8 +184,9 @@ class _BrowserTextFieldBinding {
           'color:#c25742;'
           'background-color:rgb(0, 0, 0);pointer-events:none;',
     );
-    if (existing == null) {
-      _nearestDialogElement(element)?.append(message);
+    final container = _nearestDialogElement(element);
+    if (container != null && message.parentElement != container) {
+      container.append(message);
     }
   }
 
