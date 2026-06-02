@@ -219,8 +219,21 @@ class LiveCommentMetadataContrastProbe:
         *,
         palette: ThemePalette,
     ) -> list[tuple[RgbColor, int]]:
-        candidates: list[tuple[float, list[tuple[RgbColor, int]]]] = []
+        # Prefer concrete token-color evidence over anti-aliased edge pixels. The
+        # previous implementation picked the lowest-contrast token candidate,
+        # which could misclassify a text-colored glyph as muted when its edge
+        # pixels blended with the row background.
         for token_color in (palette.text, palette.muted):
+            exactish_samples = [
+                (color, count)
+                for color, count in samples
+                if color_distance(color, token_color) <= 10
+            ]
+            if sum(count for _, count in exactish_samples) >= 5:
+                return exactish_samples
+
+        candidates: list[tuple[float, int, list[tuple[RgbColor, int]]]] = []
+        for priority, token_color in enumerate((palette.text, palette.muted)):
             token_samples = [
                 (color, count)
                 for color, count in samples
@@ -231,14 +244,15 @@ class LiveCommentMetadataContrastProbe:
             averaged = self._weighted_average(token_samples)
             candidates.append(
                 (
-                    contrast_ratio(averaged, palette.surface_alt),
+                    color_distance(averaged, token_color),
+                    priority,
                     token_samples,
                 ),
             )
         if not candidates:
             return []
-        candidates.sort(key=lambda entry: entry[0])
-        return candidates[0][1]
+        candidates.sort(key=lambda entry: (entry[0], entry[1]))
+        return candidates[0][2]
 
     @staticmethod
     def _infer_palette_token(
