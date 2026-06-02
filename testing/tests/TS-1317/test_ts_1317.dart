@@ -67,8 +67,6 @@ void main() {
         final activeLabel = 'Open TRACK-1317-1 Active search issue';
         final archivedLabel = 'Open TRACK-1317-2 Archived search issue';
         final failures = <String>[];
-        final visibleRowSet = visibleRows.toSet();
-
         result['search_queries'] = repository.searchQueries.toList();
         result['search_query_delta'] = searchQueriesAfter;
         result['query_value'] = queryValue;
@@ -112,19 +110,30 @@ void main() {
           );
         }
 
-        if (visibleRowSet.length != 1 || !visibleRowSet.contains(activeLabel)) {
+        try {
+          await screen.expectIssueSearchResultVisible(
+            'TRACK-1317-1',
+            'Active search issue',
+          );
+        } catch (error) {
           failures.add(
-            'Step 3 failed: the search results area did not show only the active issue row.\n'
-            'Expected visible rows: [$activeLabel]\n'
-            'Observed visible rows: ${_formatSnapshot(visibleRows)}\n'
+            'Step 3 failed: the active issue row was not visible in the search results area.\n'
+            'Expected active row: $activeLabel\n'
+            'Observed error: ${_formatError(error)}\n'
             'Visible texts: ${_formatSnapshot(visibleTexts)}',
           );
         }
 
-        if (visibleRowSet.contains(archivedLabel)) {
+        try {
+          screen.expectIssueSearchResultAbsent(
+            'TRACK-1317-2',
+            'Archived search issue',
+          );
+        } catch (error) {
           failures.add(
             'Step 3 failed: the archived issue row leaked into active search results.\n'
             'Archived row label: $archivedLabel\n'
+            'Observed error: ${_formatError(error)}\n'
             'Visible rows: ${_formatSnapshot(visibleRows)}\n'
             'Visible texts: ${_formatSnapshot(visibleTexts)}',
           );
