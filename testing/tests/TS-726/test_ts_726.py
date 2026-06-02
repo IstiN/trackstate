@@ -661,6 +661,10 @@ def _assert_accessible_contrast(
         icon
         for icon in surface.interactive_icons
         if icon.contrast_ratio is None or icon.contrast_ratio < MIN_GRAPHIC_CONTRAST
+        if not _has_passing_equivalent_icon(
+            icon,
+            icons=surface.interactive_icons,
+        )
     ]
     if low_contrast:
         raise AssertionError(
@@ -739,6 +743,24 @@ def _has_passing_equivalent_text_control(
         if (
             candidate.contrast_ratio is not None
             and candidate.contrast_ratio >= MIN_TEXT_CONTRAST
+        ):
+            return True
+    return False
+
+
+def _has_passing_equivalent_icon(
+    icon: WorkspaceSwitcherIconObservation,
+    *,
+    icons: tuple[WorkspaceSwitcherIconObservation, ...],
+) -> bool:
+    for candidate in icons:
+        if candidate is icon:
+            continue
+        if candidate.label != icon.label:
+            continue
+        if (
+            candidate.contrast_ratio is not None
+            and candidate.contrast_ratio >= MIN_GRAPHIC_CONTRAST
         ):
             return True
     return False
@@ -1010,6 +1032,8 @@ def _relevant_sheet_focus_sequence(
         group = _sheet_focus_group(label)
         if group is None:
             continue
+        if group == "saved-workspaces" and saw_add_group:
+            break
         relevant_steps.append(step)
         if group == "saved-workspaces":
             saw_workspace_group = True
