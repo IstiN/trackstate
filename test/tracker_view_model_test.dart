@@ -773,6 +773,60 @@ void main() {
   );
 
   test(
+    'view model keeps the saved attachment replacement when the repository cache is stale',
+    () async {
+      final initialBytes = Uint8List.fromList(
+        utf8.encode('stale attachment bytes'),
+      );
+      final replacementBytes = Uint8List.fromList(
+        utf8.encode('fresh attachment bytes'),
+      );
+      final snapshot = _snapshotWithAttachment(
+        await const DemoTrackStateRepository().loadSnapshot(),
+        initialBytes: initialBytes,
+      );
+      final repository = _MutableEditRepository(
+        snapshot: snapshot,
+        keepAttachmentSnapshotStale: true,
+        initialAttachmentBytes: initialBytes,
+        replacementAttachmentBytes: replacementBytes,
+      );
+      final viewModel = TrackerViewModel(repository: repository);
+
+      await viewModel.load();
+      final issue = viewModel.selectedIssue!;
+
+      final success = await viewModel.uploadIssueAttachment(
+        issue: issue,
+        name: 'design spec.pdf',
+        bytes: replacementBytes,
+      );
+
+      expect(success, isTrue);
+      expect(repository.loadSnapshotCount, 1);
+      expect(viewModel.selectedIssue?.attachments, hasLength(1));
+      expect(
+        viewModel.selectedIssue?.attachments.single.name,
+        'design-spec.pdf',
+      );
+      expect(
+        viewModel.selectedIssue?.attachments.single.sizeBytes,
+        replacementBytes.length,
+      );
+      expect(
+        viewModel.selectedIssue?.attachments.single.revisionOrOid,
+        'mutable-revision-updated',
+      );
+      expect(
+        await repository.downloadAttachment(
+          viewModel.selectedIssue!.attachments.single,
+        ),
+        replacementBytes,
+      );
+    },
+  );
+
+  test(
     'view model saves hosted field edits without reloading the full snapshot',
     () async {
       SharedPreferences.setMockInitialValues({
@@ -1992,6 +2046,40 @@ TrackerSnapshot _snapshotWithResolutions(
   );
 }
 
+TrackerSnapshot _snapshotWithAttachment(
+  TrackerSnapshot snapshot, {
+  required Uint8List initialBytes,
+}) {
+  final issue = snapshot.issues.firstWhere(
+    (candidate) => candidate.key == 'TRACK-12',
+  );
+  final storagePath =
+      '${issue.storagePath.substring(0, issue.storagePath.lastIndexOf('/'))}/attachments/design-spec.pdf';
+  final attachment = IssueAttachment(
+    id: storagePath,
+    name: 'design-spec.pdf',
+    mediaType: 'application/pdf',
+    sizeBytes: initialBytes.length,
+    author: 'mutable-user',
+    createdAt: '2026-05-30T05:45:32Z',
+    storagePath: storagePath,
+    revisionOrOid: 'mutable-revision-initial',
+  );
+  final updatedIssue = issue.copyWith(
+    hasAttachmentsLoaded: true,
+    attachments: [attachment],
+  );
+  return TrackerSnapshot(
+    project: snapshot.project,
+    issues: [
+      for (final candidate in snapshot.issues)
+        if (candidate.key == issue.key) updatedIssue else candidate,
+    ],
+    repositoryIndex: snapshot.repositoryIndex,
+    loadWarnings: snapshot.loadWarnings,
+  );
+}
+
 Map<String, String> _repositoryPathProjectTextFixtures() => const {
   'project.json': '''
 {
@@ -2403,6 +2491,9 @@ class _MutableEditRepository implements TrackStateRepository {
     required TrackerSnapshot snapshot,
     this.usesLocalPersistence = false,
     this.reloadReturnsSummaryOnly = false,
+    this.keepAttachmentSnapshotStale = false,
+    this.initialAttachmentBytes = const <int>[],
+    this.replacementAttachmentBytes = const <int>[],
   }) : _snapshot = snapshot;
 
   TrackerSnapshot _snapshot;
@@ -2411,6 +2502,9 @@ class _MutableEditRepository implements TrackStateRepository {
   int loadSnapshotCount = 0;
 
   final bool reloadReturnsSummaryOnly;
+  final bool keepAttachmentSnapshotStale;
+  final List<int> initialAttachmentBytes;
+  final List<int> replacementAttachmentBytes;
 
   @override
   final bool usesLocalPersistence;
@@ -2527,7 +2621,11 @@ class _MutableEditRepository implements TrackStateRepository {
 
   @override
   Future<Uint8List> downloadAttachment(IssueAttachment attachment) async =>
-      Uint8List(0);
+      Uint8List.fromList(
+        attachment.revisionOrOid == 'mutable-revision-updated'
+            ? replacementAttachmentBytes
+            : initialAttachmentBytes,
+      );
 
   @override
   Future<List<IssueHistoryEntry>> loadIssueHistory(
@@ -2542,24 +2640,43 @@ class _MutableEditRepository implements TrackStateRepository {
     String? sourceName,
   }) async {
     final sanitizedName = sanitizeAttachmentName(name);
+    final storagePath =
+        '${issue.storagePath.substring(0, issue.storagePath.lastIndexOf('/'))}/attachments/$sanitizedName';
     final updated = issue.copyWith(
       hasAttachmentsLoaded: true,
       attachments: [
-        ...issue.attachments,
-        IssueAttachment(
-          id: '${issue.storagePath}/$sanitizedName',
-          name: sanitizedName,
-          mediaType: 'application/pdf',
-          sizeBytes: bytes.length,
-          author: 'mutable-user',
-          createdAt: 'just now',
-          storagePath:
-              '${issue.storagePath.substring(0, issue.storagePath.lastIndexOf('/'))}/attachments/$sanitizedName',
-          revisionOrOid: 'mutable-revision',
-        ),
+        for (final attachment in issue.attachments)
+          if (attachment.storagePath == storagePath)
+            IssueAttachment(
+              id: storagePath,
+              name: sanitizedName,
+              mediaType: attachment.mediaType,
+              sizeBytes: bytes.length,
+              author: 'mutable-user',
+              createdAt: 'just now',
+              storagePath: storagePath,
+              revisionOrOid: 'mutable-revision-updated',
+            )
+          else
+            attachment,
+        if (!issue.attachments.any(
+          (attachment) => attachment.storagePath == storagePath,
+        ))
+          IssueAttachment(
+            id: storagePath,
+            name: sanitizedName,
+            mediaType: 'application/pdf',
+            sizeBytes: bytes.length,
+            author: 'mutable-user',
+            createdAt: 'just now',
+            storagePath: storagePath,
+            revisionOrOid: 'mutable-revision-updated',
+          ),
       ],
     );
-    applyIssue(updated);
+    if (!keepAttachmentSnapshotStale) {
+      applyIssue(updated);
+    }
     return updated;
   }
 

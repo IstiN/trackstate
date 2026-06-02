@@ -2684,7 +2684,7 @@ class TrackerViewModel extends ChangeNotifier {
             (candidate) => candidate.key == issue.key,
           )) {
         _snapshot = cachedSnapshot;
-        _updateWorkspaceSyncBaseline();
+        _mergeIssueIntoSnapshot(issue);
         _selectIssueFromSnapshot(issue);
         return;
       }
