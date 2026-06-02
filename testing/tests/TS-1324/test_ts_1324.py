@@ -46,10 +46,10 @@ class ActionlintTimeoutMinutesGateTest(unittest.TestCase):
             f"Observed default branch: {observation.default_branch}",
         )
         self.assertTrue(
-            observation.target_workflow_present_on_default_branch,
-            "Step 1 failed: the live repository does not expose the actionlint "
-            "workflow that TS-1324 needs to exercise.\n"
-            f"Expected workflow path: {self.config.target_workflow_path}\n"
+            not observation.target_workflow_present_on_default_branch,
+            "Step 1 failed: the disposable TS-1324 workflow already exists on the "
+            "default branch, so the probe is not adding a fresh workflow file.\n"
+            f"Target workflow path: {self.config.target_workflow_path}\n"
             f"Observed workflow paths: {observation.default_branch_workflow_paths}",
         )
         self.assertTrue(
@@ -72,6 +72,14 @@ class ActionlintTimeoutMinutesGateTest(unittest.TestCase):
             "Step 2 failed: the disposable branch push did not return a commit SHA.\n"
             f"Branch: {observation.pushed_branch}\n"
             f"Workflow preview: {observation.mutated_line_preview}",
+        )
+        self.assertNotIn(
+            "timeout-minutes",
+            observation.changed_workflow_text.lower(),
+            "Step 2 failed: the pushed workflow file still contains timeout-minutes, "
+            "so the test is not exercising the missing-policy scenario.\n"
+            f"Target workflow path: {self.config.target_workflow_path}\n"
+            f"Changed workflow text:\n{observation.changed_workflow_text}",
         )
         self.assertIsNotNone(
             observation.actionlint_run_url,
@@ -126,13 +134,6 @@ class ActionlintTimeoutMinutesGateTest(unittest.TestCase):
             "Step 4 failed: the visible actionlint log did not mention the changed "
             "workflow file.\n"
             f"Expected file path: {self.config.target_workflow_path}\n"
-            f"Observed log excerpt:\n{observation.actionlint_log_excerpt}",
-        )
-        self.assertIn(
-            "timeout-minutes",
-            observation.actionlint_log_excerpt.lower(),
-            "Step 4 failed: the visible actionlint log did not mention timeout-minutes "
-            "at all.\n"
             f"Observed log excerpt:\n{observation.actionlint_log_excerpt}",
         )
         self.assertRegex(

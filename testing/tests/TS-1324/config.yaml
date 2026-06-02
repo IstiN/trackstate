@@ -8,21 +8,29 @@ dependencies:
 runtime_inputs:
   repository: IstiN/trackstate-setup
   base_branch: main
-  target_workflow_name: Actionlint
-  target_workflow_path: .github/workflows/actionlint.yml
+  target_workflow_name: TS-1324 timeout-minutes probe
+  target_workflow_path: .github/workflows/ts1324-timeout-minutes-probe.yml
   branch_prefix: ts1324-actionlint-timeout-minutes
-  commit_message: "TS-1324 probe: comment-only actionlint workflow change"
-  mutation_search_text: "name: Actionlint"
-  mutation_replacement_text: |
-    name: Actionlint
-    # TS-1324 probe: keep the workflow file valid while forcing a lint run.
+  commit_message: "TS-1324 probe: add workflow without timeout-minutes"
+  mutation_mode: create_file
+  created_workflow_contents: |
+    name: TS-1324 Timeout Minutes Probe
+
+    on:
+      workflow_dispatch:
+
+    jobs:
+      probe:
+        runs-on: ubuntu-latest
+        steps:
+          - run: echo "TS-1324 probe"
   expected_actionlint_marker: actionlint
   expected_log_markers:
-    - .github/workflows/actionlint.yml
+    - .github/workflows/ts1324-timeout-minutes-probe.yml
     - timeout-minutes
     - required
   poll_interval_seconds: 5
   run_timeout_seconds: 120
 notes:
-  - Touches the live actionlint workflow itself so the branch push triggers the contributor-visible CI gate.
-  - The live workflow currently lacks a job-level timeout-minutes check, so the test expects actionlint to reject the change once the policy is enforced.
+  - Adds a disposable workflow file under .github/workflows/ that intentionally omits a job-level timeout-minutes setting.
+  - The test asserts the pushed workflow text itself lacks timeout-minutes before checking the live actionlint result.
