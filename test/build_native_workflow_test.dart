@@ -29,6 +29,7 @@ void main() {
     expect(workflow, contains('runs-on: ubuntu-latest'));
     expect(workflow, contains('GET /repos/{owner}/{repo}/actions/runners'));
     expect(workflow, contains('const readinessTimeoutMs = 5 * 60 * 1000;'));
+    expect(workflow, contains('const readinessStartedAt = Date.now();'));
     expect(
       workflow,
       contains(

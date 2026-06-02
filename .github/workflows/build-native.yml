@@ -85,6 +85,7 @@ jobs:
             const readinessTimeoutMs = 5 * 60 * 1000;
             const readinessFailureMessage =
               'Unable to verify TrackState runner labels because the token cannot read repository runners.';
+            const readinessStartedAt = Date.now();
             let readinessTimeoutId;
             const { owner, repo } = context.repo;
 
