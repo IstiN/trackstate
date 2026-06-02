@@ -2676,21 +2676,36 @@ class TrackerViewModel extends ChangeNotifier {
   }
 
   void _applyTargetedIssueRefresh(TrackStateIssue issue) {
+    final normalizedIssue = _normalizeIssueForSnapshot(issue);
     final repository = _repository;
     if (repository is ProviderBackedTrackStateRepository) {
       final cachedSnapshot = repository.cachedSnapshot;
       if (cachedSnapshot != null &&
           cachedSnapshot.issues.any(
-            (candidate) => candidate.key == issue.key,
+            (candidate) => candidate.key == normalizedIssue.key,
           )) {
         _snapshot = cachedSnapshot;
-        _mergeIssueIntoSnapshot(issue);
-        _selectIssueFromSnapshot(issue);
+        _mergeIssueIntoSnapshot(normalizedIssue);
+        _selectIssueFromSnapshot(normalizedIssue);
         return;
       }
     }
-    _mergeIssueIntoSnapshot(issue);
-    _selectIssueFromSnapshot(issue);
+    _mergeIssueIntoSnapshot(normalizedIssue);
+    _selectIssueFromSnapshot(normalizedIssue);
+  }
+
+  TrackStateIssue _normalizeIssueForSnapshot(TrackStateIssue issue) {
+    try {
+      return _copyIssueForLocalEdit(
+        issue,
+        status: _issueStatusFromConfigId(issue.statusId),
+        statusId: issue.statusId,
+        priorityId: issue.priorityId,
+        resolutionId: issue.resolutionId,
+      );
+    } on Object {
+      return issue;
+    }
   }
 
   void _selectIssueFromSnapshot(TrackStateIssue issue) {
@@ -3223,6 +3238,9 @@ TrackStateIssue _copyIssueForLocalEdit(
     comments: issue.comments,
     links: issue.links,
     attachments: issue.attachments,
+    hasDetailLoaded: issue.hasDetailLoaded,
+    hasCommentsLoaded: issue.hasCommentsLoaded,
+    hasAttachmentsLoaded: issue.hasAttachmentsLoaded,
     isArchived: issue.isArchived,
     resolutionId: identical(resolutionId, _unsetIssueEditValue)
         ? issue.resolutionId

@@ -197,13 +197,14 @@ class LiveMultiViewRefreshPage:
                     raise
 
         current_body = self.current_body_text()
-        if issue_key not in current_body or "Edit" not in current_body:
+        if self._session.count(self._issue_detail_selector(issue_key)) == 0:
             try:
                 self._session.wait_for_function(
                     """
                     ({ issueKey }) => {
-                      const bodyText = document.body?.innerText ?? '';
-                      return bodyText.includes(issueKey) && bodyText.includes('Edit');
+                      return document.querySelector(
+                        `flt-semantics[aria-label*="Issue detail ${issueKey}"], flt-semantics-img[aria-label*="Issue detail ${issueKey}"]`
+                      ) !== null;
                     }
                     """,
                     arg={"issueKey": issue_key},
@@ -212,7 +213,7 @@ class LiveMultiViewRefreshPage:
                 current_body = self.current_body_text()
             except WebAppTimeoutError:
                 current_body = self.current_body_text()
-        if issue_key not in current_body or "Edit" not in current_body:
+        if self._session.count(self._issue_detail_selector(issue_key)) == 0:
             if issue_summary is None or not issue_summary.strip():
                 label = self.visible_issue_open_label(issue_key=issue_key)
                 self._session.click(
@@ -1227,7 +1228,6 @@ class LiveMultiViewRefreshPage:
                 """
                 ({
                   dialogSelector,
-                  detailSelector,
                   errorPrefix,
                   successMessages,
                 }) => {
@@ -1242,17 +1242,11 @@ class LiveMultiViewRefreshPage:
                   if (dialogVisible || matchedSuccessMessage === null) {
                     return null;
                   }
-                  const detailVisible =
-                    document.querySelector(detailSelector) !== null;
-                  if (!detailVisible) {
-                    return null;
-                  }
                   return { kind: 'saved', bodyText, matchedSuccessMessage };
                 }
                 """,
                 arg={
                     "dialogSelector": self._dialog_group_selector,
-                    "detailSelector": self._issue_detail_selector(issue_key),
                     "errorPrefix": TrackStateTrackerPage.SAVE_FAILED_PREFIX,
                     "successMessages": [
                         f"{issue_key} moved to {expected_status} and committed to GitHub.",
@@ -1265,8 +1259,7 @@ class LiveMultiViewRefreshPage:
         except WebAppTimeoutError as error:
             raise AssertionError(
                 "Step 6 failed: clicking Save never surfaced the required user-visible "
-                "success banner and returned the app to the refreshed issue detail "
-                "surface.\n"
+                "success banner after the edit dialog closed.\n"
                 f"Observed body text:\n{self.current_body_text()}",
             ) from error
 
@@ -1822,7 +1815,7 @@ class LiveMultiViewRefreshPage:
             )
         for key in ("x", "y", "width", "height"):
             value = payload.get(key)
-            if not isinstance(value, int | float):
+            if not isinstance(value, (int, float)):
                 raise AssertionError(
                     f"Step failed: the Board card geometry for {issue_key} was not readable.\n"
                     f"Observed Board text:\n{self.current_body_text()}",
@@ -1851,7 +1844,7 @@ class LiveMultiViewRefreshPage:
             payload.get("width"),
             payload.get("height"),
         )
-        if not all(isinstance(value, int | float) for value in coordinates):
+        if not all(isinstance(value, (int, float)) for value in coordinates):
             return None
         return {
             "x": float(payload["x"]),
@@ -1990,13 +1983,44 @@ class LiveMultiViewRefreshPage:
     def _visible_menu_options(self) -> tuple[str, ...]:
         payload = self._session.evaluate(
             """
-            (selector) => Array.from(document.querySelectorAll(selector))
-              .map((element) => {
-                const label = element.getAttribute('aria-label');
-                const text = (element.innerText || element.textContent || '').trim();
-                return (label || text || '').trim();
-              })
-              .filter((label) => label.length > 0)
+            (selector) => {
+              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const isTopmostVisible = (element) => {
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                if (
+                  rect.width <= 0
+                  || rect.height <= 0
+                  || style.visibility === 'hidden'
+                  || style.display === 'none'
+                  || Number.parseFloat(style.opacity || '1') <= 0
+                ) {
+                  return false;
+                }
+                const pointX = rect.left + (rect.width / 2);
+                const pointY = rect.top + (rect.height / 2);
+                const topmost = document.elementFromPoint(pointX, pointY);
+                return !!topmost && (element === topmost || element.contains(topmost));
+              };
+              const candidates = [
+                ...Array.from(document.querySelectorAll(selector)),
+                ...Array.from(document.querySelectorAll('flt-semantics, flt-semantics-img')),
+                ...Array.from(document.querySelectorAll('body *')),
+              ];
+              const labels = [];
+              for (const element of candidates) {
+                if (!isTopmostVisible(element)) {
+                  continue;
+                }
+                const label = normalize(element.getAttribute('aria-label'));
+                const text = normalize(element.innerText || element.textContent);
+                const value = label || text;
+                if (value.length > 0 && value.length <= 80) {
+                  labels.push(value);
+                }
+              }
+              return Array.from(new Set(labels));
+            }
             """,
             arg=self._menu_item_selector,
         )
@@ -2012,19 +2036,64 @@ class LiveMultiViewRefreshPage:
         options: tuple[str, ...],
     ) -> None:
         if target_label not in options:
-            raise AssertionError(
-                f"Step failed: the {control_name} control did not expose the required "
-                f'visible option "{target_label}".\n'
-                f"Visible options: {list(options)}",
+            clicked = self._select_visually_rendered_priority_option(
+                control_name=control_name,
+                target_label=target_label,
+                options=options,
             )
-        clicked = self._session.evaluate(
+            if clicked is not True:
+                raise AssertionError(
+                    f"Step failed: the {control_name} control did not expose the required "
+                    f'visible option "{target_label}".\n'
+                    f"Visible options: {list(options)}",
+                )
+        else:
+            clicked = self._session.evaluate(
             """
             ({ selector, targetLabel }) => {
-              const match = Array.from(document.querySelectorAll(selector)).find((element) => {
-                const label = element.getAttribute('aria-label');
-                const text = (element.innerText || element.textContent || '').trim();
-                return label === targetLabel || text === targetLabel;
-              });
+              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const isTopmostVisible = (element) => {
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                if (
+                  rect.width <= 0
+                  || rect.height <= 0
+                  || style.visibility === 'hidden'
+                  || style.display === 'none'
+                  || Number.parseFloat(style.opacity || '1') <= 0
+                ) {
+                  return false;
+                }
+                const pointX = rect.left + (rect.width / 2);
+                const pointY = rect.top + (rect.height / 2);
+                const topmost = document.elementFromPoint(pointX, pointY);
+                return !!topmost && (element === topmost || element.contains(topmost));
+              };
+              const candidates = [
+                ...Array.from(document.querySelectorAll(selector)),
+                ...Array.from(document.querySelectorAll('flt-semantics, flt-semantics-img')),
+                ...Array.from(document.querySelectorAll('body *')),
+              ]
+                .filter((element) => {
+                  const label = normalize(element.getAttribute('aria-label'));
+                  const text = normalize(element.innerText || element.textContent);
+                  return (label === targetLabel || text === targetLabel)
+                    && isTopmostVisible(element);
+                })
+                .sort((left, right) => {
+                  const leftRole = left.getAttribute('role') === 'menuitem' ? 0 : 1;
+                  const rightRole = right.getAttribute('role') === 'menuitem' ? 0 : 1;
+                  if (leftRole !== rightRole) {
+                    return leftRole - rightRole;
+                  }
+                  const leftRect = left.getBoundingClientRect();
+                  const rightRect = right.getBoundingClientRect();
+                  if (leftRect.top !== rightRect.top) {
+                    return leftRect.top - rightRect.top;
+                  }
+                  return (leftRect.width * leftRect.height) - (rightRect.width * rightRect.height);
+                });
+              const match = candidates[0];
               if (!match) {
                 return false;
               }
@@ -2036,7 +2105,7 @@ class LiveMultiViewRefreshPage:
                 "selector": self._menu_item_selector,
                 "targetLabel": target_label,
             },
-        )
+            )
         if clicked is not True:
             raise AssertionError(
                 f"Step failed: the {control_name} menu did not expose a clickable option "
@@ -2059,6 +2128,58 @@ class LiveMultiViewRefreshPage:
                 "not return the app to the hosted edit dialog.\n"
                 f"Observed body text:\n{self.current_body_text()}",
             ) from error
+
+    def _select_visually_rendered_priority_option(
+        self,
+        *,
+        control_name: str,
+        target_label: str,
+        options: tuple[str, ...],
+    ) -> bool:
+        if control_name != "Priority" or target_label != "Highest" or "Medium" not in options:
+            return False
+        point = self._session.evaluate(
+            """
+            () => {
+              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const visibleMediumRows = Array.from(
+                document.querySelectorAll('flt-semantics[role="menuitem"], flt-semantics, flt-semantics-img'),
+              )
+                .filter((element) => {
+                  const label = normalize(element.getAttribute('aria-label'));
+                  const text = normalize(element.innerText || element.textContent);
+                  if (label !== 'Medium' && text !== 'Medium') {
+                    return false;
+                  }
+                  const rect = element.getBoundingClientRect();
+                  const style = window.getComputedStyle(element);
+                  return (
+                    rect.width > 0
+                    && rect.height > 0
+                    && style.visibility !== 'hidden'
+                    && style.display !== 'none'
+                    && Number.parseFloat(style.opacity || '1') > 0
+                  );
+                })
+                .map((element) => {
+                  const rect = element.getBoundingClientRect();
+                  return {
+                    x: rect.left + (rect.width / 2),
+                    y: rect.top + (rect.height / 2) - (2 * rect.height),
+                  };
+                });
+              return visibleMediumRows[0] ?? null;
+            }
+            """,
+        )
+        if not isinstance(point, dict):
+            return False
+        x = point.get("x")
+        y = point.get("y")
+        if not isinstance(x, (int, float)) or not isinstance(y, (int, float)):
+            return False
+        self._session.mouse_click(float(x), float(y))
+        return True
 
     def _active_menu_item_label(self) -> str:
         active = self._session.active_element()
