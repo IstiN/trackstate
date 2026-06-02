@@ -129,12 +129,19 @@ class LiveIssueDetailCollaborationPage:
                 "precondition for TS-396.\n"
                 f"Observed body text:\n{self.current_body_text()}",
             )
+        if self._is_connected(user_login=user_login, repository=repository):
+            return
 
-        self._tracker_page.connect_with_token(
-            token=token,
-            repository=repository,
-            user_login=user_login,
-        )
+        try:
+            self._tracker_page.connect_with_token(
+                token=token,
+                repository=repository,
+                user_login=user_login,
+            )
+        except AssertionError:
+            if self._is_connected(user_login=user_login, repository=repository):
+                return
+            raise
 
     def open_jql_search(self) -> None:
         self._session.click(self._button_selector, has_text="JQL Search", timeout_ms=30_000)
@@ -1075,10 +1082,24 @@ class LiveIssueDetailCollaborationPage:
         )
 
     def upload_attachment(self) -> None:
-        self._session.click(
-            self._upload_attachment_button_selector,
-            timeout_ms=30_000,
-        )
+        if self._session.count(self._upload_attachment_button_selector) == 0:
+            self._session.click(
+                self._visible_button_selector,
+                has_text="Upload attachment",
+                timeout_ms=30_000,
+            )
+            return
+        try:
+            self._session.click(
+                self._upload_attachment_button_selector,
+                timeout_ms=30_000,
+            )
+        except WebAppTimeoutError:
+            self._session.click(
+                self._visible_button_selector,
+                has_text="Upload attachment",
+                timeout_ms=30_000,
+            )
 
     def attachment_download_button_count(self, attachment_name: str) -> int:
         payload = self._session.evaluate(
@@ -1177,6 +1198,10 @@ class LiveIssueDetailCollaborationPage:
             )
             or (
                 "Connected as " in body_text
+                and not any(marker in body_text for marker in self._disconnected_markers)
+            )
+            or (
+                "Hosted, Connected" in body_text
                 and not any(marker in body_text for marker in self._disconnected_markers)
             )
         )
