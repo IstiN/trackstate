@@ -290,6 +290,39 @@ void main() {
   );
 
   test(
+    'workspace sync service keeps hosted web retries at the full backoff interval',
+    () async {
+      final repository = _ThrowingWorkspaceSyncRepository(
+        error: const TrackStateProviderException(
+          'GitHub API request failed for /repos/IstiN/trackstate-setup/branches/main (401): {"message":"Bad credentials"}',
+        ),
+      );
+      final timers = _RecordedTimerFactory();
+      final statuses = <WorkspaceSyncStatus>[];
+      var now = DateTime.utc(2026, 5, 14, 10, 0);
+      final service = WorkspaceSyncService(
+        repository: repository,
+        loadSnapshot: () async =>
+            await const DemoTrackStateRepository().loadSnapshot(),
+        onRefresh: (_) {},
+        onStatusChanged: statuses.add,
+        now: () => now,
+        timerFactory: timers.call,
+      );
+
+      try {
+        await service.checkNow(force: true);
+        expect(statuses.last.health, WorkspaceSyncHealth.unavailable);
+        expect(statuses.last.nextRetryAt, DateTime.utc(2026, 5, 14, 10, 1));
+        expect(timers.lastScheduledDuration, const Duration(minutes: 1));
+      } finally {
+        service.dispose();
+        timers.dispose();
+      }
+    },
+  );
+
+  test(
     'workspace sync service applies hosted backoff after failures',
     () async {
       final repository = _ThrowingWorkspaceSyncRepository();

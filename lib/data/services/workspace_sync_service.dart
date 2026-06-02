@@ -154,7 +154,7 @@ class WorkspaceSyncService {
           nextRetryAt: nextRetryAt,
         ),
       );
-      _scheduleNext(nextRetryAt.difference(_lastCompletedAt!));
+      _scheduleRetryAt(nextRetryAt);
     } finally {
       _inFlight = false;
       if (_queuedFollowUpTrigger case final pendingTrigger? when !_disposed) {
@@ -329,6 +329,11 @@ class WorkspaceSyncService {
     _timer = _timerFactory(duration, () {
       unawaited(checkNow());
     });
+  }
+
+  void _scheduleRetryAt(DateTime nextRetryAt) {
+    final delay = nextRetryAt.difference(_now());
+    _scheduleNext(delay.isNegative ? Duration.zero : delay);
   }
 
   void _publishStatus(WorkspaceSyncStatus status) {
