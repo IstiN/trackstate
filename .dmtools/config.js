@@ -54,8 +54,8 @@ module.exports = {
     globalAdditionalInstructions: [
         './agents/prompts/codegraph_tools.md'
     ],
-    // SM parallelism: keep capacity for normal automation plus Failed TC bug triage.
-    smMaxWorkflows: 3,
+    // SM parallelism: one dispatch at a time to avoid Copilot rate-limit lockups.
+    smMaxWorkflows: 1,
 
     repository: {
         owner: 'IstiN',
@@ -70,7 +70,8 @@ module.exports = {
             answerField: 'Answer'
         },
         fields: {
-            acceptanceCriteria: 'Acceptance Criteria'
+            acceptanceCriteria: 'Acceptance Criteria',
+            bugSolution: 'customfield_10400'
         }
     },
 

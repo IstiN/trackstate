@@ -4322,6 +4322,7 @@ class TrackStateCli {
       repository: target.value,
       branch: target.branch.ifEmpty(GitHubTrackStateProvider.defaultSourceRef),
       client: _httpClient,
+      disableHostedSyncRequestCaching: true,
     );
 
     try {
@@ -4341,6 +4342,7 @@ class TrackStateCli {
           GitHubTrackStateProvider.defaultSourceRef,
         ),
         client: _httpClient,
+        disableHostedSyncRequestCaching: true,
       );
       final data = <String, Object?>{
         'command': 'session',
@@ -6975,6 +6977,7 @@ abstract interface class TrackStateCliProviderFactory {
     required String repository,
     required String branch,
     http.Client? client,
+    bool disableHostedSyncRequestCaching = false,
   });
 }
 
@@ -6990,6 +6993,7 @@ abstract interface class TrackStateCliRepositoryFactory {
     required String repository,
     required String branch,
     http.Client? client,
+    bool disableHostedSyncRequestCaching = false,
   });
 }
 
@@ -7020,12 +7024,14 @@ class _ProviderBackedTrackStateCliRepositoryFactory
     required String repository,
     required String branch,
     http.Client? client,
+    bool disableHostedSyncRequestCaching = false,
   }) => ProviderBackedTrackStateRepository(
     provider: providerFactory.createHosted(
       provider: provider,
       repository: repository,
       branch: branch,
       client: client,
+      disableHostedSyncRequestCaching: disableHostedSyncRequestCaching,
     ),
   );
 }
@@ -7049,6 +7055,7 @@ class DefaultTrackStateCliProviderFactory
     required String repository,
     required String branch,
     http.Client? client,
+    bool disableHostedSyncRequestCaching = false,
   }) {
     if (provider != 'github') {
       throw _TrackStateCliException(
@@ -7066,6 +7073,7 @@ class DefaultTrackStateCliProviderFactory
       repositoryName: repository,
       sourceRef: branch,
       dataRef: branch,
+      disableHostedSyncRequestCaching: disableHostedSyncRequestCaching,
     );
   }
 }

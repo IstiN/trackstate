@@ -23,6 +23,9 @@ import '../../../../../l10n/generated/app_localizations.dart';
 import '../../../core/trackstate_icons.dart';
 import '../../../core/trackstate_theme.dart';
 import '../services/attachment_picker.dart';
+import '../services/browser_header_controls_flex_container_stub.dart'
+    if (dart.library.js_interop) '../services/browser_header_controls_flex_container_web.dart'
+    as browser_header_controls_flex_container;
 import '../services/browser_focusable_control_stub.dart'
     if (dart.library.js_interop) '../services/browser_focusable_control_web.dart'
     as browser_focusable_control;
@@ -236,6 +239,7 @@ class _TrackStateAppState extends State<TrackStateApp>
   String? _startupHostedFallbackWorkspaceId;
   bool _isSwitchingStartupHostedFallback = false;
   bool _isPersistingStartupHostedFallbackSelection = false;
+  int _deferredStartupLocalWorkspaceRestoreVersion = 0;
 
   @override
   void initState() {
@@ -345,6 +349,7 @@ class _TrackStateAppState extends State<TrackStateApp>
           widget.repository ??
           widget.repositoryFactory?.call() ??
           createTrackStateRepository(),
+      workspaceProfileService: widget.workspaceProfileService,
       workspaceId: workspaceId ?? _workspaceState.activeWorkspaceId,
     );
     if (previous != null) {
@@ -410,11 +415,13 @@ class _TrackStateAppState extends State<TrackStateApp>
   Future<_PreparedWorkspaceSwitch?> _prepareBrowserLocalWorkspaceSwitch(
     WorkspaceProfile workspace, {
     required TrackerViewModel previousViewModel,
+    bool deferAccessRestore = false,
   }) async {
     return _prepareBrowserLocalWorkspaceSwitchWithLoader(
       workspace,
       previousViewModel: previousViewModel,
       repositoryLoader: widget.openBrowserLocalRepository,
+      deferAccessRestore: deferAccessRestore,
     );
   }
 
@@ -423,6 +430,7 @@ class _TrackStateAppState extends State<TrackStateApp>
     WorkspaceProfile workspace, {
     required TrackerViewModel previousViewModel,
     required BrowserLocalRepositoryLoader repositoryLoader,
+    bool deferAccessRestore = false,
   }) async {
     try {
       final repository = await repositoryLoader(
@@ -439,7 +447,7 @@ class _TrackStateAppState extends State<TrackStateApp>
         autoLoad: false,
         workspaceId: workspace.id,
       );
-      await nextViewModel.load();
+      await nextViewModel.load(deferAccessRestore: deferAccessRestore);
       if (nextViewModel.snapshot == null) {
         final reason = _normalizeWorkspaceFailureReason(nextViewModel.message);
         nextViewModel.dispose();
@@ -686,6 +694,125 @@ class _TrackStateAppState extends State<TrackStateApp>
         continue;
       }
       final restoredWorkspaceId = prepared.workspace?.id ?? workspace.id;
+      final preservesActiveLocalSelectionWithHostedShell =
+          kIsWeb &&
+          workspace.isLocal &&
+          workspace.id == activeWorkspaceId &&
+          prepared.workspace?.isHosted == true &&
+          restoredWorkspaceId != workspace.id;
+      if (preservesActiveLocalSelectionWithHostedShell &&
+          prepared.preserveActiveLocalAvailability) {
+        final optimisticHostedAccessMode =
+            _hostedWorkspaceAccessModeForViewModel(prepared.viewModel);
+        final optimisticState = _workspaceState.copyWith(
+          profiles: [
+            for (final profile in _workspaceState.profiles)
+              if (profile.id == restoredWorkspaceId && profile.isHosted)
+                profile.copyWith(hostedAccessMode: optimisticHostedAccessMode)
+              else
+                profile,
+          ],
+          activeWorkspaceId: workspace.id,
+          unavailableLocalWorkspaceIds: _workspaceState
+              .unavailableLocalWorkspaceIds
+              .difference({workspace.id}),
+        );
+        _pendingStartupLocalFallbackWorkspaceId = null;
+        _pendingWorkspaceRestoreFailure = null;
+        if (lastFailure != null) {
+          prepared.viewModel.showMessage(
+            TrackerMessage.workspaceRestoreSkipped(
+              workspaceName: lastFailure.workspaceName,
+              reason: lastFailure.reason,
+            ),
+          );
+        }
+        await _commitPreparedWorkspaceSwitch(
+          prepared,
+          previousViewModel: previousViewModel,
+          workspaceState: optimisticState,
+        );
+        var preservedState = await widget.workspaceProfileService.loadState();
+        preservedState = preservedState.copyWith(
+          activeWorkspaceId: workspace.id,
+          unavailableLocalWorkspaceIds: preservedState
+              .unavailableLocalWorkspaceIds
+              .difference({workspace.id}),
+        );
+        preservedState =
+            await _persistPreparedHostedWorkspaceState(
+              prepared,
+              workspaceState: preservedState,
+              preserveActiveSelection: true,
+            ) ??
+            preservedState;
+        if (!mounted) {
+          return true;
+        }
+        setState(() {
+          _workspaceState = preservedState;
+        });
+        await _refreshWorkspaceSwitcherState(preservedState);
+        return true;
+      }
+      final preservesUnavailableActiveLocalSelection =
+          preservesActiveLocalSelectionWithHostedShell;
+      if (preservesUnavailableActiveLocalSelection) {
+        final optimisticHostedAccessMode =
+            _hostedWorkspaceAccessModeForViewModel(prepared.viewModel);
+        final optimisticState = _workspaceState.copyWith(
+          profiles: [
+            for (final profile in _workspaceState.profiles)
+              if (profile.id == restoredWorkspaceId && profile.isHosted)
+                profile.copyWith(hostedAccessMode: optimisticHostedAccessMode)
+              else
+                profile,
+          ],
+          activeWorkspaceId: workspace.id,
+          unavailableLocalWorkspaceIds: {
+            ..._workspaceState.unavailableLocalWorkspaceIds,
+            workspace.id,
+          },
+        );
+        _pendingStartupLocalFallbackWorkspaceId = null;
+        _pendingWorkspaceRestoreFailure = null;
+        if (lastFailure != null) {
+          prepared.viewModel.showMessage(
+            TrackerMessage.workspaceRestoreSkipped(
+              workspaceName: lastFailure.workspaceName,
+              reason: lastFailure.reason,
+            ),
+          );
+        }
+        await _commitPreparedWorkspaceSwitch(
+          prepared,
+          previousViewModel: previousViewModel,
+          workspaceState: optimisticState,
+        );
+        var preservedState = await widget.workspaceProfileService.loadState();
+        preservedState = preservedState.copyWith(
+          activeWorkspaceId: workspace.id,
+          unavailableLocalWorkspaceIds: {
+            ...preservedState.unavailableLocalWorkspaceIds,
+            workspace.id,
+          },
+        );
+        preservedState =
+            await _persistPreparedHostedWorkspaceState(
+              prepared,
+              workspaceState: preservedState,
+              preserveActiveSelection: true,
+            ) ??
+            preservedState;
+        if (!mounted) {
+          return true;
+        }
+        setState(() {
+          _workspaceState = preservedState;
+        });
+        await _refreshWorkspaceSwitcherState(preservedState);
+        return true;
+      }
       final shouldCommitHostedFallbackBeforePersistence =
           deferAccessRestore &&
           kIsWeb &&
@@ -801,6 +928,7 @@ class _TrackStateAppState extends State<TrackStateApp>
   Future<WorkspaceProfilesState?> _persistPreparedHostedWorkspaceState(
     _PreparedWorkspaceSwitch prepared, {
     WorkspaceProfilesState? workspaceState,
+    bool preserveActiveSelection = false,
   }) async {
     if (widget.repository != null) {
       return workspaceState;
@@ -810,7 +938,9 @@ class _TrackStateAppState extends State<TrackStateApp>
       return workspaceState;
     }
     var nextState = workspaceState;
-    if (nextState == null || nextState.activeWorkspaceId != workspace.id) {
+    nextState ??= await widget.workspaceProfileService.loadState();
+    if (!preserveActiveSelection &&
+        nextState.activeWorkspaceId != workspace.id) {
       nextState = await widget.workspaceProfileService.selectProfile(
         workspace.id,
       );
@@ -963,6 +1093,18 @@ class _TrackStateAppState extends State<TrackStateApp>
       final reason = _normalizeWorkspaceFailureReason(nextViewModel.message);
       if (preserveActiveLocalSelectionOnStartupFailure && workspace.isLocal) {
         nextViewModel.dispose();
+        if (kIsWeb && _shouldRetryActiveLocalWorkspaceRevalidation(reason)) {
+          final preserved = await _preserveActiveLocalWorkspaceSelection(
+            workspace,
+            previousViewModel,
+            deferAccessRestore: deferAccessRestore,
+            requireAuthenticatedHostedFallback: false,
+          );
+          if (preserved != null) {
+            _scheduleDeferredStartupLocalWorkspaceRestore(workspace);
+            return preserved;
+          }
+        }
         final requiresBrowserReselection =
             _requiresBrowserLocalWorkspaceReselection(reason);
         if (preserveActiveLocalSelectionOnUnsupportedAccess &&
@@ -994,6 +1136,18 @@ class _TrackStateAppState extends State<TrackStateApp>
     } on Object catch (error) {
       final reason = _normalizeWorkspaceFailureReason(error);
       if (preserveActiveLocalSelectionOnStartupFailure && workspace.isLocal) {
+        if (kIsWeb && _shouldRetryActiveLocalWorkspaceRevalidation(reason)) {
+          final preserved = await _preserveActiveLocalWorkspaceSelection(
+            workspace,
+            previousViewModel,
+            deferAccessRestore: deferAccessRestore,
+            requireAuthenticatedHostedFallback: false,
+          );
+          if (preserved != null) {
+            _scheduleDeferredStartupLocalWorkspaceRestore(workspace);
+            return preserved;
+          }
+        }
         final requiresBrowserReselection =
             _requiresBrowserLocalWorkspaceReselection(reason);
         if (preserveActiveLocalSelectionOnUnsupportedAccess &&
@@ -1043,7 +1197,12 @@ class _TrackStateAppState extends State<TrackStateApp>
       } else {
         _workspaceValidationFailures.remove(workspace.id);
       }
-      return hostedFallbackSwitch;
+      return _PreparedWorkspaceSwitch(
+        viewModel: hostedFallbackSwitch.viewModel,
+        workspace: hostedFallbackSwitch.workspace,
+        localConfigurationKey: hostedFallbackSwitch.localConfigurationKey,
+        preserveActiveLocalAvailability: !markUnavailable,
+      );
     }
     if (requireAuthenticatedHostedFallback) {
       return null;
@@ -1117,12 +1276,7 @@ class _TrackStateAppState extends State<TrackStateApp>
         _pendingStartupLocalFallbackWorkspaceId = null;
         return;
       }
-      _startupHostedFallbackWorkspaceId = prepared.workspace!.id;
-      _isPersistingStartupHostedFallbackSelection = true;
       _pendingStartupLocalFallbackWorkspaceId = null;
-      // Commit the UI immediately with an optimistic workspace state so the
-      // hosted restricted shell is visible before the persistence writes
-      // complete (which may require the /user auth probe to finish).
       final optimisticHostedAccessMode = _hostedWorkspaceAccessModeForViewModel(
         prepared.viewModel,
       );
@@ -1134,7 +1288,7 @@ class _TrackStateAppState extends State<TrackStateApp>
             else
               profile,
         ],
-        activeWorkspaceId: prepared.workspace!.id,
+        activeWorkspaceId: workspace.id,
         unavailableLocalWorkspaceIds: {
           ..._workspaceState.unavailableLocalWorkspaceIds,
           workspace.id,
@@ -1145,28 +1299,26 @@ class _TrackStateAppState extends State<TrackStateApp>
         previousViewModel: previousViewModel,
         workspaceState: optimisticState,
       );
-      // Persist after the shell is already visible.
-      try {
-        var selectedState = await widget.workspaceProfileService.selectProfile(
-          prepared.workspace!.id,
-        );
-        selectedState =
-            await _persistPreparedHostedWorkspaceState(
-              prepared,
-              workspaceState: selectedState,
-            ) ??
-            selectedState;
-        if (mounted) {
-          setState(() {
-            _workspaceState = selectedState;
-          });
-          await _refreshWorkspaceSwitcherState(selectedState);
-        }
-      } finally {
-        _isPersistingStartupHostedFallbackSelection = false;
-        if (viewModel.workspaceId == prepared.workspace!.id) {
-          _startupHostedFallbackWorkspaceId = null;
-        }
+      var preservedState = await widget.workspaceProfileService.loadState();
+      preservedState = preservedState.copyWith(
+        activeWorkspaceId: workspace.id,
+        unavailableLocalWorkspaceIds: {
+          ...preservedState.unavailableLocalWorkspaceIds,
+          workspace.id,
+        },
+      );
+      preservedState =
+          await _persistPreparedHostedWorkspaceState(
+            prepared,
+            workspaceState: preservedState,
+            preserveActiveSelection: true,
+          ) ??
+          preservedState;
+      if (mounted) {
+        setState(() {
+          _workspaceState = preservedState;
+        });
+        await _refreshWorkspaceSwitcherState(preservedState);
       }
     } finally {
       if (_pendingStartupLocalFallbackWorkspaceId == workspace.id &&
@@ -1190,6 +1342,115 @@ class _TrackStateAppState extends State<TrackStateApp>
       _workspaceState = nextState;
     });
     return nextState;
+  }
+
+  void _scheduleDeferredStartupLocalWorkspaceRestore(
+    WorkspaceProfile workspace,
+  ) {
+    if (!kIsWeb || widget.repository != null || !workspace.isLocal) {
+      return;
+    }
+    final restoreVersion = ++_deferredStartupLocalWorkspaceRestoreVersion;
+    unawaited(
+      _runDeferredStartupLocalWorkspaceRestore(
+        workspace,
+        restoreVersion: restoreVersion,
+      ),
+    );
+  }
+
+  bool _shouldContinueDeferredStartupLocalWorkspaceRestore(
+    WorkspaceProfile workspace, {
+    required int restoreVersion,
+  }) {
+    return mounted &&
+        restoreVersion == _deferredStartupLocalWorkspaceRestoreVersion &&
+        _workspaceState.activeWorkspaceId == workspace.id;
+  }
+
+  Future<void> _runDeferredStartupLocalWorkspaceRestore(
+    WorkspaceProfile workspace, {
+    required int restoreVersion,
+  }) async {
+    const retryDelays = <Duration>[
+      Duration(milliseconds: 100),
+      Duration(milliseconds: 150),
+      Duration(milliseconds: 250),
+      Duration(milliseconds: 400),
+      Duration(milliseconds: 600),
+    ];
+    const maxStartupRevalidationWait = Duration(seconds: 10);
+    var elapsedWait = Duration.zero;
+    var attempt = 0;
+    while (_shouldContinueDeferredStartupLocalWorkspaceRestore(
+      workspace,
+      restoreVersion: restoreVersion,
+    )) {
+      final previousViewModel = viewModel;
+      final prepared = await _prepareBrowserLocalWorkspaceSwitch(
+        workspace,
+        previousViewModel: previousViewModel,
+        deferAccessRestore: true,
+      );
+      if (!_shouldContinueDeferredStartupLocalWorkspaceRestore(
+        workspace,
+        restoreVersion: restoreVersion,
+      )) {
+        prepared?.viewModel.dispose();
+        return;
+      }
+      if (prepared != null) {
+        var selectedState = await widget.workspaceProfileService.selectProfile(
+          workspace.id,
+        );
+        selectedState = await _saveLocalWorkspaceAvailability(
+          workspace.id,
+          isAvailable: true,
+        );
+        await _commitPreparedWorkspaceSwitch(
+          prepared,
+          previousViewModel: previousViewModel,
+          workspaceState: selectedState,
+        );
+        return;
+      }
+      final reason = _workspaceValidationFailureReason(workspace);
+      final retryable = _shouldRetryActiveLocalWorkspaceRevalidation(reason);
+      if (!retryable ||
+          _requiresBrowserLocalWorkspaceReselection(reason) ||
+          _isUnsupportedActiveLocalStartupAccess(reason)) {
+        await _saveLocalWorkspaceAvailability(workspace.id, isAvailable: false);
+        if (_shouldContinueDeferredStartupLocalWorkspaceRestore(
+          workspace,
+          restoreVersion: restoreVersion,
+        )) {
+          await _refreshWorkspaceSwitcherState();
+        }
+        return;
+      }
+      final remaining = maxStartupRevalidationWait - elapsedWait;
+      if (remaining <= Duration.zero) {
+        break;
+      }
+      final delay = retryDelays[math.min(attempt, retryDelays.length - 1)];
+      final appliedDelay = remaining < delay ? remaining : delay;
+      await Future<void>.delayed(appliedDelay);
+      elapsedWait += appliedDelay;
+      attempt += 1;
+    }
+    if (!_shouldContinueDeferredStartupLocalWorkspaceRestore(
+      workspace,
+      restoreVersion: restoreVersion,
+    )) {
+      return;
+    }
+    await _saveLocalWorkspaceAvailability(workspace.id, isAvailable: false);
+    if (_shouldContinueDeferredStartupLocalWorkspaceRestore(
+      workspace,
+      restoreVersion: restoreVersion,
+    )) {
+      await _refreshWorkspaceSwitcherState();
+    }
   }
 
   bool _isUnsupportedActiveLocalStartupAccess(String reason) {
@@ -5607,126 +5868,133 @@ class _TopBar extends StatelessWidget {
             );
           }
 
-          return Semantics(
-            container: true,
-            explicitChildNodes: true,
-            identifier: _browserDesktopHeaderControlsSemanticsIdentifier,
-            child: Row(
-              children: [
-                if (showHostedConnectAction)
-                  orderedControl(
-                    syncPillOrder ?? searchOrder + 1,
-                    _SecondaryButton(
-                      label: l10n.connectGitHub,
-                      icon: TrackStateIconGlyph.repository,
-                      onPressed: openHostedRepositoryAccess,
-                      height: _desktopTopBarControlHeight,
-                      semanticsSortOrder: syncPillOrder ?? searchOrder + 1,
-                    ),
-                  )
-                else
-                  orderedControl(
-                    syncPillOrder ?? searchOrder + 1,
-                    _SyncPill(
-                      label: _workspaceSyncLabel(l10n, viewModel),
-                      semanticLabel: _workspaceSyncSemanticLabel(
-                        l10n,
-                        viewModel,
+          return browser_header_controls_flex_container.BrowserHeaderControlsFlexContainer(
+            semanticsIdentifier:
+                _browserDesktopHeaderControlsSemanticsIdentifier,
+            child: Semantics(
+              container: true,
+              explicitChildNodes: true,
+              identifier: _browserDesktopHeaderControlsSemanticsIdentifier,
+              child: Row(
+                children: [
+                  if (showHostedConnectAction)
+                    orderedControl(
+                      syncPillOrder ?? searchOrder + 1,
+                      _SecondaryButton(
+                        label: l10n.connectGitHub,
+                        icon: TrackStateIconGlyph.repository,
+                        onPressed: openHostedRepositoryAccess,
+                        height: _desktopTopBarControlHeight,
+                        semanticsSortOrder: syncPillOrder ?? searchOrder + 1,
                       ),
-                      tone: _workspaceSyncTone(viewModel),
-                      height: _desktopTopBarControlHeight,
-                      onPressed: () =>
-                          viewModel.selectSection(TrackerSection.settings),
-                      semanticsSortOrder: syncPillOrder,
+                    )
+                  else
+                    orderedControl(
+                      syncPillOrder ?? searchOrder + 1,
+                      _SyncPill(
+                        label: _workspaceSyncLabel(l10n, viewModel),
+                        semanticLabel: _workspaceSyncSemanticLabel(
+                          l10n,
+                          viewModel,
+                        ),
+                        tone: _workspaceSyncTone(viewModel),
+                        height: _desktopTopBarControlHeight,
+                        onPressed: () =>
+                            viewModel.selectSection(TrackerSection.settings),
+                        semanticsSortOrder: syncPillOrder,
+                      ),
                     ),
-                  ),
-                const SizedBox(width: 12),
-                buildPrimaryHeaderActions(),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: SizedBox(
-                    height: _desktopTopBarControlHeight,
-                    child: orderedControl(
-                      searchOrder,
-                      CallbackShortcuts(
-                        bindings: !kIsWeb
-                            ? <ShortcutActivator, VoidCallback>{
-                                const SingleActivator(
-                                  LogicalKeyboardKey.tab,
-                                  shift: true,
-                                ): () => workspaceSwitcherTriggerFocusNode
-                                    .requestFocus(),
-                              }
-                            : const <ShortcutActivator, VoidCallback>{},
-                        child: Builder(
-                          builder: (context) {
-                            final desktopSearchField = TextField(
-                              focusNode: desktopSearchFocusNode,
-                              controller: TextEditingController(
-                                text: viewModel.jql,
-                              ),
-                              onSubmitted: viewModel.updateQuery,
-                              maxLines: 1,
-                              style: Theme.of(
-                                context,
-                              ).textTheme.bodyMedium?.copyWith(height: 1),
-                              textAlignVertical: TextAlignVertical.center,
-                              decoration: InputDecoration(
-                                isDense: true,
-                                isCollapsed: true,
-                                constraints: const BoxConstraints.tightFor(
-                                  height: _desktopTopBarControlHeight,
+                  const SizedBox(width: 12),
+                  buildPrimaryHeaderActions(),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: SizedBox(
+                      height: _desktopTopBarControlHeight,
+                      child: orderedControl(
+                        searchOrder,
+                        CallbackShortcuts(
+                          bindings: !kIsWeb
+                              ? <ShortcutActivator, VoidCallback>{
+                                  const SingleActivator(
+                                    LogicalKeyboardKey.tab,
+                                    shift: true,
+                                  ): () => workspaceSwitcherTriggerFocusNode
+                                      .requestFocus(),
+                                }
+                              : const <ShortcutActivator, VoidCallback>{},
+                          child: Builder(
+                            builder: (context) {
+                              final desktopSearchField = TextField(
+                                focusNode: desktopSearchFocusNode,
+                                controller: TextEditingController(
+                                  text: viewModel.jql,
                                 ),
-                                contentPadding: const EdgeInsets.only(
-                                  right: 10,
-                                ),
-                                prefixIcon: Padding(
-                                  padding: const EdgeInsets.all(8),
-                                  child: TrackStateIcon(
-                                    TrackStateIconGlyph.search,
-                                    color: colors.muted,
-                                    size: _desktopTopBarIconSize,
-                                    semanticLabel: l10n.searchIssues,
+                                onSubmitted: viewModel.updateQuery,
+                                maxLines: 1,
+                                style: Theme.of(
+                                  context,
+                                ).textTheme.bodyMedium?.copyWith(height: 1),
+                                textAlignVertical: TextAlignVertical.center,
+                                decoration: InputDecoration(
+                                  isDense: true,
+                                  isCollapsed: true,
+                                  constraints: const BoxConstraints.tightFor(
+                                    height: _desktopTopBarControlHeight,
                                   ),
-                                ),
-                                prefixIconConstraints:
-                                    const BoxConstraints.tightFor(
-                                      width: _desktopTopBarControlHeight,
-                                      height: _desktopTopBarControlHeight,
+                                  contentPadding: const EdgeInsets.only(
+                                    right: 10,
+                                  ),
+                                  prefixIcon: Padding(
+                                    padding: const EdgeInsets.all(8),
+                                    child: TrackStateIcon(
+                                      TrackStateIconGlyph.search,
+                                      color: colors.muted,
+                                      size: _desktopTopBarIconSize,
+                                      semanticLabel: l10n.searchIssues,
                                     ),
-                                hintText: l10n.jqlPlaceholder,
-                                hintStyle: Theme.of(context)
-                                    .textTheme
-                                    .bodyMedium
-                                    ?.copyWith(color: colors.muted, height: 1),
-                              ),
-                            );
-                            if (kIsWeb) {
+                                  ),
+                                  prefixIconConstraints:
+                                      const BoxConstraints.tightFor(
+                                        width: _desktopTopBarControlHeight,
+                                        height: _desktopTopBarControlHeight,
+                                      ),
+                                  hintText: l10n.jqlPlaceholder,
+                                  hintStyle: Theme.of(context)
+                                      .textTheme
+                                      .bodyMedium
+                                      ?.copyWith(
+                                        color: colors.muted,
+                                        height: 1,
+                                      ),
+                                ),
+                              );
+                              if (kIsWeb) {
+                                return Semantics(
+                                  identifier:
+                                      browserDesktopSearchInputSemanticsIdentifier,
+                                  label: l10n.searchIssues,
+                                  textField: true,
+                                  child: desktopSearchField,
+                                );
+                              }
                               return Semantics(
+                                focusable: true,
                                 identifier:
                                     browserDesktopSearchInputSemanticsIdentifier,
                                 label: l10n.searchIssues,
+                                sortKey: OrdinalSortKey(searchOrder),
                                 textField: true,
                                 child: desktopSearchField,
                               );
-                            }
-                            return Semantics(
-                              focusable: true,
-                              identifier:
-                                  browserDesktopSearchInputSemanticsIdentifier,
-                              label: l10n.searchIssues,
-                              sortKey: OrdinalSortKey(searchOrder),
-                              textField: true,
-                              child: desktopSearchField,
-                            );
-                          },
+                            },
+                          ),
                         ),
                       ),
                     ),
                   ),
-                ),
-                buildTrailingHeaderActions(),
-              ],
+                  buildTrailingHeaderActions(),
+                ],
+              ),
             ),
           );
         },
@@ -5744,11 +6012,13 @@ class _PreparedWorkspaceSwitch {
     required this.viewModel,
     required this.workspace,
     required this.localConfigurationKey,
+    this.preserveActiveLocalAvailability = false,
   });
 
   final TrackerViewModel viewModel;
   final WorkspaceProfile? workspace;
   final String? localConfigurationKey;
+  final bool preserveActiveLocalAvailability;
 }
 
 class _WorkspaceRestoreFailure {
@@ -5817,6 +6087,10 @@ String _activeWorkspaceStateLabel(
     if (activeWorkspace != null &&
         localWorkspaceAvailability[activeWorkspace.id] == false) {
       return l10n.workspaceStateUnavailable;
+    }
+    if (viewModel.isRestoringLocalHostedAccess &&
+        !viewModel.hasLocalHostedAccessSession) {
+      return l10n.workspaceStateLocal;
     }
     return l10n.workspaceStateLocalGit;
   }
@@ -8940,6 +9214,7 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
                     semanticsLabel:
                         '${l10n.openWorkspace}: ${workspace.displayName}',
                     onPressed: onOpen,
+                    rowId: rowSemanticsIdentifier,
                     focusTargetId: _workspaceSwitcherActionFocusId(
                       workspace.id,
                       'open',
@@ -8958,6 +9233,7 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
                     label: primaryActionLabel,
                     semanticsLabel: primaryActionSemanticLabel!,
                     onPressed: onPrimaryAction,
+                    rowId: rowSemanticsIdentifier,
                     focusTargetId: _workspaceSwitcherActionFocusId(
                       workspace.id,
                       'primary',
@@ -8979,6 +9255,7 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
                     semanticsLabel: '${l10n.delete}: ${workspace.displayName}',
                     onPressed: onDelete,
                     destructive: true,
+                    rowId: rowSemanticsIdentifier,
                     focusTargetId: _workspaceSwitcherActionFocusId(
                       workspace.id,
                       'delete',
@@ -9166,6 +9443,7 @@ class _WorkspaceSwitcherActionButton extends StatelessWidget {
     required this.semanticsLabel,
     required this.onPressed,
     required this.focusTargetId,
+    required this.rowId,
     this.destructive = false,
   });
 
@@ -9174,6 +9452,7 @@ class _WorkspaceSwitcherActionButton extends StatelessWidget {
   final String semanticsLabel;
   final VoidCallback? onPressed;
   final String focusTargetId;
+  final String rowId;
   final bool destructive;
 
   @override
@@ -9233,6 +9512,7 @@ class _WorkspaceSwitcherActionButton extends StatelessWidget {
           onPressed: onPressed,
           focusTargetId: focusTargetId,
           panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+          rowId: rowId,
           child: buttonChild,
         ),
       ),
@@ -12448,7 +12728,10 @@ class _IssueList extends StatelessWidget {
     final colors = context.ts;
     final searchResults = viewModel.searchResults;
     final bootstrapResults = viewModel.shouldUseBootstrapSearchFallback
-        ? viewModel.issues.take(6).toList(growable: false)
+        ? viewModel.issues
+              .where((issue) => !issue.isArchived)
+              .take(6)
+              .toList(growable: false)
         : const <TrackStateIssue>[];
     final visibleResults = searchResults.isEmpty
         ? bootstrapResults
@@ -13627,6 +13910,7 @@ class _SettingsTextField extends StatelessWidget {
           WidgetsBinding.instance.addPostFrameCallback((_) {
             browser_text_field_value_sync.syncBrowserTextFieldValue(
               label: label,
+              controller: textController,
               value: value.text,
               enabled: enabled,
               readOnly: !enabled,
@@ -15906,7 +16190,9 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
                                     enabled: canEditFields,
                                     errorText:
                                         _didAttemptSubmit &&
-                                            _summaryController.text.trim().isEmpty
+                                            _summaryController.text
+                                                .trim()
+                                                .isEmpty
                                         ? l10n.summaryRequired
                                         : null,
                                     onChanged: (_) {

@@ -28,6 +28,23 @@ void main() {
     expect(workflow, isNot(contains('branches: [main]')));
     expect(workflow, contains('runs-on: ubuntu-latest'));
     expect(workflow, contains('GET /repos/{owner}/{repo}/actions/runners'));
+    expect(workflow, contains('const readinessTimeoutMs = 5 * 60 * 1000;'));
+    expect(workflow, contains('const readinessStartedAt = Date.now();'));
+    expect(
+      workflow,
+      contains(
+        'response = await Promise.race([',
+      ),
+    );
+    expect(workflow, contains('let readinessTimeoutId;'));
+    expect(
+      workflow,
+      contains("runner-inventory-timeout"),
+    );
+    expect(workflow, contains('readinessTimeoutId = setTimeout('));
+    expect(workflow, contains('readinessTimeoutId.unref?.();'));
+    expect(workflow, contains('} finally {'));
+    expect(workflow, contains('clearTimeout(readinessTimeoutId);'));
     expect(
       workflow,
       contains('[self-hosted, macOS, trackstate-release, ARM64]'),

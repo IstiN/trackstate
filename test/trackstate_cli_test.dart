@@ -147,48 +147,51 @@ void main() {
       expect(data['projectConfig'], isA<Map<String, Object?>>());
     });
 
-    test('accepts root target flags as a session shorthand for local targets', () async {
-      final cli = TrackStateCli(
-        environment: TrackStateCliEnvironment(
-          workingDirectory: '/workspace/repo',
-          resolvePath: (path) => path,
-        ),
-        providerFactory: _FakeTrackStateCliProviderFactory(
-          localProvider: _FakeLocalGitTrackStateProvider(
-            repositoryPath: '/workspace/repo',
-            branch: 'feature/local',
-            user: const RepositoryUser(
-              login: 'local@example.com',
-              displayName: 'Local User',
-            ),
-            permission: const RepositoryPermission(
-              canRead: true,
-              canWrite: true,
-              isAdmin: false,
-              canCreateBranch: true,
-              canManageAttachments: true,
-              canCheckCollaborators: false,
+    test(
+      'accepts root target flags as a session shorthand for local targets',
+      () async {
+        final cli = TrackStateCli(
+          environment: TrackStateCliEnvironment(
+            workingDirectory: '/workspace/repo',
+            resolvePath: (path) => path,
+          ),
+          providerFactory: _FakeTrackStateCliProviderFactory(
+            localProvider: _FakeLocalGitTrackStateProvider(
+              repositoryPath: '/workspace/repo',
+              branch: 'feature/local',
+              user: const RepositoryUser(
+                login: 'local@example.com',
+                displayName: 'Local User',
+              ),
+              permission: const RepositoryPermission(
+                canRead: true,
+                canWrite: true,
+                isAdmin: false,
+                canCreateBranch: true,
+                canManageAttachments: true,
+                canCheckCollaborators: false,
+              ),
             ),
           ),
-        ),
-        repositoryFactory: _FakeTrackStateCliRepositoryFactory(
-          localRepository: _FakeSearchRepository(snapshot: _sampleSnapshot()),
-        ),
-      );
+          repositoryFactory: _FakeTrackStateCliRepositoryFactory(
+            localRepository: _FakeSearchRepository(snapshot: _sampleSnapshot()),
+          ),
+        );
 
-      final result = await cli.run(const <String>['--target', 'local']);
-      final json = jsonDecode(result.stdout) as Map<String, Object?>;
-      final data = json['data']! as Map<String, Object?>;
+        final result = await cli.run(const <String>['--target', 'local']);
+        final json = jsonDecode(result.stdout) as Map<String, Object?>;
+        final data = json['data']! as Map<String, Object?>;
 
-      expect(result.exitCode, 0);
-      expect(json['provider'], 'local-git');
-      expect(json['target'], <String, Object?>{
-        'type': 'local',
-        'value': '/workspace/repo',
-      });
-      expect(data['branch'], 'feature/local');
-      expect(data['authSource'], 'none');
-    });
+        expect(result.exitCode, 0);
+        expect(json['provider'], 'local-git');
+        expect(json['target'], <String, Object?>{
+          'type': 'local',
+          'value': '/workspace/repo',
+        });
+        expect(data['branch'], 'feature/local');
+        expect(data['authSource'], 'none');
+      },
+    );
 
     test(
       'accepts root target flags as a session shorthand for hosted targets',
@@ -214,7 +217,9 @@ void main() {
             hostedProvider: hostedProvider,
           ),
           repositoryFactory: _FakeTrackStateCliRepositoryFactory(
-            hostedRepository: _FakeSearchRepository(snapshot: _sampleSnapshot()),
+            hostedRepository: _FakeSearchRepository(
+              snapshot: _sampleSnapshot(),
+            ),
           ),
         );
 
@@ -361,6 +366,130 @@ void main() {
           'id': 'in-review',
           'name': 'In Review',
         });
+      },
+    );
+
+    test(
+      'hosted session sees saved status and workflow changes on the same repository',
+      () async {
+        final sampleSnapshot = _sampleSnapshot();
+        final sampleProject = sampleSnapshot.project;
+        final staleSnapshot = TrackerSnapshot(
+          project: ProjectConfig(
+            key: sampleProject.key,
+            name: sampleProject.name,
+            repository: sampleProject.repository,
+            branch: sampleProject.branch,
+            defaultLocale: sampleProject.defaultLocale,
+            supportedLocales: sampleProject.supportedLocales,
+            issueTypeDefinitions: sampleProject.issueTypeDefinitions,
+            statusDefinitions: <TrackStateConfigEntry>[
+              const TrackStateConfigEntry(id: 'todo', name: 'To Do'),
+            ],
+            fieldDefinitions: sampleProject.fieldDefinitions,
+            workflowDefinitions: const <TrackStateWorkflowDefinition>[],
+            priorityDefinitions: sampleProject.priorityDefinitions,
+            versionDefinitions: sampleProject.versionDefinitions,
+            componentDefinitions: sampleProject.componentDefinitions,
+            resolutionDefinitions: sampleProject.resolutionDefinitions,
+            attachmentStorage: sampleProject.attachmentStorage,
+          ),
+          repositoryIndex: sampleSnapshot.repositoryIndex,
+          issues: sampleSnapshot.issues,
+        );
+        final hostedRepository = _FakeSearchRepository(snapshot: staleSnapshot);
+        await hostedRepository.saveProjectSettings(
+          sampleProject.settingsCatalog.copyWith(
+            statusDefinitions: <TrackStateConfigEntry>[
+              const TrackStateConfigEntry(id: 'todo', name: 'To Do'),
+              const TrackStateConfigEntry(
+                id: 'in-review',
+                name: 'In Review',
+                category: 'indeterminate',
+              ),
+            ],
+            workflowDefinitions: const <TrackStateWorkflowDefinition>[
+              TrackStateWorkflowDefinition(
+                id: 'delivery',
+                name: 'Delivery',
+                statusIds: <String>['todo', 'in-review'],
+                transitions: <TrackStateWorkflowTransition>[
+                  TrackStateWorkflowTransition(
+                    id: 'review',
+                    name: 'Request review',
+                    fromStatusId: 'todo',
+                    toStatusId: 'in-review',
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+        final providerFactory = _FakeTrackStateCliProviderFactory(
+          hostedProvider: _FakeHostedTrackStateProvider(
+            user: const RepositoryUser(
+              login: 'octocat',
+              displayName: 'Octo Cat',
+            ),
+            permission: const RepositoryPermission(
+              canRead: true,
+              canWrite: false,
+              isAdmin: false,
+              canCreateBranch: true,
+              canManageAttachments: false,
+              canCheckCollaborators: false,
+            ),
+          ),
+        );
+        final repositoryFactory = _FakeTrackStateCliRepositoryFactory(
+          hostedRepository: hostedRepository,
+        );
+        final cli = TrackStateCli(
+          environment: const TrackStateCliEnvironment(
+            environment: <String, String>{
+              trackStateCliTokenEnvironmentVariable: 'env-token',
+            },
+          ),
+          providerFactory: providerFactory,
+          repositoryFactory: repositoryFactory,
+        );
+
+        final result = await cli.run(const <String>[
+          'session',
+          '--target',
+          'hosted',
+          '--provider',
+          'github',
+          '--repository',
+          'owner/repo',
+          '--branch',
+          'main',
+        ]);
+        final json = jsonDecode(result.stdout) as Map<String, Object?>;
+        final data = json['data']! as Map<String, Object?>;
+        final projectConfig = data['projectConfig']! as Map<String, Object?>;
+        final statuses = projectConfig['statuses']! as List<Object?>;
+        final workflows = projectConfig['workflows']! as List<Object?>;
+        final delivery = workflows.single as Map<String, Object?>;
+        final transitions = delivery['transitions']! as List<Object?>;
+
+        expect(result.exitCode, 0);
+        expect(providerFactory.lastDisableHostedSyncRequestCaching, isTrue);
+        expect(repositoryFactory.lastDisableHostedSyncRequestCaching, isTrue);
+        expect(
+          statuses.any(
+            (status) =>
+                (status as Map<String, Object?>)['id'] == 'in-review' &&
+                status['name'] == 'In Review',
+          ),
+          isTrue,
+        );
+        expect(delivery['id'], 'delivery');
+        expect(transitions, hasLength(1));
+        expect(
+          (transitions.single as Map<String, Object?>)['name'],
+          'Request review',
+        );
       },
     );
 
@@ -1511,7 +1640,7 @@ void main() {
             },
           ),
           repositoryFactory: repositoryFactory,
-          providerFactory: const _FakeTrackStateCliProviderFactory(),
+          providerFactory: _FakeTrackStateCliProviderFactory(),
         );
 
         final result = await cli.run(const <String>[
@@ -1584,7 +1713,7 @@ void main() {
             },
           ),
           repositoryFactory: repositoryFactory,
-          providerFactory: const _FakeTrackStateCliProviderFactory(),
+          providerFactory: _FakeTrackStateCliProviderFactory(),
         );
 
         final result = await cli.run(const <String>[
@@ -3271,13 +3400,11 @@ String _sanitizeAttachmentTestName(String value) => value
 
 class _FakeTrackStateCliProviderFactory
     implements TrackStateCliProviderFactory {
-  const _FakeTrackStateCliProviderFactory({
-    this.localProvider,
-    this.hostedProvider,
-  });
+  _FakeTrackStateCliProviderFactory({this.localProvider, this.hostedProvider});
 
   final LocalGitTrackStateProvider? localProvider;
   final TrackStateProviderAdapter? hostedProvider;
+  bool? lastDisableHostedSyncRequestCaching;
 
   @override
   LocalGitTrackStateProvider createLocal({
@@ -3297,7 +3424,9 @@ class _FakeTrackStateCliProviderFactory
     required String repository,
     required String branch,
     http.Client? client,
+    bool disableHostedSyncRequestCaching = false,
   }) {
+    lastDisableHostedSyncRequestCaching = disableHostedSyncRequestCaching;
     final adapter = hostedProvider;
     if (adapter == null) {
       throw StateError('Expected a fake hosted provider.');
@@ -3321,6 +3450,7 @@ class _FakeTrackStateCliRepositoryFactory
   String? lastHostedRepository;
   String? lastHostedBranch;
   String? lastHostedProvider;
+  bool? lastDisableHostedSyncRequestCaching;
 
   @override
   TrackStateRepository createLocal({
@@ -3344,10 +3474,12 @@ class _FakeTrackStateCliRepositoryFactory
     required String repository,
     required String branch,
     http.Client? client,
+    bool disableHostedSyncRequestCaching = false,
   }) {
     lastHostedProvider = provider;
     lastHostedRepository = repository;
     lastHostedBranch = branch;
+    lastDisableHostedSyncRequestCaching = disableHostedSyncRequestCaching;
     final hosted = hostedRepository;
     if (hosted == null) {
       throw StateError('Expected a fake hosted repository.');
@@ -3356,7 +3488,8 @@ class _FakeTrackStateCliRepositoryFactory
   }
 }
 
-class _FakeSearchRepository implements TrackStateRepository {
+class _FakeSearchRepository
+    implements TrackStateRepository, ProjectSettingsRepository {
   _FakeSearchRepository({
     this.page = const TrackStateIssueSearchPage.empty(),
     this.snapshot = const TrackerSnapshot(
@@ -3422,6 +3555,38 @@ class _FakeSearchRepository implements TrackStateRepository {
 
   @override
   Future<TrackerSnapshot> loadSnapshot() async => snapshot;
+
+  @override
+  Future<TrackerSnapshot> saveProjectSettings(
+    ProjectSettingsCatalog settings,
+  ) async {
+    final currentSnapshot = snapshot;
+    snapshot = TrackerSnapshot(
+      project: ProjectConfig(
+        key: currentSnapshot.project.key,
+        name: currentSnapshot.project.name,
+        repository: currentSnapshot.project.repository,
+        branch: currentSnapshot.project.branch,
+        defaultLocale: settings.defaultLocale,
+        supportedLocales: settings.effectiveSupportedLocales,
+        issueTypeDefinitions: settings.issueTypeDefinitions,
+        statusDefinitions: settings.statusDefinitions,
+        fieldDefinitions: settings.fieldDefinitions,
+        workflowDefinitions: settings.workflowDefinitions,
+        priorityDefinitions: settings.priorityDefinitions,
+        versionDefinitions: settings.versionDefinitions,
+        componentDefinitions: settings.componentDefinitions,
+        resolutionDefinitions: settings.resolutionDefinitions,
+        attachmentStorage: settings.attachmentStorage,
+      ),
+      repositoryIndex: currentSnapshot.repositoryIndex,
+      issues: currentSnapshot.issues,
+      loadWarnings: currentSnapshot.loadWarnings,
+      readiness: currentSnapshot.readiness,
+      startupRecovery: currentSnapshot.startupRecovery,
+    );
+    return snapshot;
+  }
 
   @override
   Future<TrackStateIssueSearchPage> searchIssuePage(
