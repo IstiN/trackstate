@@ -1292,21 +1292,21 @@ Issue targeted by the delete workflow.
       );
 
       final descriptionResults = await repository.searchIssues(
-        'project = DEMO AND ASSIGNEES',
+        'project = DEMO AND supporting',
       );
       final implicitTextResults = await repository.searchIssues(
-        'project = DEMO accessibility',
+        'project = DEMO supporting',
       );
       final acceptanceResults = await repository.searchIssues(
-        'project = DEMO AND accessibility',
+        'project = DEMO AND attachments',
       );
       final commentOnlyResults = await repository.searchIssues(
         'project = DEMO AND markdown-backed',
       );
 
-      expect(descriptionResults.map((issue) => issue.key), ['DEMO-2']);
-      expect(implicitTextResults.map((issue) => issue.key), ['DEMO-2']);
-      expect(acceptanceResults.map((issue) => issue.key), ['DEMO-2']);
+      expect(descriptionResults.map((issue) => issue.key), ['DEMO-5']);
+      expect(implicitTextResults.map((issue) => issue.key), ['DEMO-5']);
+      expect(acceptanceResults.map((issue) => issue.key), ['DEMO-5']);
       expect(commentOnlyResults, isEmpty);
     },
   );
