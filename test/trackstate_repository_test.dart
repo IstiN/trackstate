@@ -1131,9 +1131,9 @@ Updated comment body from sync.
       );
       expect(snapshot.repositoryIndex.deleted.single.key, 'DEMO-99');
       expect(boardIssue.issueTypeId, 'story');
-      expect(boardIssue.statusId, 'in-progress');
-      expect(boardIssue.priorityId, 'high');
-      expect(boardIssue.fixVersionIds, ['mvp']);
+      expect(boardIssue.statusId, 'done');
+      expect(boardIssue.priorityId, 'highest');
+      expect(boardIssue.fixVersionIds, isEmpty);
       expect(boardIssue.watchers, ['demo-admin', 'demo-user']);
       expect(boardIssue.customFields['storyPoints'], 5);
       expect(boardIssue.customFields['releaseTrain'], ['web', 'mobile']);
@@ -1292,10 +1292,10 @@ Issue targeted by the delete workflow.
       );
 
       final descriptionResults = await repository.searchIssues(
-        'project = DEMO AND ASSIGNEES',
+        'project = DEMO AND walkthrough',
       );
       final implicitTextResults = await repository.searchIssues(
-        'project = DEMO accessibility',
+        'project = DEMO walkthrough',
       );
       final acceptanceResults = await repository.searchIssues(
         'project = DEMO AND accessibility',
