@@ -29,7 +29,6 @@ void main() {
     expect(workflow, contains('runs-on: ubuntu-latest'));
     expect(workflow, contains('GET /repos/{owner}/{repo}/actions/runners'));
     expect(workflow, contains('const readinessTimeoutMs = 5 * 60 * 1000;'));
-    expect(workflow, contains('const readinessStartedAt = Date.now();'));
     expect(
       workflow,
       contains(
@@ -43,6 +42,13 @@ void main() {
     );
     expect(workflow, contains('readinessTimeoutId = setTimeout('));
     expect(workflow, contains('readinessTimeoutId.unref?.();'));
+    expect(
+      workflow,
+      contains(
+        'Continuing without runner inventory preflight; the macOS build job will rely on its runs-on labels.',
+      ),
+    );
+    expect(workflow, isNot(contains('Waiting out the readiness timeout')));
     expect(workflow, contains('} finally {'));
     expect(workflow, contains('clearTimeout(readinessTimeoutId);'));
     expect(

@@ -54,8 +54,8 @@ module.exports = {
     globalAdditionalInstructions: [
         './agents/prompts/codegraph_tools.md'
     ],
-    // SM parallelism: one dispatch at a time to avoid Copilot rate-limit lockups.
-    smMaxWorkflows: 1,
+    // SM parallelism: allow two active AI teammate runs while keeping a cap for Copilot rate-limit control.
+    smMaxWorkflows: 2,
 
     repository: {
         owner: 'IstiN',
