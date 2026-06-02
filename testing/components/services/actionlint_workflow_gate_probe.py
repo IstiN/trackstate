@@ -106,6 +106,7 @@ class ActionlintWorkflowGateProbeService:
                 branch_observation.get("actionlint_log_excerpt")
             ),
             mutated_line_preview=str(branch_observation["mutated_line_preview"]),
+            changed_workflow_text=str(branch_observation["changed_workflow_text"]),
             cleanup_deleted_branch=bool(branch_observation["cleanup_deleted_branch"]),
         )
 
@@ -170,7 +171,7 @@ class ActionlintWorkflowGateProbeService:
                 cwd=temp_repository_root,
             )
 
-            changed_paths, mutated_line_preview = self._apply_workflow_change(
+            changed_paths, mutated_line_preview, changed_workflow_text = self._apply_workflow_change(
                 temp_repository_root
             )
             self._run_command(
@@ -203,6 +204,7 @@ class ActionlintWorkflowGateProbeService:
                 "pushed_commit_sha": pushed_commit_sha,
                 "branch_actions_page_url": branch_actions_page_url,
                 "mutated_line_preview": mutated_line_preview,
+                "changed_workflow_text": changed_workflow_text,
                 "cleanup_deleted_branch": False,
                 **branch_run_observation,
             }
@@ -226,7 +228,7 @@ class ActionlintWorkflowGateProbeService:
     def _apply_workflow_change(
         self,
         temp_repository_root: Path,
-    ) -> tuple[list[str], str]:
+    ) -> tuple[list[str], str, str]:
         target_workflow = temp_repository_root / self._config.target_workflow_path
         if self._config.mutation_mode == "create_file":
             if target_workflow.exists():
@@ -241,11 +243,14 @@ class ActionlintWorkflowGateProbeService:
                 self._config.created_workflow_contents + "\n",
                 encoding="utf-8",
             )
+            changed_workflow_text = target_workflow.read_text(encoding="utf-8")
             preview_source = (
                 self._config.mutation_replacement_text
                 or self._config.created_workflow_contents
             )
-            return [self._config.target_workflow_path], self._preview_text(preview_source)
+            return [
+                self._config.target_workflow_path
+            ], self._preview_text(preview_source), changed_workflow_text
 
         original_workflow_text = target_workflow.read_text(encoding="utf-8")
         mutated_workflow_text = original_workflow_text.replace(
@@ -261,9 +266,9 @@ class ActionlintWorkflowGateProbeService:
                 f"Expected to replace: {self._config.mutation_search_text}"
             )
         target_workflow.write_text(mutated_workflow_text, encoding="utf-8")
-        return [self._config.target_workflow_path], self._preview_text(
-            self._config.mutation_replacement_text
-        )
+        return [
+            self._config.target_workflow_path
+        ], self._preview_text(self._config.mutation_replacement_text), mutated_workflow_text
     def _wait_for_branch_runs(
         self,
         branch_name: str,
