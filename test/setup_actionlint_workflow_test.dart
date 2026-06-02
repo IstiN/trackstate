@@ -27,6 +27,8 @@ void main() {
     expect(workflow, contains('.github/workflows/**'));
     expect(workflow, contains('jobs:'));
     expect(workflow, contains('name: actionlint'));
+    expect(workflow, contains('timeout-minutes:'));
+    expect(workflow, contains('Enforce job-level timeout-minutes'));
     expect(workflow, contains('Run actionlint'));
   });
 
