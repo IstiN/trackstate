@@ -1791,6 +1791,63 @@ void main() {
   );
 
   test(
+    'view model normalizes hosted transition result enums before board grouping',
+    () async {
+      final initialSnapshot = await const DemoTrackStateRepository()
+          .loadSnapshot();
+      final repository = _MutableEditRepository(snapshot: initialSnapshot);
+      final service = _RecordingEditIssueMutationService(
+        repository,
+        returnStaleTransitionEnum: true,
+      );
+      final viewModel = TrackerViewModel(
+        repository: repository,
+        issueMutationService: service,
+      );
+
+      await viewModel.load();
+      final issue = viewModel.issues.firstWhere(
+        (candidate) => candidate.key == 'TRACK-12',
+      );
+
+      final success = await viewModel.saveIssueEdits(
+        issue,
+        IssueEditRequest(
+          summary: issue.summary,
+          description: issue.description,
+          priorityId: 'highest',
+          assignee: issue.assignee,
+          labels: issue.labels,
+          components: issue.components,
+          fixVersionIds: issue.fixVersionIds,
+          parentKey: issue.parentKey,
+          epicKey: issue.epicKey,
+          transitionStatusId: 'done',
+          resolutionId: 'done',
+        ),
+      );
+
+      expect(success, isTrue);
+      expect(viewModel.selectedIssue?.statusId, 'done');
+      expect(viewModel.selectedIssue?.status, IssueStatus.done);
+      expect(viewModel.selectedIssue?.priorityId, 'highest');
+      expect(viewModel.selectedIssue?.priority, IssuePriority.highest);
+      expect(
+        viewModel.issuesByStatus[IssueStatus.done]!.map(
+          (issue) => issue.key,
+        ),
+        contains('TRACK-12'),
+      );
+      expect(
+        viewModel.issuesByStatus[IssueStatus.inReview]!.map(
+          (issue) => issue.key,
+        ),
+        isNot(contains('TRACK-12')),
+      );
+    },
+  );
+
+  test(
     'view model keeps the selected issue hydrated after hosted same-key status reloads',
     () async {
       final initialSnapshot = await const DemoTrackStateRepository()
@@ -2983,10 +3040,12 @@ class _RecordingEditIssueMutationService extends IssueMutationService {
       TrackStateConfigEntry(id: 'in-review', name: 'In Review'),
       TrackStateConfigEntry(id: 'done', name: 'Done'),
     ],
+    this.returnStaleTransitionEnum = false,
   }) : super(repository: const DemoTrackStateRepository());
 
   final _MutableEditRepository _repository;
   final List<TrackStateConfigEntry> transitions;
+  final bool returnStaleTransitionEnum;
   Map<String, Object?> updatedFields = const {};
   String? reassignedParentKey;
   String? reassignedEpicKey;
@@ -3060,7 +3119,7 @@ class _RecordingEditIssueMutationService extends IssueMutationService {
     };
     final updated = _copyIssue(
       issue,
-      status: nextStatus,
+      status: returnStaleTransitionEnum ? issue.status : nextStatus,
       statusId: status,
       resolutionId: resolution,
     );
