@@ -26,9 +26,8 @@ runtime_inputs:
           - run: echo "TS-1324 probe"
   expected_actionlint_marker: actionlint
   expected_log_markers:
-    - .github/workflows/ts1324-timeout-minutes-probe.yml
-    - timeout-minutes
-    - required
+    - "Workflow jobs must declare timeout-minutes:"
+    - "job `probe` is missing timeout-minutes"
   poll_interval_seconds: 5
   run_timeout_seconds: 120
 notes:
