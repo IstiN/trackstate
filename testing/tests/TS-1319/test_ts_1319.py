@@ -22,6 +22,9 @@ from testing.core.config.github_actions_preflight_gate_config import (  # noqa: 
 from testing.core.interfaces.github_actions_preflight_gate_probe import (  # noqa: E402
     GitHubActionsPreflightGateObservation,
 )
+from testing.components.services.github_actions_preflight_gate_probe import (  # noqa: E402
+    GitHubActionsPreflightGatePreconditionError,
+)
 from testing.tests.support.github_actions_page_factory import (  # noqa: E402
     create_github_actions_page,
 )
@@ -172,6 +175,32 @@ def main() -> None:
                 f"Observed job conclusion: `{_job_conclusion(observation.preflight_job)}`."
             ),
         )
+    except GitHubActionsPreflightGatePreconditionError as error:
+        _merge_probe_error_context(result, error)
+        result.setdefault("error", f"{type(error).__name__}: {error}")
+        result.setdefault("traceback", traceback.format_exc())
+        result["blocked_reason"] = (
+            "The live Apple Release Builds workflow currently has a matching online "
+            "macOS runner, so the no-runner timeout path required by the ticket "
+            "cannot be reproduced."
+        )
+        result["missing"] = [
+            {
+                "type": "test_data",
+                "name": "offline-macos-runner-precondition",
+                "description": (
+                    "A live no-runner condition for the Apple Release Builds workflow "
+                    "so the Ubuntu preflight gate can exercise the timeout path."
+                ),
+                "how_to_add": (
+                    "Re-run when all matching macOS release runners are offline or "
+                    "unavailable."
+                ),
+            }
+        ]
+        _write_blocked_outputs(result)
+        return
+
     except Exception as error:
         _merge_probe_error_context(result, error)
         if (
@@ -349,6 +378,25 @@ def _write_failure_outputs(result: dict[str, Any]) -> None:
     RESPONSE_PATH.write_text(_response(result, passed=False), encoding="utf-8")
 
 
+def _write_blocked_outputs(result: dict[str, Any]) -> None:
+    BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
+    RESULT_PATH.write_text(
+        json.dumps(
+            {
+                "status": "blocked_by_human",
+                "blocked_reason": result.get("blocked_reason", ""),
+                "missing": result.get("missing", []),
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    JIRA_COMMENT_PATH.write_text(_jira_comment_blocked(result), encoding="utf-8")
+    PR_BODY_PATH.write_text(_markdown_summary_blocked(result), encoding="utf-8")
+    RESPONSE_PATH.write_text(_response_blocked(result), encoding="utf-8")
+
+
 def _test_automation_result_payload(result: dict[str, Any]) -> dict[str, Any]:
     error = str(result.get("error", "AssertionError: test failed"))
     if not error.startswith(("AssertionError:", "RuntimeError:", "ValueError:", "TypeError:")):
@@ -416,6 +464,34 @@ def _jira_comment(result: dict[str, Any], *, passed: bool) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _jira_comment_blocked(result: dict[str, Any]) -> str:
+    return "\n".join(
+        [
+            "h3. Test Automation Result",
+            "",
+            "*Status:* BLOCKED",
+            f"*Test Case:* {TICKET_KEY} - {TEST_CASE_TITLE}",
+            "",
+            "h4. What was tested",
+            "* Pushed a disposable semantic version tag to {{IstiN/trackstate}} and waited for the live {{Apple Release Builds}} workflow.",
+            "* Verified the live preflight gate contract, but the no-runner timeout precondition was not present.",
+            "",
+            "h4. Result",
+            f"* Blocked: {result.get('blocked_reason', '')}",
+            "",
+            "h4. Test file",
+            "{code}",
+            f"testing/tests/{TICKET_KEY}/test_ts_1319.py",
+            "{code}",
+            "",
+            "h4. Run command",
+            "{code:bash}",
+            RUN_COMMAND,
+            "{code}",
+        ]
+    ) + "\n"
+
+
 def _markdown_summary(result: dict[str, Any], *, passed: bool) -> str:
     lines = [
         "## Test Automation Result",
@@ -460,6 +536,29 @@ def _markdown_summary(result: dict[str, Any], *, passed: bool) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _markdown_summary_blocked(result: dict[str, Any]) -> str:
+    return "\n".join(
+        [
+            "## Test Automation Result",
+            "",
+            "**Status:** BLOCKED",
+            f"**Test Case:** {TICKET_KEY} - {TEST_CASE_TITLE}",
+            "",
+            "## What was automated",
+            "- Pushed a disposable semantic version tag to `IstiN/trackstate` and waited for the live `Apple Release Builds` workflow.",
+            "- Verified the live preflight gate contract, but the no-runner timeout precondition was not present.",
+            "",
+            "## Result",
+            f"- Blocked: {result.get('blocked_reason', '')}",
+            "",
+            "## How to run",
+            "```bash",
+            RUN_COMMAND,
+            "```",
+        ]
+    ) + "\n"
+
+
 def _response(result: dict[str, Any], *, passed: bool) -> str:
     lines = [
         "## Test Automation Result",
@@ -491,6 +590,23 @@ def _response(result: dict[str, Any], *, passed: bool) -> str:
             ]
         )
     return "\n".join(lines) + "\n"
+
+
+def _response_blocked(result: dict[str, Any]) -> str:
+    return "\n".join(
+        [
+            "## Test Automation Result",
+            "",
+            "**Status:** BLOCKED",
+            f"**Test Case:** {TICKET_KEY} - {TEST_CASE_TITLE}",
+            "",
+            "## Outcome",
+            f"- {result.get('blocked_reason', '')}",
+            "",
+            "## Human-style verification",
+            "- The GitHub Actions run and job pages were opened; the workflow currently succeeds because a matching macOS runner is online.",
+        ]
+    ) + "\n"
 
 
 def _bug_description(result: dict[str, Any]) -> str:
