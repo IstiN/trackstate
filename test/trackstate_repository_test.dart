@@ -2873,7 +2873,7 @@ size 6
   );
 
   test(
-    'provider-backed repository queues legacy repository-path replacements through the inbox when hosted release writes are unavailable',
+    'provider-backed repository overwrites legacy repository-path attachments directly when hosted release writes are unavailable',
     () async {
       final provider = _FakeReleaseAttachmentProvider(
         permission: const RepositoryPermission(
@@ -2980,15 +2980,15 @@ Nested release-backed attachment issue.
 
       expect(
         provider.lastAttachmentWriteRequest?.path,
-        'DEMO/.trackstate/upload-inbox/DEMO-2/manual.pdf',
+        'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
       );
       expect(
-        provider.binaryFiles['DEMO/.trackstate/upload-inbox/DEMO-2/manual.pdf'],
+        provider.binaryFiles['DEMO/DEMO-1/DEMO-2/attachments/manual.pdf'],
         Uint8List.fromList(utf8.encode('replacement attachment')),
       );
       expect(
         provider.binaryFiles.containsKey(
-          'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
+          'DEMO/.trackstate/upload-inbox/DEMO-2/manual.pdf',
         ),
         isFalse,
       );
@@ -3001,6 +3001,24 @@ Nested release-backed attachment issue.
         updated.attachments.single.repositoryPath,
         'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
       );
+      expect(updated.attachments.single.revisionOrOid, 'attachment-sha');
+      final metadata =
+          jsonDecode(provider.files['DEMO/DEMO-1/DEMO-2/attachments.json']!)
+              as List<Object?>;
+      expect(metadata, [
+        {
+          'id': 'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
+          'name': 'manual.pdf',
+          'mediaType': 'application/pdf',
+          'sizeBytes': utf8.encode('replacement attachment').length,
+          'author': 'demo-user',
+          'createdAt': updated.attachments.single.createdAt,
+          'storagePath': 'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
+          'revisionOrOid': 'attachment-sha',
+          'storageBackend': 'repository-path',
+          'repositoryPath': 'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
+        },
+      ]);
     },
   );
 
