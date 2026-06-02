@@ -30,6 +30,7 @@ void main() {
       );
       await tester.pump();
       await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
 
       expect(input.value, 'Original summary');
 
@@ -39,6 +40,7 @@ void main() {
       );
       await tester.pump();
       await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
 
       expect(controller.text, isEmpty);
     },
@@ -53,12 +55,14 @@ void main() {
       final input = web.HTMLInputElement()
         ..setAttribute('aria-label', 'Summary')
         ..setAttribute('data-semantics-role', 'text-field');
-      web.document.body!.append(input);
+      final dialog = web.HTMLDivElement()..setAttribute('role', 'dialog');
+      dialog.append(input);
+      web.document.body!.append(dialog);
       addTearDown(() {
         web.document
             .getElementById('trackstate-text-field-summary-error')
             ?.remove();
-        input.remove();
+        dialog.remove();
       });
 
       browser_text_field_value_sync.syncBrowserTextFieldValue(
@@ -72,6 +76,7 @@ void main() {
       );
       await tester.pump();
       await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
 
       expect(input.getAttribute('aria-invalid'), 'true');
       expect(
@@ -85,6 +90,7 @@ void main() {
       expect(errorMessage!.getAttribute('role'), 'alert');
       expect(errorMessage.getAttribute('aria-live'), 'assertive');
       expect(errorMessage.textContent, 'Summary is required before saving.');
+      expect(dialog.contains(errorMessage), isTrue);
 
       browser_text_field_value_sync.syncBrowserTextFieldValue(
         label: 'Summary',
@@ -95,6 +101,7 @@ void main() {
       );
       await tester.pump();
       await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
 
       expect(input.getAttribute('aria-invalid'), isNull);
       expect(input.getAttribute('aria-errormessage'), isNull);
