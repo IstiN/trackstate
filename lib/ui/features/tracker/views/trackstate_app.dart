@@ -13918,6 +13918,8 @@ class _SettingsTextField extends StatelessWidget {
               value: value.text,
               enabled: enabled,
               readOnly: !enabled,
+              errorText: errorText,
+              errorColor: _cssHexColor(colors.error),
             );
           });
           return Semantics(
@@ -13925,6 +13927,11 @@ class _SettingsTextField extends StatelessWidget {
             textField: true,
             enabled: enabled,
             value: value.text,
+            hint: errorText,
+            liveRegion: errorText != null,
+            validationResult: errorText == null
+                ? SemanticsValidationResult.none
+                : SemanticsValidationResult.invalid,
             child: ExcludeSemantics(
               child: TextField(
                 key: fieldKey,
@@ -13980,6 +13987,16 @@ class _SettingsTextField extends StatelessWidget {
       ),
     );
   }
+}
+
+String _cssHexColor(Color color) {
+  String channel(double value) =>
+      (value * 255).round().toRadixString(16).padLeft(2, '0');
+  if (color.a >= 1) {
+    return '#${channel(color.r)}${channel(color.g)}${channel(color.b)}';
+  }
+  return 'rgba(${(color.r * 255).round()}, ${(color.g * 255).round()}, '
+      '${(color.b * 255).round()}, ${color.a})';
 }
 
 class _SurfaceCard extends StatelessWidget {

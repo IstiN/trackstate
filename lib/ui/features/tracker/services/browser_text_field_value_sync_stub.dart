@@ -6,4 +6,6 @@ void syncBrowserTextFieldValue({
   required String value,
   required bool enabled,
   required bool readOnly,
+  String? errorText,
+  String? errorColor,
 }) {}
