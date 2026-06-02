@@ -85,7 +85,6 @@ jobs:
             const readinessTimeoutMs = 5 * 60 * 1000;
             const readinessFailureMessage =
               'Unable to verify TrackState runner labels because the token cannot read repository runners.';
-            const readinessStartedAt = Date.now();
             let readinessTimeoutId;
             const { owner, repo } = context.repo;
 
@@ -120,21 +119,8 @@ jobs:
               }
 
               if (error.status === 403) {
-                const elapsedMs = Date.now() - readinessStartedAt;
-                const remainingDelayMs = Math.max(
-                  0,
-                  readinessTimeoutMs - elapsedMs,
-                );
                 core.warning(
-                  `${readinessFailureMessage} Waiting out the readiness timeout before failing closed.`,
-                );
-                if (remainingDelayMs > 0) {
-                  await new Promise((resolve) =>
-                    setTimeout(resolve, remainingDelayMs),
-                  );
-                }
-                core.setFailed(
-                  `${readinessFailureMessage} Failing closed after the readiness timeout expired.`,
+                  `${readinessFailureMessage} Continuing without runner inventory preflight; the macOS build job will rely on its runs-on labels.`,
                 );
                 return;
               }
