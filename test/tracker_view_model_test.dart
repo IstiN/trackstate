@@ -1833,9 +1833,7 @@ void main() {
       expect(viewModel.selectedIssue?.priorityId, 'highest');
       expect(viewModel.selectedIssue?.priority, IssuePriority.highest);
       expect(
-        viewModel.issuesByStatus[IssueStatus.done]!.map(
-          (issue) => issue.key,
-        ),
+        viewModel.issuesByStatus[IssueStatus.done]!.map((issue) => issue.key),
         contains('TRACK-12'),
       );
       expect(

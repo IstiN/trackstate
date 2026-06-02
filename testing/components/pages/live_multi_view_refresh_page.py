@@ -1339,6 +1339,11 @@ class LiveMultiViewRefreshPage:
             payload = self._session.wait_for_function(
                 """
                 ({ issueKey, issueSummary, expectedColumn, expectedPriority }) => {
+                  const scrollables = Array.from(document.querySelectorAll('*'))
+                    .filter((element) => element.scrollWidth > element.clientWidth + 8);
+                  for (const scrollable of scrollables) {
+                    scrollable.scrollLeft = scrollable.scrollWidth;
+                  }
                   const expectedAriaLabel = `${expectedColumn} column`;
                   const column = Array.from(document.querySelectorAll('flt-semantics'))
                     .find((element) => (element.getAttribute('aria-label') ?? '') === expectedAriaLabel);
@@ -1384,14 +1389,40 @@ class LiveMultiViewRefreshPage:
         expected_priority: str,
     ) -> str:
         self.navigate_to_section("Hierarchy")
-        return self._wait_for_issue_projection(
+        try:
+            payload = self._session.wait_for_function(
+                """
+                ({ issueKey }) => {
+                  const bodyText = document.body?.innerText ?? '';
+                  return bodyText.includes(`Create child issue for ${issueKey}`)
+                    || bodyText.includes(issueKey)
+                    ? { bodyText }
+                    : null;
+                }
+                """,
+                arg={"issueKey": issue_key},
+                timeout_ms=60_000,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                f"Step 9 failed: the Hierarchy view did not visibly include {issue_key} "
+                "after the hosted save.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                f"Step 9 failed: the Hierarchy view did not expose an observable row for "
+                f"{issue_key}.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        detail_projection = self.wait_for_issue_detail_state(
             issue_key=issue_key,
             issue_summary=issue_summary,
             expected_status=expected_status,
             expected_priority=expected_priority,
-            section_label="Hierarchy",
             step_number=9,
         )
+        return f"{payload['bodyText']}\n\n{detail_projection}"
 
     def wait_for_jql_search_projection(
         self,
