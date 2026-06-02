@@ -448,6 +448,7 @@ class WorkspaceSwitcherInteractiveTextObservation:
     label: str
     visible_text: str
     role: str | None
+    disabled: bool
     foreground_color: str | None
     background_color: str | None
     contrast_ratio: float | None
@@ -5205,6 +5206,12 @@ class LiveWorkspaceSwitcherPage:
                 );
               const visibleTextFor = (element) =>
                 normalize(element.innerText || element.textContent || '');
+              const isDisabled = (element) => {
+                const ariaDisabled = normalize(element.getAttribute?.('aria-disabled')).toLowerCase();
+                return ariaDisabled === 'true'
+                  || element.hasAttribute?.('disabled')
+                  || element.disabled === true;
+              };
               const rectPayload = (element) => {
                 const rect = element.getBoundingClientRect();
                 return {
@@ -5234,7 +5241,6 @@ class LiveWorkspaceSwitcherPage:
                   || text.includes('Add workspace')
                   || isWorkspaceRow(text)
                   || text.includes('Hosted Local')
-                  || (text.includes('Repository') && text.includes('Branch'))
                 );
               const visibleDialogs = Array.from(
                 document.querySelectorAll('flt-semantics[role="dialog"],[role="dialog"]'),
@@ -5262,20 +5268,38 @@ class LiveWorkspaceSwitcherPage:
                     || isWorkspaceSwitcherSurfaceText(candidate.text)
                   )
                   .sort((left, right) => left.area - right.area);
+                const matchingAncestors = [];
                 for (const headingCandidate of headings) {
                   let current = headingCandidate.element;
                   while (current && current !== document.body) {
                     const text = normalize(current.innerText || current.textContent || '');
                     if (isWorkspaceSwitcherSurfaceText(text)) {
-                      switcher = current;
-                      break;
+                      const rect = current.getBoundingClientRect();
+                      matchingAncestors.push({
+                        element: current,
+                        area: rect.width * rect.height,
+                        width: rect.width,
+                        height: rect.height,
+                        text,
+                      });
                     }
                     current = current.parentElement;
                   }
-                  if (switcher) {
-                    break;
-                  }
                 }
+                matchingAncestors.sort((left, right) => left.area - right.area);
+                switcher = matchingAncestors.find((candidate) =>
+                  candidate.text.startsWith('Workspace switcher')
+                  && candidate.text.includes('Saved workspaces')
+                  && candidate.text.includes('Add workspace')
+                )?.element ?? matchingAncestors.find((candidate) =>
+                  candidate.text.includes('Workspace switcher')
+                  && (
+                    candidate.text.includes('Saved workspaces')
+                    || candidate.text.includes('Add workspace')
+                  )
+                  && candidate.width < window.innerWidth * 0.92
+                  && candidate.height < window.innerHeight * 0.95
+                )?.element ?? matchingAncestors[0]?.element ?? null;
               }
               if (!switcher) {
                 return null;
@@ -5399,6 +5423,7 @@ class LiveWorkspaceSwitcherPage:
                     label,
                     visibleText,
                     role: element.getAttribute('role'),
+                    disabled: isDisabled(element),
                     foregroundColor,
                     backgroundColor,
                     contrastRatio: contrastRatio(foregroundColor, backgroundColor),
@@ -5422,6 +5447,7 @@ class LiveWorkspaceSwitcherPage:
                     label,
                     visibleText: label,
                     role: element.getAttribute('role'),
+                    disabled: isDisabled(element),
                     foregroundColor,
                     backgroundColor,
                     contrastRatio: contrastRatio(foregroundColor, backgroundColor),
@@ -5459,6 +5485,7 @@ class LiveWorkspaceSwitcherPage:
                     label,
                     visibleText,
                     role: element.getAttribute('role'),
+                    disabled: isDisabled(element),
                     foregroundColor,
                     backgroundColor,
                     contrastRatio: contrastRatio(foregroundColor, backgroundColor),
@@ -5506,11 +5533,12 @@ class LiveWorkspaceSwitcherPage:
                 const { element, label } = candidate;
                 const backgroundColor = resolveBackgroundColor(element, dialogBackground);
                 const style = window.getComputedStyle(element);
+                const foregroundColor = resolveForegroundColor(element) ?? toHex(style.color);
                 return {
                   label,
-                  foregroundColor: toHex(style.color),
+                  foregroundColor,
                   backgroundColor,
-                  contrastRatio: contrastRatio(style.color, backgroundColor),
+                  contrastRatio: contrastRatio(foregroundColor, backgroundColor),
                   ...rectPayload(element),
                 };
               });
@@ -5712,6 +5740,7 @@ class LiveWorkspaceSwitcherPage:
                     label=str(item.get("label", "")),
                     visible_text=str(item.get("visibleText", "")),
                     role=str(item.get("role")) if item.get("role") is not None else None,
+                    disabled=bool(item.get("disabled")),
                     foreground_color=(
                         str(item.get("foregroundColor"))
                         if item.get("foregroundColor") is not None
@@ -9013,7 +9042,6 @@ class LiveWorkspaceSwitcherPage:
                       || text.includes('Add workspace')
                       || isWorkspaceRow(text)
                       || text.includes('Hosted Local')
-                      || (text.includes('Repository') && text.includes('Branch'))
                     );
                   const visibleDialogs = Array.from(
                     document.querySelectorAll('flt-semantics[role="dialog"],[role="dialog"]'),
