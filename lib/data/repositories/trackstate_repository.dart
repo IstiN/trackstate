@@ -1360,11 +1360,17 @@ class ProviderBackedTrackStateRepository
         expectedRevision: existingRevision,
       ),
     );
-    _snapshotArtifactRevisions[attachmentPath] = attachmentWriteResult.revision;
     final persistedAttachmentArtifact = await _provider.readAttachment(
       attachmentPath,
       ref: writeBranch,
     );
+    if (persistedAttachmentArtifact.bytes.length != bytes.length) {
+      throw TrackStateRepositoryException(
+        'Stored attachment size ${persistedAttachmentArtifact.bytes.length} bytes '
+        'does not match uploaded size ${bytes.length} bytes for $attachmentPath.',
+      );
+    }
+    _snapshotArtifactRevisions[attachmentPath] = attachmentWriteResult.revision;
     final updatedAttachment = IssueAttachment(
       id: attachmentPath,
       name: normalizedName,

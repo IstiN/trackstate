@@ -1591,6 +1591,133 @@ void main() {
   );
 
   testWidgets(
+    'web startup retries a transiently busy saved local workspace until it restores as Local Git',
+    (tester) async {
+      const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
+      const authStore = SharedPreferencesTrackStateAuthStore();
+      final workspaceProfiles = SharedPreferencesWorkspaceProfileService(
+        authStore: authStore,
+      );
+      await workspaceProfiles.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.local,
+          target: '/tmp/trackstate-demo',
+          defaultBranch: 'main',
+          displayName: 'Active local workspace',
+        ),
+      );
+      await workspaceProfiles.createProfile(
+        const WorkspaceProfileInput(
+          targetType: WorkspaceProfileTargetType.hosted,
+          target: 'stable/repo',
+          defaultBranch: 'main',
+          displayName: 'Hosted setup workspace',
+        ),
+        select: false,
+      );
+      await authStore.saveToken('github-token', repository: 'stable/repo');
+
+      var localAccessReady = false;
+      var localOpenAttempts = 0;
+
+      tester.view.physicalSize = const Size(1440, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      await tester.pumpWidget(
+        TrackStateApp(
+          workspaceProfileService: workspaceProfiles,
+          authStore: authStore,
+          openBrowserLocalRepository:
+              ({
+                required String repositoryPath,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async {
+                localOpenAttempts += 1;
+                if (!localAccessReady) {
+                  throw StateError(
+                    'File System Access handle revalidation is still pending.',
+                  );
+                }
+                return DemoTrackStateRepository(
+                  snapshot: await _snapshotForRepository(repositoryPath),
+                );
+              },
+          openHostedRepository:
+              ({
+                required String repository,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async => DemoTrackStateRepository(
+                snapshot: await _snapshotForRepository(repository),
+              ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(localOpenAttempts, greaterThan(0));
+      final savedStateDuringRetry = await workspaceProfiles.loadState();
+      expect(savedStateDuringRetry.activeWorkspaceId, activeLocalWorkspaceId);
+      expect(
+        savedStateDuringRetry.unavailableLocalWorkspaceIds,
+        isNot(contains(activeLocalWorkspaceId)),
+      );
+
+      await tester.tap(
+        find.byKey(const ValueKey('workspace-switcher-trigger')),
+      );
+      await tester.pumpAndSettle();
+
+      final pendingLocalRow = find.byKey(
+        const ValueKey('workspace-$activeLocalWorkspaceId'),
+      );
+      expect(pendingLocalRow, findsOneWidget);
+      expect(
+        find.descendant(of: pendingLocalRow, matching: find.text('Active')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: pendingLocalRow, matching: find.text('Local Git')),
+        findsNothing,
+      );
+
+      await tester.tapAt(const Offset(8, 8));
+      await tester.pumpAndSettle();
+
+      localAccessReady = true;
+      await tester.pump(const Duration(seconds: 2));
+      await tester.pumpAndSettle();
+
+      expect(localOpenAttempts, greaterThan(1));
+      final savedStateAfterRecovery = await workspaceProfiles.loadState();
+      expect(savedStateAfterRecovery.activeWorkspaceId, activeLocalWorkspaceId);
+      expect(
+        savedStateAfterRecovery.unavailableLocalWorkspaceIds,
+        isNot(contains(activeLocalWorkspaceId)),
+      );
+      expect(
+        find.bySemanticsLabel(
+          RegExp(r'Workspace switcher: Active local workspace, .*Local Git'),
+        ),
+        findsWidgets,
+      );
+      expect(
+        find.bySemanticsLabel(
+          RegExp(
+            r'Workspace switcher: Hosted setup workspace, .*Needs sign-in',
+          ),
+        ),
+        findsNothing,
+      );
+    },
+  );
+
+  testWidgets(
     'web startup starts the real delayed /user probe for a saved local workspace when hosted access falls back from saved hosted profiles',
     (tester) async {
       const activeLocalWorkspaceId = 'local:/tmp/trackstate-demo@main';
