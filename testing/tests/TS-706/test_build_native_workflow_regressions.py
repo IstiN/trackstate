@@ -20,7 +20,7 @@ class BuildNativeWorkflowRegressionTest(unittest.TestCase):
             )
         self.workflow = workflow
 
-    def test_verify_runner_step_fails_closed_when_runner_inventory_is_forbidden(self) -> None:
+    def test_verify_runner_step_fails_fast_on_label_mismatch(self) -> None:
         verify_runner_steps = self.workflow["jobs"]["verify-runner"]["steps"]
         runner_check_step = next(
             step
@@ -32,15 +32,26 @@ class BuildNativeWorkflowRegressionTest(unittest.TestCase):
 
         self.assertRegex(
             script,
-            r"if \(error\.status === 403\)\s*\{\s*core\.setFailed\(",
+            r"if \(matchingRunners\.length === 0\)\s*\{\s*core\.setFailed\(",
         )
         self.assertIn(
-            "Unable to verify TrackState runner labels because the token cannot read repository runners",
+            "No online runners found with required labels",
             script,
         )
-        self.assertNotIn("core.warning(", script)
         self.assertNotIn(
-            "Skipping macOS runner availability preflight because the token cannot read repository runners",
+            "core.warning(",
+            script,
+        )
+        self.assertRegex(
+            script,
+            r"if \(onlineRunners\.length === 0\)\s*\{\s*core\.setFailed\(",
+        )
+        self.assertIn(
+            "Runner labels ${runnerLabels} are registered, but none are online.",
+            script,
+        )
+        self.assertIn(
+            "No online runners found with required labels ${runnerLabels} for ${owner}/${repo}.",
             script,
         )
 
