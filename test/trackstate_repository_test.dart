@@ -3087,8 +3087,6 @@ updated: 2026-05-12T20:31:06Z
 
 Hosted repository-path attachment issue.
 ''',
-          'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf':
-              '%PDF-1.4\nlegacy repository attachment\n',
           'DEMO/DEMO-1/DEMO-2/attachments.json': jsonEncode([
             {
               'id': 'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
@@ -3108,6 +3106,8 @@ Hosted repository-path attachment issue.
       final repository = ProviderBackedTrackStateRepository(provider: provider);
 
       final snapshot = await repository.loadSnapshot();
+      provider.files['DEMO/DEMO-1/DEMO-2/attachments/manual.pdf'] =
+          '%PDF-1.4\nlegacy repository attachment\n';
       await repository.connect(
         const RepositoryConnection(
           repository: 'IstiN/trackstate',
@@ -3129,6 +3129,10 @@ Hosted repository-path attachment issue.
       expect(
         provider.lastAttachmentWriteRequest?.path,
         'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
+      );
+      expect(
+        provider.lastAttachmentWriteRequest?.expectedRevision,
+        'attachment-sha',
       );
       expect(provider.lastAttachmentWriteRequest?.allowLfsTrackedWrite, isTrue);
       expect(
@@ -4772,6 +4776,15 @@ class _FakeReleaseAttachmentProvider
   Future<RepositoryAttachmentWriteResult> writeAttachment(
     RepositoryAttachmentWriteRequest request,
   ) async {
+    if (enforceExistingRevisionOnWrite &&
+        (files.containsKey(request.path) ||
+            binaryFiles.containsKey(request.path)) &&
+        (request.expectedRevision?.isNotEmpty != true)) {
+      throw TrackStateProviderException(
+        'Cannot save ${request.path} because it changed in the current branch. '
+        'Expected revision for existing attachment was not provided.',
+      );
+    }
     lastAttachmentWriteRequest = request;
     binaryFiles[request.path] = Uint8List.fromList(request.bytes);
     return RepositoryAttachmentWriteResult(

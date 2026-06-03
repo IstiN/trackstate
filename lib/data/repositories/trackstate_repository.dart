@@ -1136,11 +1136,16 @@ class ProviderBackedTrackStateRepository
     final attachmentMetadataPath = _attachmentMetadataPath(
       _issueRoot(currentIssue.storagePath),
     );
-    final existingRevision = await _existingArtifactRevision(
-      path: attachmentPath,
-      ref: writeBranch,
-      blobPaths: _snapshotBlobPaths,
-    );
+    final existingRevision = existingAttachment == null
+        ? await _existingArtifactRevision(
+            path: attachmentPath,
+            ref: writeBranch,
+            blobPaths: _snapshotBlobPaths,
+          )
+        : (await _provider.readAttachment(
+            attachmentPath,
+            ref: writeBranch,
+          )).revision;
     final metadataRevision = await _existingRevision(
       path: attachmentMetadataPath,
       ref: writeBranch,
