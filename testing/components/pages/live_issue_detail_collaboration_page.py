@@ -1428,6 +1428,64 @@ class LiveIssueDetailCollaborationPage:
     ) -> None:
         self._session.wait_for_text_absence("Replace attachment?", timeout_ms=timeout_ms)
 
+    def wait_for_attachment_upload_completion(
+        self,
+        attachment_name: str,
+        *,
+        expected_size_label: str,
+        timeout_ms: int = 120_000,
+    ) -> str:
+        try:
+            payload = self._session.wait_for_function(
+                """
+                ({ attachmentName, downloadLabel, expectedSizeLabel }) => {
+                  const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+                  const bodyText = document.body?.innerText ?? '';
+                  const normalizedBody = normalize(bodyText);
+                  if (
+                    normalizedBody.includes('Replace attachment?')
+                    || normalizedBody.includes(`Selected attachment: ${attachmentName}`)
+                  ) {
+                    return null;
+                  }
+                  const hasDownloadAction = Array.from(
+                    document.querySelectorAll('flt-semantics[aria-label]')
+                  ).some((element) => {
+                    const label = element.getAttribute('aria-label') ?? '';
+                    const rect = element.getBoundingClientRect();
+                    const style = window.getComputedStyle(element);
+                    return label === downloadLabel
+                      && rect.width > 0
+                      && rect.height > 0
+                      && style.visibility !== 'hidden'
+                      && style.display !== 'none';
+                  });
+                  if (!hasDownloadAction) {
+                    return null;
+                  }
+                  return normalizedBody.includes(attachmentName)
+                    && normalizedBody.includes(expectedSizeLabel)
+                    ? bodyText
+                    : null;
+                }
+                """,
+                arg={
+                    "attachmentName": attachment_name,
+                    "downloadLabel": self._download_button_label(attachment_name),
+                    "expectedSizeLabel": expected_size_label,
+                },
+                timeout_ms=timeout_ms,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                "Step 6 failed: the hosted attachment replacement did not finish "
+                "updating the visible attachment row before verification.\n"
+                f"Expected attachment: {attachment_name}\n"
+                f"Expected size label: {expected_size_label}\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+        return str(payload)
+
     def attachment_row_text(self, attachment_name: str, *, timeout_ms: int = 30_000) -> str:
         download_label = self._download_button_label(attachment_name)
         self._session.wait_for_function(

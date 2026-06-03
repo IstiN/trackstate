@@ -268,6 +268,10 @@ def _run_live_ui_flow(
             action="Confirm the replacement dialog and complete the overwrite.",
             observed=dialog_text,
         )
+        page.wait_for_attachment_upload_completion(
+            ATTACHMENT_NAME,
+            expected_size_label=f"{len(REPLACEMENT_ATTACHMENT_BYTES)} B",
+        )
 
         updated_row_text = page.attachment_row_text(ATTACHMENT_NAME)
         _scroll_download_button_into_view(tracker_page.session, ATTACHMENT_NAME)
