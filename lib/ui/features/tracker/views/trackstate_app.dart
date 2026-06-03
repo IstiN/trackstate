@@ -12408,6 +12408,7 @@ class _IssueDetailState extends State<_IssueDetail> {
       return;
     }
     if (inspection.existingAttachment != null) {
+      var replaceConfirmed = false;
       final confirmed = await showDialog<bool>(
         context: context,
         builder: (context) {
@@ -12424,14 +12425,17 @@ class _IssueDetailState extends State<_IssueDetail> {
                 child: Text(l10n.keepCurrentAttachment),
               ),
               FilledButton(
-                onPressed: () => Navigator.of(context).pop(true),
+                onPressed: () {
+                  replaceConfirmed = true;
+                  Navigator.of(context).pop(true);
+                },
                 child: Text(l10n.replaceAttachmentAction),
               ),
             ],
           );
         },
       );
-      if (confirmed != true) {
+      if (confirmed != true && !replaceConfirmed) {
         return;
       }
     }
