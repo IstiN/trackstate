@@ -36,6 +36,12 @@ from testing.core.interfaces.web_app_session import (
     WebAppTimeoutError,
 )
 
+_CHROMIUM_FOREGROUND_TIMING_ARGS = [
+    "--disable-background-timer-throttling",
+    "--disable-renderer-backgrounding",
+    "--disable-backgrounding-occluded-windows",
+]
+
 
 class PlaywrightWebAppSession(WebAppSession):
     def __init__(self, page: Page) -> None:
@@ -995,7 +1001,10 @@ class PlaywrightWebAppRuntime(AbstractContextManager[PlaywrightWebAppSession]):
 
     def __enter__(self) -> PlaywrightWebAppSession:
         self._playwright = sync_playwright().start()
-        self._browser = self._playwright.chromium.launch(headless=True)
+        self._browser = self._playwright.chromium.launch(
+            headless=True,
+            args=_CHROMIUM_FOREGROUND_TIMING_ARGS,
+        )
         self._context = self._browser.new_context(
             viewport={
                 "width": self._viewport_width,
@@ -1037,7 +1046,10 @@ class PlaywrightStoredTokenWebAppRuntime(
 
     def __enter__(self) -> PlaywrightWebAppSession:
         self._playwright = sync_playwright().start()
-        self._browser = self._playwright.chromium.launch(headless=True)
+        self._browser = self._playwright.chromium.launch(
+            headless=True,
+            args=_CHROMIUM_FOREGROUND_TIMING_ARGS,
+        )
         self._context = self._browser.new_context(
             viewport={
                 "width": self._viewport_width,
