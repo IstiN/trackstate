@@ -3023,7 +3023,7 @@ Nested release-backed attachment issue.
   );
 
   test(
-    'provider-backed repository migrates duplicate hosted LFS replacements to GitHub Releases metadata',
+    'provider-backed repository overwrites duplicate repository-path attachments even when the name matches LFS attributes',
     () async {
       final provider = _FakeReleaseAttachmentProvider(
         permission: const RepositoryPermission(
@@ -3126,23 +3126,24 @@ Hosted repository-path attachment issue.
         bytes: Uint8List.fromList(utf8.encode('replacement attachment')),
       );
 
-      expect(provider.lastAttachmentWriteRequest, isNull);
       expect(
-        provider.binaryFiles.containsKey(
-          'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
-        ),
-        isFalse,
+        provider.lastAttachmentWriteRequest?.path,
+        'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
+      );
+      expect(provider.lastAttachmentWriteRequest?.allowLfsTrackedWrite, isTrue);
+      expect(
+        provider.binaryFiles['DEMO/DEMO-1/DEMO-2/attachments/manual.pdf'],
+        Uint8List.fromList(utf8.encode('replacement attachment')),
       );
       expect(updated.attachments, hasLength(1));
       expect(
         updated.attachments.single.storageBackend,
-        AttachmentStorageMode.githubReleases,
+        AttachmentStorageMode.repositoryPath,
       );
       expect(
-        updated.attachments.single.githubReleaseTag,
-        'trackstate-attachments-DEMO-2',
+        updated.attachments.single.repositoryPath,
+        updated.attachments.single.storagePath,
       );
-      expect(updated.attachments.single.githubReleaseAssetName, 'manual.pdf');
       final metadata =
           jsonDecode(provider.files['DEMO/DEMO-1/DEMO-2/attachments.json']!)
               as List<Object?>;
@@ -3155,10 +3156,9 @@ Hosted repository-path attachment issue.
           'author': 'demo-user',
           'createdAt': updated.attachments.single.createdAt,
           'storagePath': 'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
-          'revisionOrOid': '84',
-          'storageBackend': 'github-releases',
-          'githubReleaseTag': 'trackstate-attachments-DEMO-2',
-          'githubReleaseAssetName': 'manual.pdf',
+          'revisionOrOid': 'attachment-sha',
+          'storageBackend': 'repository-path',
+          'repositoryPath': 'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
         },
       ]);
     },

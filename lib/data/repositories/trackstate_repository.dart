@@ -1123,6 +1123,10 @@ class ProviderBackedTrackStateRepository
     final existingAttachment = currentIssue.attachments
         .where((candidate) => candidate.storagePath == attachmentPath)
         .firstOrNull;
+    final replacesRepositoryPathAttachment =
+        attachmentStorage.mode == AttachmentStorageMode.repositoryPath &&
+        existingAttachment?.storageBackend ==
+            AttachmentStorageMode.repositoryPath;
     final preserveRepositoryPathReplacement =
         attachmentStorage.mode == AttachmentStorageMode.githubReleases &&
         !permission.supportsReleaseAttachmentWrites &&
@@ -1148,6 +1152,7 @@ class ProviderBackedTrackStateRepository
         existingAttachment?.storageBackend ==
             AttachmentStorageMode.repositoryPath &&
         lfsTracked &&
+        !replacesRepositoryPathAttachment &&
         permission.attachmentUploadMode == AttachmentUploadMode.noLfs &&
         permission.supportsReleaseAttachmentWrites;
     final prefersReleaseStorage =
@@ -1343,7 +1348,8 @@ class ProviderBackedTrackStateRepository
       return updatedIssue;
     }
     if (lfsTracked &&
-        permission.attachmentUploadMode == AttachmentUploadMode.noLfs) {
+        permission.attachmentUploadMode == AttachmentUploadMode.noLfs &&
+        !replacesRepositoryPathAttachment) {
       throw const TrackStateRepositoryException(
         'This repository session is download-only for Git LFS attachments.',
       );
@@ -1358,6 +1364,7 @@ class ProviderBackedTrackStateRepository
         message: 'Upload attachment to ${currentIssue.key}',
         branch: writeBranch,
         expectedRevision: existingRevision,
+        allowLfsTrackedWrite: replacesRepositoryPathAttachment,
       ),
     );
     final persistedAttachmentArtifact = await _provider.readAttachment(
