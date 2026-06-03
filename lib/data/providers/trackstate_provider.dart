@@ -549,6 +549,7 @@ class RepositoryAttachmentWriteRequest {
     required this.message,
     required this.branch,
     this.expectedRevision,
+    this.allowLfsTrackedWrite = false,
   });
 
   final String path;
@@ -556,6 +557,7 @@ class RepositoryAttachmentWriteRequest {
   final String message;
   final String branch;
   final String? expectedRevision;
+  final bool allowLfsTrackedWrite;
 }
 
 class RepositoryAttachmentWriteResult {
