@@ -114,6 +114,13 @@ def main() -> None:
 
         failures = _failed_steps(result)
         if failures:
+            if result.get("failure_kind") == "setup":
+                error = AssertionError("\n".join(failures))
+                result["error"] = f"AssertionError: {error}"
+                result["traceback"] = str(error)
+                _write_blocked_outputs(result)
+                print("TS-909 blocked")
+                return
             raise AssertionError("\n".join(failures))
 
         _write_pass_outputs(result)
@@ -896,8 +903,31 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
 
 
+def _write_blocked_outputs(result: dict[str, object]) -> None:
+    error = str(result.get("error", "AssertionError: TS-909 blocked"))
+    BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
+    RESULT_PATH.write_text(
+        json.dumps(
+            {
+                "status": "blocked",
+                "passed": 0,
+                "failed": 0,
+                "skipped": 1,
+                "summary": "0 passed, 0 failed, 1 blocked",
+                "error": error,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=False), encoding="utf-8")
+    PR_BODY_PATH.write_text(_pr_body(result, passed=False), encoding="utf-8")
+    RESPONSE_PATH.write_text(_response_summary(result, passed=False), encoding="utf-8")
+
+
 def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
-    status = "PASSED" if passed else "FAILED"
+    status = _outcome_status(result, passed=passed, jira=True)
+    failure_kind = str(result.get("failure_kind", "product"))
     lines = [
         f"h3. {TICKET_KEY} {status}",
         "",
@@ -915,7 +945,15 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         ),
         "",
         "*Observed result*",
-        "* Matched the expected result." if passed else "* Did not match the expected result.",
+        (
+            "* Matched the expected result."
+            if passed
+            else (
+                "* Blocked before full verification: the automation needs an authenticated GitHub browser session to inspect the live PR compose description body."
+                if failure_kind == "setup"
+                else "* Did not match the expected result."
+            )
+        ),
         (
             f"* Environment: repository {{{{{result['repository']}}}}}, branch "
             f"{{{{{result.get('default_branch', result.get('expected_default_branch', 'main'))}}}}}, "
@@ -944,7 +982,8 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
 
 
 def _pr_body(result: dict[str, object], *, passed: bool) -> str:
-    status = "Passed" if passed else "Failed"
+    status = _outcome_status(result, passed=passed, jira=False).title()
+    failure_kind = str(result.get("failure_kind", "product"))
     lines = [
         f"## {TICKET_KEY} {status}",
         "",
@@ -958,7 +997,15 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
         "- When repository evidence already proved the template was missing, opened the live GitHub file page for the canonical template path and checked the reviewer-visible content.",
         "",
         "### Observed result",
-        "- Matched the expected result." if passed else "- Did not match the expected result.",
+        (
+            "- Matched the expected result."
+            if passed
+            else (
+                "- Blocked before full verification: the automation needs an authenticated GitHub browser session to inspect the live PR compose description body."
+                if failure_kind == "setup"
+                else "- Did not match the expected result."
+            )
+        ),
         (
             f"- Environment: repository `{result['repository']}`, branch "
             f"`{result.get('default_branch', result.get('expected_default_branch', 'main'))}`, "
@@ -987,7 +1034,7 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
 
 
 def _response_summary(result: dict[str, object], *, passed: bool) -> str:
-    status = "PASSED" if passed else "FAILED"
+    status = _outcome_status(result, passed=passed, jira=False)
     failure_kind = str(result.get("failure_kind", "product"))
     lines = [
         f"# {TICKET_KEY} {status}",
@@ -1018,6 +1065,14 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
             ]
         )
     return "\n".join(lines) + "\n"
+
+
+def _outcome_status(result: dict[str, object], *, passed: bool, jira: bool) -> str:
+    if passed:
+        return "PASSED" if jira else "PASSED"
+    if result.get("failure_kind") == "setup":
+        return "BLOCKED" if jira else "BLOCKED"
+    return "FAILED" if jira else "FAILED"
 
 
 def _bug_description(result: dict[str, object]) -> str:
@@ -1110,10 +1165,13 @@ def _step_lines(result: dict[str, object], *, jira: bool) -> list[str]:
         if not isinstance(item, dict):
             continue
         prefix = "*" if jira else "-"
+        status = str(item.get("status", "")).upper()
+        if status == "FAILED" and result.get("failure_kind") == "setup":
+            status = "BLOCKED"
         lines.append(
             (
                 f"{prefix} Step {item.get('step')} — "
-                f"{str(item.get('status', '')).upper()}: {item.get('action')}\n"
+                f"{status}: {item.get('action')}\n"
                 f"  Observed: {item.get('observed')}"
             )
         )
