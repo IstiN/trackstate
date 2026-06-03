@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import http.client
 import json
 import platform
 import sys
@@ -383,7 +384,10 @@ def main() -> None:
                     page.confirm_replace_attachment()
                     page.wait_for_replace_attachment_dialog_to_close(timeout_ms=60_000)
                     matched, repo_text_after_confirm = poll_until(
-                        probe=lambda: service.fetch_repo_text(attachment_path),
+                        probe=lambda: _fetch_repo_text_for_poll(
+                            service,
+                            attachment_path,
+                        ),
                         is_satisfied=lambda text: text == REPLACEMENT_ATTACHMENT_TEXT,
                         timeout_seconds=90,
                         interval_seconds=3,
@@ -604,6 +608,16 @@ def _fetch_repo_text_observation(
     if repo_file is None:
         return False, f"<missing repository attachment at {path}>"
     return True, repo_file.content
+
+
+def _fetch_repo_text_for_poll(
+    service: LiveSetupRepositoryService,
+    path: str,
+) -> str:
+    try:
+        return service.fetch_repo_text(path)
+    except (http.client.RemoteDisconnected, urllib.error.URLError) as error:
+        return f"<transient GitHub read failure: {type(error).__name__}: {error}>"
 
 
 def _attachment_upload_controls_failure_observation(
