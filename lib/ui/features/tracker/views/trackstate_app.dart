@@ -12389,9 +12389,11 @@ class _IssueDetailState extends State<_IssueDetail> {
     if (selectedAttachment == null) {
       return;
     }
+    final viewModel = widget.viewModel;
+    final issue = widget.issue;
     final l10n = AppLocalizations.of(context)!;
-    final inspection = await widget.viewModel.inspectIssueAttachmentUpload(
-      widget.issue,
+    final inspection = await viewModel.inspectIssueAttachmentUpload(
+      issue,
       selectedAttachment.name,
     );
     if (!mounted) {
@@ -12429,12 +12431,12 @@ class _IssueDetailState extends State<_IssueDetail> {
           );
         },
       );
-      if (!mounted || confirmed != true) {
+      if (confirmed != true) {
         return;
       }
     }
-    final success = await widget.viewModel.uploadIssueAttachment(
-      issue: widget.issue,
+    final success = await viewModel.uploadIssueAttachment(
+      issue: issue,
       name: selectedAttachment.name,
       bytes: selectedAttachment.bytes,
     );
