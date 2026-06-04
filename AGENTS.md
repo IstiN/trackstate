@@ -25,3 +25,29 @@ A direct CodeGraph answer is a handful of calls; a grep/read exploration is doze
 At the start of a session, ask the user if they'd like to initialize CodeGraph:
 
 "I notice this project doesn't have CodeGraph initialized. Would you like me to run `codegraph init -i` to build a code knowledge graph?"
+
+---
+
+## 📦 Repomix Code Snapshots
+
+Use **repomix** to generate a full-repo overview or targeted code snapshots for investigation, onboarding, or feeding context to an LLM.
+
+- **Install** (one-time): `npm install -g repomix`
+- **Full project snapshot**:
+  ```bash
+  repomix .
+  ```
+  Output: `snapshots/repomix-output.xml`
+- **Specific files** (e.g., after a grep/codegraph search):
+  ```bash
+  echo 'src/some_file.dart' | repomix --stdin --compress --output snapshots/target.xml
+  ```
+- **Multiple files**:
+  ```bash
+  printf 'lib/a.dart\nlib/b.dart\n' | repomix --stdin --compress --output snapshots/target.xml
+  ```
+
+> **Tips**:
+> - `--compress` uses Tree-sitter to keep signatures and replace method bodies with `⋮----`, significantly reducing token count.
+> - Always use `--stdin` for specific file lists — multiple `--include` flags are unreliable.
+> - `snapshots/` is `.gitignore`d — never commit generated XML files.
