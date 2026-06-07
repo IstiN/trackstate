@@ -42,6 +42,7 @@ import 'trackstate_app_types.dart';
 import 'trackstate_app_helpers.dart';
 import 'widgets/message_banner.dart';
 import 'widgets/access_callout.dart';
+import 'widgets/startup_recovery_view.dart';
 import 'widgets/ordered_focus_action.dart';
 
 export 'trackstate_app_types.dart';
@@ -3176,9 +3177,14 @@ class _TrackerHome extends StatelessWidget {
         return Scaffold(
           backgroundColor: colors.page,
           body: SafeArea(
-            child: _StartupRecoveryView(
+            child: StartupRecoveryView(
               viewModel: viewModel,
               onRetryStartupRecovery: onRetryStartupRecovery,
+              secondaryActionLabel:
+                  viewModel.supportsGitHubAuth ? l10n.connectGitHub : null,
+              onSecondaryAction: viewModel.supportsGitHubAuth
+                  ? () => _showRepositoryAccessDialog(context, viewModel)
+                  : null,
             ),
           ),
         );
@@ -6807,38 +6813,6 @@ String _initialsFromText(String value) {
       .toUpperCase();
 }
 
-String _startupRecoveryTitle(
-  AppLocalizations l10n,
-  TrackerStartupRecovery recovery,
-) {
-  return switch (recovery.kind) {
-    TrackerStartupRecoveryKind.githubRateLimit =>
-      l10n.startupRateLimitRecoveryTitle,
-    TrackerStartupRecoveryKind.hostedBootstrapIndex =>
-      l10n.startupHostedBootstrapIndexRecoveryTitle,
-  };
-}
-
-String _startupRecoveryMessage(
-  AppLocalizations l10n,
-  TrackerViewModel viewModel,
-) {
-  final recovery = viewModel.startupRecovery;
-  if (recovery == null) {
-    return '';
-  }
-  return switch (recovery.kind) {
-    TrackerStartupRecoveryKind.githubRateLimit =>
-      viewModel.snapshot == null
-          ? l10n.startupRateLimitRecoveryBlockingMessage
-          : l10n.startupRateLimitRecoveryShellMessage,
-    TrackerStartupRecoveryKind.hostedBootstrapIndex =>
-      recovery.detail?.trim().isNotEmpty == true
-          ? recovery.detail!
-          : l10n.startupHostedBootstrapIndexRecoveryMessage,
-  };
-}
-
 class _RepositoryAccessBanner extends StatelessWidget {
   const _RepositoryAccessBanner({required this.viewModel});
 
@@ -6873,69 +6847,6 @@ class _RepositoryAccessBanner extends StatelessWidget {
               )
             : () => _showRepositoryAccessDialog(context, viewModel),
         actionTraversalOrderBase: 11,
-      ),
-    );
-  }
-}
-
-class _StartupRecoveryView extends StatelessWidget {
-  const _StartupRecoveryView({
-    required this.viewModel,
-    required this.onRetryStartupRecovery,
-  });
-
-  final TrackerViewModel viewModel;
-  final Future<void> Function() onRetryStartupRecovery;
-
-  @override
-  Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context)!;
-    final recovery = viewModel.startupRecovery;
-    if (recovery == null) {
-      return const SizedBox.shrink();
-    }
-    return Center(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 720),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Semantics(
-                header: true,
-                child: Text(
-                  l10n.appTitle,
-                  style: Theme.of(context).textTheme.headlineMedium,
-                ),
-              ),
-              const SizedBox(height: 16),
-              if (viewModel.message != null) ...[
-                MessageBanner(
-                  message: viewModel.message!,
-                  onDismiss: viewModel.dismissMessage,
-                ),
-                const SizedBox(height: 12),
-              ],
-              AccessCallout(
-                semanticLabel: l10n.startupRecovery,
-                title: _startupRecoveryTitle(l10n, recovery),
-                message: _startupRecoveryMessage(l10n, viewModel),
-                primaryActionLabel: l10n.retryStartup,
-                onPrimaryAction: () {
-                  unawaited(onRetryStartupRecovery());
-                },
-                secondaryActionLabel: viewModel.supportsGitHubAuth
-                    ? l10n.connectGitHub
-                    : null,
-                onSecondaryAction: viewModel.supportsGitHubAuth
-                    ? () => _showRepositoryAccessDialog(context, viewModel)
-                    : null,
-              ),
-            ],
-          ),
-        ),
       ),
     );
   }
@@ -7817,8 +7728,8 @@ class _SettingsState extends State<_Settings> {
         ] else if (widget.viewModel.startupRecovery case final recovery?) ...[
           AccessCallout(
             semanticLabel: l10n.startupRecovery,
-            title: _startupRecoveryTitle(l10n, recovery),
-            message: _startupRecoveryMessage(l10n, widget.viewModel),
+            title: startupRecoveryTitle(l10n, recovery),
+            message: startupRecoveryMessage(l10n, widget.viewModel),
             primaryActionLabel: l10n.retry,
             onPrimaryAction: () {
               unawaited(widget.onRetryStartupRecovery());
