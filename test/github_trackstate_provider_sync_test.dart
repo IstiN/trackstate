@@ -4,7 +4,7 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
-import 'package:trackstate/data/providers/github/github_auth_probe_stub.dart';
+import 'package:trackstate/data/providers/github/github_auth_probe.dart';
 import 'package:trackstate/data/providers/github/github_trackstate_provider.dart';
 import 'package:trackstate/data/providers/trackstate_provider.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
