@@ -47,26 +47,10 @@ import 'widgets/settings_text_field.dart';
 import 'widgets/settings_editors.dart';
 export 'trackstate_app_types.dart';
 export 'trackstate_app_helpers.dart';
-part 'trackstate_app_widgets.dart';
-typedef _HostedWorkspaceOpener =
-    Future<void> Function({
-      required String repository,
-      required String defaultBranch,
-      required String writeBranch,
-    });
-typedef _HostedRepositoryCatalogLoader =
-    Future<List<HostedRepositoryReference>> Function();
-typedef _CreateIssueLauncher = void Function([_CreateIssuePrefill? prefill]);
-const _desktopWorkspaceSwitcherTapRegionGroupId = 'desktop-workspace-switcher';
-const _browserDesktopHeaderControlsSemanticsIdentifier =
-    'trackstate-desktop-header-controls';
-const _workspaceSwitcherTargetTypeHostedFocusId =
-    'trackstate-workspace-switcher-target-type-hosted';
-const _workspaceSwitcherTargetTypeLocalFocusId =
-    'trackstate-workspace-switcher-target-type-local';
-const _workspaceSwitcherSaveFocusId = 'trackstate-workspace-switcher-save';
-String _workspaceSwitcherActionFocusId(String workspaceId, String action) =>
-    'trackstate-workspace-switcher-$action-$workspaceId';
+part 'trackstate_app_widgets_main.dart';
+part 'trackstate_app_widgets_settings.dart';
+part 'trackstate_app_widgets_dialogs.dart';
+
 class TrackStateApp extends StatefulWidget {
   const TrackStateApp({
     super.key,
@@ -104,7 +88,7 @@ class _TrackStateAppState extends State<TrackStateApp>
   late TrackerViewModel viewModel;
   bool _isCreateIssueVisible = false;
   bool _isDesktopWorkspaceSwitcherVisible = false;
-  _CreateIssuePrefill? _createIssuePrefill;
+  CreateIssuePrefill? _createIssuePrefill;
   String? _activeLocalGitConfigurationKey;
   String? _pendingLocalGitConfigurationKey;
   bool _workspaceProfilesReady = false;
@@ -2855,14 +2839,14 @@ class _TrackStateAppState extends State<TrackStateApp>
     orderedProfiles.addAll(profilesById.values);
     return orderedProfiles;
   }
-  void _openCreateIssue([_CreateIssuePrefill? prefill]) {
+  void _openCreateIssue([CreateIssuePrefill? prefill]) {
     if (_isCreateIssueVisible) {
       return;
     }
     setState(() {
       _isCreateIssueVisible = true;
       _createIssuePrefill =
-          prefill ?? _CreateIssuePrefill(originSection: viewModel.section);
+          prefill ?? CreateIssuePrefill(originSection: viewModel.section);
     });
   }
   void _closeCreateIssue() {
