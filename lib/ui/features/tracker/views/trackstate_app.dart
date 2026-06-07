@@ -43,6 +43,7 @@ import 'trackstate_app_helpers.dart';
 import 'widgets/message_banner.dart';
 import 'widgets/access_callout.dart';
 import 'widgets/startup_recovery_view.dart';
+import 'widgets/workspace_initialization_view.dart';
 import 'widgets/ordered_focus_action.dart';
 
 export 'trackstate_app_types.dart';
@@ -2998,7 +2999,7 @@ class _TrackStateAppState extends State<TrackStateApp>
           ],
           supportedLocales: AppLocalizations.supportedLocales,
           home: !_workspaceProfilesReady
-              ? _WorkspaceInitializationView(viewModel: viewModel)
+              ? WorkspaceInitializationView(viewModel: viewModel)
               : _showsWorkspaceOnboarding
               ? _pendingWorkspaceRestoreFailure != null &&
                         _workspaceState.hasProfiles
@@ -3386,27 +3387,6 @@ class _TrackerHome extends StatelessWidget {
               );
             },
           ),
-        ),
-      ),
-    );
-  }
-}
-
-class _WorkspaceInitializationView extends StatelessWidget {
-  const _WorkspaceInitializationView({required this.viewModel});
-
-  final TrackerViewModel viewModel;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.ts;
-    final l10n = AppLocalizations.of(context)!;
-    return Scaffold(
-      backgroundColor: colors.page,
-      body: Center(
-        child: Semantics(
-          label: l10n.appTitle,
-          child: CircularProgressIndicator(color: colors.primary),
         ),
       ),
     );
