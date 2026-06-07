@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart'
-    show kIsWeb, listEquals, visibleForTesting;
+    show kIsWeb, listEquals;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -38,31 +38,12 @@ import '../services/browser_workspace_switcher_focus_monitor_stub.dart'
     as browser_workspace_switcher_focus_monitor;
 import '../services/workspace_directory_picker.dart';
 import '../view_models/tracker_view_model.dart';
+import 'trackstate_app_types.dart';
+import 'trackstate_app_helpers.dart';
 
-typedef LocalRepositoryLoader =
-    Future<TrackStateRepository> Function({
-      required String repositoryPath,
-      required String defaultBranch,
-      required String writeBranch,
-    });
-typedef BrowserLocalRepositoryLoader =
-    Future<TrackStateRepository?> Function({
-      required String repositoryPath,
-      required String defaultBranch,
-      required String writeBranch,
-    });
-typedef BrowserLocalRepositoryAccessRequester =
-    Future<TrackStateRepository?> Function({
-      required String repositoryPath,
-      required String defaultBranch,
-      required String writeBranch,
-    });
-typedef HostedRepositoryLoader =
-    Future<TrackStateRepository> Function({
-      required String repository,
-      required String defaultBranch,
-      required String writeBranch,
-    });
+export 'trackstate_app_types.dart';
+export 'trackstate_app_helpers.dart';
+
 typedef _HostedWorkspaceOpener =
     Future<void> Function({
       required String repository,
@@ -72,15 +53,6 @@ typedef _HostedWorkspaceOpener =
 typedef _HostedRepositoryCatalogLoader =
     Future<List<HostedRepositoryReference>> Function();
 typedef _CreateIssueLauncher = void Function([_CreateIssuePrefill? prefill]);
-typedef WorkspaceProfileCreator =
-    Future<void> Function(WorkspaceProfileInput input);
-
-typedef LocalRepositoryConfigurationApplier =
-    Future<void> Function({
-      required String repositoryPath,
-      required String defaultBranch,
-      required String writeBranch,
-    });
 
 const _desktopWorkspaceSwitcherTapRegionGroupId = 'desktop-workspace-switcher';
 const _browserDesktopHeaderControlsSemanticsIdentifier =
@@ -91,68 +63,8 @@ const _workspaceSwitcherTargetTypeLocalFocusId =
     'trackstate-workspace-switcher-target-type-local';
 const _workspaceSwitcherSaveFocusId = 'trackstate-workspace-switcher-save';
 
-@visibleForTesting
-bool shouldCloseDesktopWorkspaceSwitcherOnAccessibilityFocusLoss({
-  required bool compact,
-  required bool isWeb,
-}) {
-  return !compact && !isWeb;
-}
-
 String _workspaceSwitcherActionFocusId(String workspaceId, String action) =>
     'trackstate-workspace-switcher-$action-$workspaceId';
-
-@visibleForTesting
-bool shouldOpenProjectSettingsForStartupWithoutSavedWorkspaces({
-  required bool isWeb,
-  required bool hasRepository,
-  required bool hasProfiles,
-}) {
-  return isWeb && !hasRepository && !hasProfiles;
-}
-
-@visibleForTesting
-bool shouldShowWorkspaceOnboardingForStartup({
-  required bool isWeb,
-  required bool hasRepository,
-  required bool hasProfiles,
-}) {
-  return !isWeb && !hasRepository && !hasProfiles;
-}
-
-@visibleForTesting
-bool shouldActivateBrowserWorkspaceSwitcherRowSummary({
-  required bool isWeb,
-  required bool isActive,
-  required bool showOpenAction,
-  required bool hasSelectionAction,
-}) {
-  return hasSelectionAction;
-}
-
-@visibleForTesting
-String? resolveWorkspaceSwitcherSelectedWorkspaceId({
-  required String? currentSelectedWorkspaceId,
-  required WorkspaceProfilesState previousWorkspaces,
-  required WorkspaceProfilesState nextWorkspaces,
-}) {
-  final selectionStillExists =
-      currentSelectedWorkspaceId != null &&
-      nextWorkspaces.profiles.any(
-        (workspace) => workspace.id == currentSelectedWorkspaceId,
-      );
-  if (!selectionStillExists) {
-    return nextWorkspaces.activeWorkspaceId;
-  }
-  final activeWorkspaceChanged =
-      nextWorkspaces.activeWorkspaceId != previousWorkspaces.activeWorkspaceId;
-  final hasPendingSelection =
-      currentSelectedWorkspaceId != previousWorkspaces.activeWorkspaceId;
-  if (activeWorkspaceChanged && !hasPendingSelection) {
-    return nextWorkspaces.activeWorkspaceId;
-  }
-  return currentSelectedWorkspaceId;
-}
 
 class TrackStateApp extends StatefulWidget {
   const TrackStateApp({
