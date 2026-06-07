@@ -276,11 +276,12 @@ class _BrowserLocalWorkspaceSelectionsPersistence {
     return result as web.IDBDatabase;
   }
 
-  Future<JSAny?> _awaitRequestResult(
-    web.IDBRequest request, {
+  void _bindRequestCompletion({
+    required web.IDBRequest request,
+    required Completer<JSAny?> completer,
     required String operation,
+    void Function()? onBlocked,
   }) {
-    final completer = Completer<JSAny?>();
     request.onsuccess = ((web.Event _) {
       if (!completer.isCompleted) {
         completer.complete(request.result);
@@ -291,6 +292,25 @@ class _BrowserLocalWorkspaceSelectionsPersistence {
         completer.completeError(_requestError(request, operation: operation));
       }
     }).toJS;
+    if (onBlocked != null) {
+      (request as web.IDBOpenDBRequest).onblocked = ((web.Event _) {
+        if (!completer.isCompleted) {
+          onBlocked();
+        }
+      }).toJS;
+    }
+  }
+
+  Future<JSAny?> _awaitRequestResult(
+    web.IDBRequest request, {
+    required String operation,
+  }) {
+    final completer = Completer<JSAny?>();
+    _bindRequestCompletion(
+      request: request,
+      completer: completer,
+      operation: operation,
+    );
     return completer.future;
   }
 
@@ -333,23 +353,17 @@ class _BrowserLocalWorkspaceSelectionsPersistence {
     required String operation,
   }) {
     final completer = Completer<JSAny?>();
-    request.onsuccess = ((web.Event _) {
-      if (!completer.isCompleted) {
-        completer.complete(request.result);
-      }
-    }).toJS;
-    request.onerror = ((web.Event _) {
-      if (!completer.isCompleted) {
-        completer.completeError(_requestError(request, operation: operation));
-      }
-    }).toJS;
-    request.onblocked = ((web.Event _) {
-      if (!completer.isCompleted) {
-        completer.completeError(
-          StateError('Failed to $operation: IndexedDB request was blocked.'),
-        );
-      }
-    }).toJS;
+    _bindRequestCompletion(
+      request: request,
+      completer: completer,
+      operation: operation,
+      onBlocked:
+          () => completer.completeError(
+            StateError(
+              'Failed to $operation: IndexedDB request was blocked.',
+            ),
+          ),
+    );
     return completer.future;
   }
 

@@ -255,7 +255,7 @@ jobs:
 
           DMTOOLS_INTEGRATIONS: "jira,confluence,figma,ai,cli,file,github"
           PROMPT_CHUNK_TOKEN_LIMIT: ${{ vars.PROMPT_CHUNK_TOKEN_LIMIT }}
-          CLI_ALLOWED_COMMANDS: "find,ls,cat,mkdir,bash,git,gh,flutter,dart,python3,pytest,run-agent.sh,codegraph"
+          CLI_ALLOWED_COMMANDS: "find,ls,cat,mkdir,bash,git,gh,flutter,dart,python3,pytest,run-agent.sh,codegraph,npx,npm"
 
         run: |
           ENCODED_CONFIG="${EFFECTIVE_ENCODED_CONFIG}"

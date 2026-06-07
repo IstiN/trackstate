@@ -14,7 +14,7 @@ void main() {
       await _copyRepository(source: Directory.current, destination: tempDir);
 
       final targetFile = File(
-        '${tempDir.path}/lib/ui/features/tracker/views/trackstate_app.dart',
+        '${tempDir.path}/lib/ui/features/tracker/views/trackstate_app_widgets_workspace.dart',
       );
       final source = targetFile.readAsStringSync();
       final mutatedSource = source.replaceFirst(
@@ -33,7 +33,7 @@ void main() {
 
       final result = await Process.run(_flutterBinary(), <String>[
         'analyze',
-        'lib/ui/features/tracker/views/trackstate_app.dart',
+        'lib/ui/features/tracker/views/trackstate_app_widgets_workspace.dart',
       ], workingDirectory: tempDir.path);
 
       final output = '${result.stdout}${result.stderr}'.toLowerCase();

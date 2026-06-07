@@ -26,11 +26,26 @@ jobs:
           channel: stable
           cache: true
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: 'package.json'
+          cache: npm
+
       - name: Install dependencies
         run: flutter pub get
 
+      - name: Install Node dependencies
+        run: npm ci
+
       - name: Analyze
         run: flutter analyze
+
+      - name: Check code duplication
+        run: |
+          npx jscpd lib/ --min-lines 5 --min-tokens 50 \
+            --ignore "**/*.g.dart,**/*.freezed.dart,lib/l10n/generated/**,lib/**/*.gr.dart" \
+            --reporters console --threshold 1
 
       - name: Run tests and goldens
         run: flutter test

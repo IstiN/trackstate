@@ -141,54 +141,50 @@ class _TrackerHome extends StatelessWidget {
           child: LayoutBuilder(
             builder: (context, constraints) {
               final isCompact = constraints.maxWidth < 980;
+              final shellProps = _ShellProps(
+                viewModel: viewModel,
+                workspaces: workspaces,
+                authenticatedWorkspaceIds: authenticatedWorkspaceIds,
+                localWorkspaceAvailability: localWorkspaceAvailability,
+                workspaceSwitcherTriggerKey: workspaceSwitcherTriggerKey,
+                workspaceSwitcherTriggerFocusNode:
+                    workspaceSwitcherTriggerFocusNode,
+                desktopSearchFocusNode: desktopSearchFocusNode,
+                desktopSettingsFocusNode: desktopSettingsFocusNode,
+                workspaceSwitcherOverlayHostKey:
+                    workspaceSwitcherOverlayHostKey,
+                isCreateIssueVisible: isCreateIssueVisible,
+                isDesktopWorkspaceSwitcherVisible:
+                    isDesktopWorkspaceSwitcherVisible,
+                desktopWorkspaceSwitcherPanelRect:
+                    desktopWorkspaceSwitcherPanelRect,
+                desktopWorkspaceSwitcherContent:
+                    desktopWorkspaceSwitcherContent,
+                onOpenCreateIssue: onOpenCreateIssue,
+                onOpenWorkspaceSwitcher: onOpenWorkspaceSwitcher,
+                onCloseDesktopWorkspaceSwitcher:
+                    onCloseDesktopWorkspaceSwitcher,
+                onCloseCreateIssue: onCloseCreateIssue,
+                createIssuePrefill: createIssuePrefill,
+                onOpenWorkspaceOnboarding: onOpenWorkspaceOnboarding,
+                canOpenWorkspaceOnboarding: canOpenWorkspaceOnboarding,
+                onApplyLocalGitConfiguration: onApplyLocalGitConfiguration,
+                onApplyHostedConfiguration: onApplyHostedConfiguration,
+                onSelectWorkspace: onSelectWorkspace,
+                onDeleteWorkspace: onDeleteWorkspace,
+                onMoveWorkspaceSelection: onMoveWorkspaceSelection,
+                onFocusActiveWorkspaceSwitcherRow:
+                    onFocusActiveWorkspaceSwitcherRow,
+                workspaceRestoreFailure: workspaceRestoreFailure,
+                onRetryStartupRecovery: onRetryStartupRecovery,
+                onRetryWorkspaceRestore: onRetryWorkspaceRestore,
+                attachmentPicker: attachmentPicker,
+              );
               return Scaffold(
                 backgroundColor: colors.page,
                 body: SafeArea(
                   child: isCompact
-                      ? _MobileShell(
-                          viewModel: viewModel,
-                          workspaces: workspaces,
-                          authenticatedWorkspaceIds: authenticatedWorkspaceIds,
-                          localWorkspaceAvailability:
-                              localWorkspaceAvailability,
-                          workspaceSwitcherTriggerKey:
-                              workspaceSwitcherTriggerKey,
-                          workspaceSwitcherTriggerFocusNode:
-                              workspaceSwitcherTriggerFocusNode,
-                          desktopSearchFocusNode: desktopSearchFocusNode,
-                          desktopSettingsFocusNode: desktopSettingsFocusNode,
-                          workspaceSwitcherOverlayHostKey:
-                              workspaceSwitcherOverlayHostKey,
-                          isCreateIssueVisible: isCreateIssueVisible,
-                          isDesktopWorkspaceSwitcherVisible:
-                              isDesktopWorkspaceSwitcherVisible,
-                          desktopWorkspaceSwitcherPanelRect:
-                              desktopWorkspaceSwitcherPanelRect,
-                          desktopWorkspaceSwitcherContent:
-                              desktopWorkspaceSwitcherContent,
-                          onOpenCreateIssue: onOpenCreateIssue,
-                          onOpenWorkspaceSwitcher: onOpenWorkspaceSwitcher,
-                          onCloseDesktopWorkspaceSwitcher:
-                              onCloseDesktopWorkspaceSwitcher,
-                          onCloseCreateIssue: onCloseCreateIssue,
-                          createIssuePrefill: createIssuePrefill,
-                          onOpenWorkspaceOnboarding: onOpenWorkspaceOnboarding,
-                          canOpenWorkspaceOnboarding:
-                              canOpenWorkspaceOnboarding,
-                          onApplyLocalGitConfiguration:
-                              onApplyLocalGitConfiguration,
-                          onApplyHostedConfiguration:
-                              onApplyHostedConfiguration,
-                          onSelectWorkspace: onSelectWorkspace,
-                          onDeleteWorkspace: onDeleteWorkspace,
-                          onMoveWorkspaceSelection: onMoveWorkspaceSelection,
-                          onFocusActiveWorkspaceSwitcherRow:
-                              onFocusActiveWorkspaceSwitcherRow,
-                          workspaceRestoreFailure: workspaceRestoreFailure,
-                          onRetryStartupRecovery: onRetryStartupRecovery,
-                          onRetryWorkspaceRestore: onRetryWorkspaceRestore,
-                          attachmentPicker: attachmentPicker,
-                        )
+                      ? _AdaptiveShell(compact: true, props: shellProps)
                       : _BrowserDesktopPrimaryNavigationTabOrderBinder(
                           enabled: !isDesktopWorkspaceSwitcherVisible,
                           orderedTargets: [
@@ -230,51 +226,9 @@ class _TrackerHome extends StatelessWidget {
                               l10n.searchIssues,
                             ),
                           ],
-                          child: _DesktopShell(
-                            viewModel: viewModel,
-                            workspaces: workspaces,
-                            authenticatedWorkspaceIds:
-                                authenticatedWorkspaceIds,
-                            localWorkspaceAvailability:
-                                localWorkspaceAvailability,
-                            workspaceSwitcherTriggerKey:
-                                workspaceSwitcherTriggerKey,
-                            workspaceSwitcherTriggerFocusNode:
-                                workspaceSwitcherTriggerFocusNode,
-                            desktopSearchFocusNode: desktopSearchFocusNode,
-                            desktopSettingsFocusNode: desktopSettingsFocusNode,
-                            workspaceSwitcherOverlayHostKey:
-                                workspaceSwitcherOverlayHostKey,
-                            isCreateIssueVisible: isCreateIssueVisible,
-                            isDesktopWorkspaceSwitcherVisible:
-                                isDesktopWorkspaceSwitcherVisible,
-                            desktopWorkspaceSwitcherPanelRect:
-                                desktopWorkspaceSwitcherPanelRect,
-                            desktopWorkspaceSwitcherContent:
-                                desktopWorkspaceSwitcherContent,
-                            onOpenCreateIssue: onOpenCreateIssue,
-                            onOpenWorkspaceSwitcher: onOpenWorkspaceSwitcher,
-                            onCloseDesktopWorkspaceSwitcher:
-                                onCloseDesktopWorkspaceSwitcher,
-                            onCloseCreateIssue: onCloseCreateIssue,
-                            createIssuePrefill: createIssuePrefill,
-                            onOpenWorkspaceOnboarding:
-                                onOpenWorkspaceOnboarding,
-                            canOpenWorkspaceOnboarding:
-                                canOpenWorkspaceOnboarding,
-                            onApplyLocalGitConfiguration:
-                                onApplyLocalGitConfiguration,
-                            onApplyHostedConfiguration:
-                                onApplyHostedConfiguration,
-                            onSelectWorkspace: onSelectWorkspace,
-                            onDeleteWorkspace: onDeleteWorkspace,
-                            onMoveWorkspaceSelection: onMoveWorkspaceSelection,
-                            onFocusActiveWorkspaceSwitcherRow:
-                                onFocusActiveWorkspaceSwitcherRow,
-                            workspaceRestoreFailure: workspaceRestoreFailure,
-                            onRetryStartupRecovery: onRetryStartupRecovery,
-                            onRetryWorkspaceRestore: onRetryWorkspaceRestore,
-                            attachmentPicker: attachmentPicker,
+                          child: _AdaptiveShell(
+                            compact: false,
+                            props: shellProps,
                           ),
                         ),
                 ),

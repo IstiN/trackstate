@@ -5,11 +5,7 @@ const String _targetDir = 'lib';
 
 // Known legacy violations that are being addressed separately.
 // Do NOT add new entries here — extract widgets/helpers instead.
-const Set<String> _legacyViolationWhitelist = {
-  'lib/ui/features/tracker/view_models/tracker_view_model.dart',
-  'lib/cli/trackstate_cli.dart',
-  'lib/data/repositories/trackstate_repository.dart',
-};
+const Set<String> _legacyViolationWhitelist = {};
 
 void main() {
   final root = Directory(_targetDir);

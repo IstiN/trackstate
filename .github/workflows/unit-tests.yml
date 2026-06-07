@@ -59,9 +59,20 @@ jobs:
           channel: stable
           cache: true
 
+      - name: Setup Node.js
+        if: steps.changes.outputs.flutter == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: 'package.json'
+          cache: npm
+
       - name: Install dependencies
         if: steps.changes.outputs.flutter == 'true'
         run: flutter pub get
+
+      - name: Install Node dependencies
+        if: steps.changes.outputs.flutter == 'true'
+        run: npm ci
 
       - name: Analyze
         if: steps.changes.outputs.flutter == 'true'
@@ -74,6 +85,13 @@ jobs:
       - name: Check web safety
         if: steps.changes.outputs.flutter == 'true'
         run: dart run tool/check_web_safety.dart
+
+      - name: Check code duplication
+        if: steps.changes.outputs.flutter == 'true'
+        run: |
+          npx jscpd lib/ --min-lines 5 --min-tokens 50 \
+            --ignore "**/*.g.dart,**/*.freezed.dart,lib/l10n/generated/**,lib/**/*.gr.dart" \
+            --reporters console --threshold 1
 
       - name: Run unit and golden tests
         if: steps.changes.outputs.flutter == 'true'
@@ -140,7 +158,7 @@ jobs:
         if: steps.changes.outputs.accessibility == 'true'
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version-file: 'package.json'
           cache: npm
 
       - name: Validate accessibility workflow contract

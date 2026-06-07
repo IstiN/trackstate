@@ -91,21 +91,8 @@ class ProjectConfig {
     for (final definition in fieldDefinitions) definition.name,
   ];
 
-  List<String> get effectiveSupportedLocales {
-    final locales = <String>[];
-    final normalizedDefaultLocale = defaultLocale.trim();
-    if (normalizedDefaultLocale.isNotEmpty) {
-      locales.add(normalizedDefaultLocale);
-    }
-    for (final locale in supportedLocales) {
-      final normalized = locale.trim();
-      if (normalized.isEmpty || locales.contains(normalized)) {
-        continue;
-      }
-      locales.add(normalized);
-    }
-    return locales;
-  }
+  List<String> get effectiveSupportedLocales =>
+      resolveEffectiveSupportedLocales(defaultLocale, supportedLocales);
 
   ProjectSettingsCatalog get settingsCatalog => ProjectSettingsCatalog(
     defaultLocale: defaultLocale,

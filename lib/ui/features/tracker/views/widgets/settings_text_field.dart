@@ -68,6 +68,20 @@ class SettingsTextField extends StatelessWidget {
       return helperBaseStyle.copyWith(color: colors.muted);
     });
 
+    final style = helperBaseStyle.copyWith(
+      color: enabled ? colors.text : colors.muted,
+    );
+    final decoration = InputDecoration(
+      labelText: label,
+      helperText: helperText,
+      hintText: hintText,
+      errorText: errorText,
+      alignLabelWithHint: alignLabelWithHint,
+      labelStyle: labelStyle,
+      floatingLabelStyle: labelStyle,
+      helperStyle: helperStyle,
+    );
+
     if (kIsWeb && controller != null) {
       final textController = controller!;
       return ValueListenableBuilder<TextEditingValue>(
@@ -104,19 +118,8 @@ class SettingsTextField extends StatelessWidget {
                 onChanged: onChanged,
                 minLines: minLines,
                 maxLines: maxLines,
-                style: helperBaseStyle.copyWith(
-                  color: enabled ? colors.text : colors.muted,
-                ),
-                decoration: InputDecoration(
-                  labelText: label,
-                  helperText: helperText,
-                  hintText: hintText,
-                  errorText: errorText,
-                  alignLabelWithHint: alignLabelWithHint,
-                  labelStyle: labelStyle,
-                  floatingLabelStyle: labelStyle,
-                  helperStyle: helperStyle,
-                ),
+                style: style,
+                decoration: decoration,
               ),
             ),
           );
@@ -134,19 +137,8 @@ class SettingsTextField extends StatelessWidget {
       onChanged: onChanged,
       minLines: minLines,
       maxLines: maxLines,
-      style: helperBaseStyle.copyWith(
-        color: enabled ? colors.text : colors.muted,
-      ),
-      decoration: InputDecoration(
-        labelText: label,
-        helperText: helperText,
-        hintText: hintText,
-        errorText: errorText,
-        alignLabelWithHint: alignLabelWithHint,
-        labelStyle: labelStyle,
-        floatingLabelStyle: labelStyle,
-        helperStyle: helperStyle,
-      ),
+      style: style,
+      decoration: decoration,
     );
   }
 }

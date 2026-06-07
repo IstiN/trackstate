@@ -4,9 +4,13 @@
   "scripts": {
     "test:a11y": "playwright test"
   },
+  "engines": {
+    "node": "22"
+  },
   "devDependencies": {
     "@axe-core/playwright": "^4.10.2",
     "@playwright/test": "^1.54.2",
-    "http-server": "^14.1.1"
+    "http-server": "^14.1.1",
+    "jscpd": "^4.0.5"
   }
 }

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../../../ui/core/design/loading_feedback_surface.dart';
 import '../../../../../ui/core/trackstate_icons.dart';
 import '../../../../../ui/core/trackstate_theme.dart';
 import '../../../../../domain/models/trackstate_models.dart';
@@ -14,26 +15,13 @@ class LoadingPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.ts;
-    final backgroundColor = colors.loadingFeedbackBackground;
-    final foregroundColor = colors.loadingFeedbackForeground;
-    return Semantics(
-      container: true,
-      label: semanticLabel,
-      child: ExcludeSemantics(
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          decoration: BoxDecoration(
-            color: backgroundColor,
-            borderRadius: BorderRadius.circular(999),
-            border: Border.all(color: colors.border),
-          ),
-          child: Text(
-            label,
-            style: Theme.of(
-              context,
-            ).textTheme.labelSmall?.copyWith(color: foregroundColor),
-          ),
-        ),
+    return LoadingFeedbackSurface(
+      semanticLabel: semanticLabel,
+      child: Text(
+        label,
+        style: Theme.of(
+          context,
+        ).textTheme.labelSmall?.copyWith(color: colors.loadingFeedbackForeground),
       ),
     );
   }
@@ -52,43 +40,32 @@ class SectionLoadingBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.ts;
-    final backgroundColor = colors.loadingFeedbackBackground;
-    final foregroundColor = colors.loadingFeedbackForeground;
-    return Semantics(
-      container: true,
-      label: semanticLabel,
-      child: ExcludeSemantics(
-        child: Container(
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          decoration: BoxDecoration(
-            color: backgroundColor,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: colors.border),
+    return LoadingFeedbackSurface(
+      semanticLabel: semanticLabel,
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      borderRadius: 12,
+      child: Row(
+        children: [
+          Container(
+            width: 12,
+            height: 12,
+            decoration: BoxDecoration(
+              color: colors.primarySoft,
+              shape: BoxShape.circle,
+              border: Border.all(color: colors.primary),
+            ),
           ),
-          child: Row(
-            children: [
-              Container(
-                width: 12,
-                height: 12,
-                decoration: BoxDecoration(
-                  color: colors.primarySoft,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: colors.primary),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  label,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.labelMedium?.copyWith(color: foregroundColor),
-                ),
-              ),
-            ],
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              label,
+              style: Theme.of(
+                context,
+              ).textTheme.labelMedium?.copyWith(color: colors.loadingFeedbackForeground),
+            ),
           ),
-        ),
+        ],
       ),
     );
   }
