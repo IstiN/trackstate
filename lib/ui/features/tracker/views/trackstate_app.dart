@@ -40,6 +40,7 @@ import '../services/workspace_directory_picker.dart';
 import '../view_models/tracker_view_model.dart';
 import 'trackstate_app_types.dart';
 import 'trackstate_app_helpers.dart';
+import 'widgets/ordered_focus_action.dart';
 
 export 'trackstate_app_types.dart';
 export 'trackstate_app_helpers.dart';
@@ -7130,7 +7131,7 @@ class _AccessCallout extends StatelessWidget {
                 runSpacing: 8,
                 children: [
                   if (primaryActionLabel != null && onPrimaryAction != null)
-                    _OrderedFocusAction(
+                    OrderedFocusAction(
                       order: actionTraversalOrderBase,
                       child: OutlinedButton(
                         onPressed: onPrimaryAction,
@@ -7148,7 +7149,7 @@ class _AccessCallout extends StatelessWidget {
                       ),
                     ),
                   if (secondaryActionLabel != null && onSecondaryAction != null)
-                    _OrderedFocusAction(
+                    OrderedFocusAction(
                       order: actionTraversalOrderBase == null
                           ? null
                           : actionTraversalOrderBase! + 1,
@@ -7212,21 +7213,6 @@ ButtonStyle _warningCalloutSecondaryActionStyle(TrackStateColors colors) {
 }
 
 enum _AccessCalloutTone { warning, success }
-
-class _OrderedFocusAction extends StatelessWidget {
-  const _OrderedFocusAction({required this.child, this.order});
-
-  final Widget child;
-  final double? order;
-
-  @override
-  Widget build(BuildContext context) {
-    if (order == null) {
-      return child;
-    }
-    return FocusTraversalOrder(order: NumericFocusOrder(order!), child: child);
-  }
-}
 
 class _StartupRecoveryView extends StatelessWidget {
   const _StartupRecoveryView({
@@ -16147,7 +16133,7 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
                                       widget.issue.status.label,
                                 ),
                                 const SizedBox(height: 12),
-                                _OrderedFocusAction(
+                                OrderedFocusAction(
                                   order: 1,
                                   child: _DropdownCreateField(
                                     label: l10n.status,
@@ -16186,7 +16172,7 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
                                 ),
                                 if (showResolution) ...[
                                   const SizedBox(height: 12),
-                                  _OrderedFocusAction(
+                                  OrderedFocusAction(
                                     order: 2,
                                     child: _DropdownCreateField(
                                       label: resolutionLabel,
@@ -16219,7 +16205,7 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
                                   ),
                                 ],
                                 const SizedBox(height: 20),
-                                _OrderedFocusAction(
+                                OrderedFocusAction(
                                   order: 3,
                                   child: _SettingsTextField(
                                     fieldKey: _summaryFieldKey,
@@ -16242,7 +16228,7 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
                                   ),
                                 ),
                                 const SizedBox(height: 12),
-                                _OrderedFocusAction(
+                                OrderedFocusAction(
                                   order: 4,
                                   child: _SettingsTextField(
                                     label: l10n.description,
@@ -16254,7 +16240,7 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
                                   ),
                                 ),
                                 const SizedBox(height: 12),
-                                _OrderedFocusAction(
+                                OrderedFocusAction(
                                   order: 5,
                                   child: _DropdownCreateField(
                                     label: priorityLabel,
@@ -16284,7 +16270,7 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
                                   ),
                                 ),
                                 const SizedBox(height: 12),
-                                _OrderedFocusAction(
+                                OrderedFocusAction(
                                   order: 6,
                                   child: _SettingsTextField(
                                     label: assigneeLabel,
@@ -16294,7 +16280,7 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
                                   ),
                                 ),
                                 const SizedBox(height: 12),
-                                _OrderedFocusAction(
+                                OrderedFocusAction(
                                   order: 7,
                                   child: CallbackShortcuts(
                                     bindings: <ShortcutActivator, VoidCallback>{
@@ -16322,7 +16308,7 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
                                   ),
                                 ),
                                 const SizedBox(height: 16),
-                                _OrderedFocusAction(
+                                OrderedFocusAction(
                                   order: 8,
                                   child: CallbackShortcuts(
                                     bindings: <ShortcutActivator, VoidCallback>{
@@ -16369,7 +16355,7 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
                                   ),
                                 ),
                                 const SizedBox(height: 16),
-                                _OrderedFocusAction(
+                                OrderedFocusAction(
                                   order: 9,
                                   child: CallbackShortcuts(
                                     bindings: <ShortcutActivator, VoidCallback>{
@@ -16417,7 +16403,7 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
                                 ),
                                 if (!_isEpicType && !_isSubtaskType) ...[
                                   const SizedBox(height: 16),
-                                  _OrderedFocusAction(
+                                  OrderedFocusAction(
                                     order: 10,
                                     child: CallbackShortcuts(
                                       bindings:
@@ -16464,7 +16450,7 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
                                 ],
                                 if (_isSubtaskType) ...[
                                   const SizedBox(height: 16),
-                                  _OrderedFocusAction(
+                                  OrderedFocusAction(
                                     order: 10,
                                     child: CallbackShortcuts(
                                       bindings:
