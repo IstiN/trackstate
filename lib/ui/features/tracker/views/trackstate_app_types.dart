@@ -38,3 +38,5 @@ typedef LocalRepositoryConfigurationApplier =
       required String defaultBranch,
       required String writeBranch,
     });
+
+const double desktopTopBarIconSize = 14;

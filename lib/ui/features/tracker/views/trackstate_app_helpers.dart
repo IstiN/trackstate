@@ -1,4 +1,10 @@
+import 'package:flutter/semantics.dart';
+
 import '../../../../../domain/models/workspace_profile_models.dart';
+
+SemanticsSortKey? semanticsSortKey(double? sortOrder) {
+  return sortOrder == null ? null : OrdinalSortKey(sortOrder);
+}
 
 bool shouldCloseDesktopWorkspaceSwitcherOnAccessibilityFocusLoss({
   required bool compact,

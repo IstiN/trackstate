@@ -44,6 +44,7 @@ import 'widgets/message_banner.dart';
 import 'widgets/access_callout.dart';
 import 'widgets/startup_recovery_view.dart';
 import 'widgets/workspace_initialization_view.dart';
+import 'widgets/icon_button_surface.dart';
 import 'widgets/ordered_focus_action.dart';
 
 export 'trackstate_app_types.dart';
@@ -5583,7 +5584,7 @@ class _TopBar extends StatelessWidget {
                 if (iconOnlyActions)
                   orderedControl(
                     createIssueOrder,
-                    _IconButtonSurface(
+                    IconButtonSurface(
                       label: l10n.createIssue,
                       glyph: TrackStateIconGlyph.plus,
                       onPressed: openCreateIssue,
@@ -5611,7 +5612,7 @@ class _TopBar extends StatelessWidget {
                   if (iconOnlyActions)
                     orderedControl(
                       addWorkspaceOrder,
-                      _IconButtonSurface(
+                      IconButtonSurface(
                         label: l10n.addWorkspace,
                         glyph: TrackStateIconGlyph.repository,
                         onPressed: openWorkspaceOnboarding,
@@ -5710,7 +5711,7 @@ class _TopBar extends StatelessWidget {
                 const SizedBox(width: 8),
                 orderedControl(
                   themeToggleOrder ?? searchOrder + 1,
-                  _IconButtonSurface(
+                  IconButtonSurface(
                     label: viewModel.themePreference == ThemePreference.dark
                         ? l10n.lightTheme
                         : l10n.darkTheme,
@@ -5804,7 +5805,7 @@ class _TopBar extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(width: 8),
-                    _IconButtonSurface(
+                    IconButtonSurface(
                       label: _workspaceSyncLabel(l10n, viewModel),
                       glyph: TrackStateIconGlyph.sync,
                       onPressed: () =>
@@ -5923,7 +5924,7 @@ class _TopBar extends StatelessWidget {
                                     child: TrackStateIcon(
                                       TrackStateIconGlyph.search,
                                       color: colors.muted,
-                                      size: _desktopTopBarIconSize,
+                                      size: desktopTopBarIconSize,
                                       semanticLabel: l10n.searchIssues,
                                     ),
                                   ),
@@ -5978,7 +5979,7 @@ class _TopBar extends StatelessWidget {
 }
 
 const double _desktopTopBarControlHeight = 32;
-const double _desktopTopBarIconSize = 14;
+const double desktopTopBarIconSize = 14;
 const double _desktopTopBarAvatarRadius = _desktopTopBarControlHeight / 2;
 
 class _PreparedWorkspaceSwitch {
@@ -12265,7 +12266,7 @@ class _IssueDetailActionButtonState extends State<_IssueDetailActionButton> {
         focusable: widget.onPressed != null,
         focused: _effectiveFocusNode.hasFocus,
         label: widget.label,
-        sortKey: _semanticsSortKey(widget.sortOrder),
+        sortKey: semanticsSortKey(widget.sortOrder),
         onTap: widget.onPressed,
         child: ExcludeSemantics(child: child!),
       ),
@@ -13658,7 +13659,7 @@ class _PrimaryButton extends StatelessWidget {
       expanded: kIsWeb ? null : expanded,
       identifier: semanticsIdentifier,
       label: semanticLabel ?? label,
-      sortKey: _semanticsSortKey(semanticsSortOrder),
+      sortKey: semanticsSortKey(semanticsSortOrder),
       controlsNodes: controlsNodes,
       onTap: enabled ? onPressed : null,
       child: ExcludeSemantics(
@@ -13679,7 +13680,7 @@ class _PrimaryButton extends StatelessWidget {
             ),
             icon: TrackStateIcon(
               icon,
-              size: height == null ? 16 : _desktopTopBarIconSize,
+              size: height == null ? 16 : desktopTopBarIconSize,
               color: onPrimary,
             ),
             label: Text(label, style: TextStyle(color: onPrimary, height: 1)),
@@ -13785,7 +13786,7 @@ class _WorkspaceSwitcherTriggerButton extends StatelessWidget {
           TrackStateIcon(
             summary.icon,
             color: onPrimary,
-            size: compact ? 18 : _desktopTopBarIconSize,
+            size: compact ? 18 : desktopTopBarIconSize,
           ),
           const SizedBox(width: 8),
           Expanded(
@@ -13863,7 +13864,7 @@ class _WorkspaceSwitcherTriggerButton extends StatelessWidget {
           focusable: enabled,
           identifier: semanticsIdentifier,
           label: summary.semanticLabel,
-          sortKey: _semanticsSortKey(semanticsSortOrder),
+          sortKey: semanticsSortKey(semanticsSortOrder),
           controlsNodes: controlsNodes,
           onTap: enabled ? onPressed : null,
           child: browser_focusable_control.BrowserFocusableControl(
@@ -13887,7 +13888,7 @@ class _WorkspaceSwitcherTriggerButton extends StatelessWidget {
         expanded: expanded,
         identifier: semanticsIdentifier,
         label: summary.semanticLabel,
-        sortKey: _semanticsSortKey(semanticsSortOrder),
+        sortKey: semanticsSortKey(semanticsSortOrder),
         controlsNodes: controlsNodes,
         onTap: enabled ? onPressed : null,
         child: visualButton,
@@ -13922,7 +13923,7 @@ class _SecondaryButton extends StatelessWidget {
       button: true,
       identifier: semanticsIdentifier,
       label: label,
-      sortKey: _semanticsSortKey(semanticsSortOrder),
+      sortKey: semanticsSortKey(semanticsSortOrder),
       child: OutlinedButton.icon(
         key: buttonKey,
         onPressed: onPressed,
@@ -13933,93 +13934,6 @@ class _SecondaryButton extends StatelessWidget {
         ),
         icon: TrackStateIcon(icon, size: 16, color: colors.text),
         label: Text(label),
-      ),
-    );
-  }
-}
-
-class _IconButtonSurface extends StatelessWidget {
-  const _IconButtonSurface({
-    required this.label,
-    required this.glyph,
-    required this.onPressed,
-    this.size,
-    this.semanticsSortOrder,
-    this.semanticsIdentifier,
-  });
-
-  final String label;
-  final TrackStateIconGlyph glyph;
-  final VoidCallback? onPressed;
-  final double? size;
-  final double? semanticsSortOrder;
-  final String? semanticsIdentifier;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.ts;
-    final enabled = onPressed != null;
-    final controlSize = size ?? 40.0;
-    return Semantics(
-      button: true,
-      enabled: enabled,
-      focusable: enabled,
-      identifier: semanticsIdentifier,
-      label: label,
-      sortKey: _semanticsSortKey(semanticsSortOrder),
-      child: ExcludeSemantics(
-        child: SizedBox(
-          width: controlSize,
-          height: controlSize,
-          child: OutlinedButton(
-            onPressed: onPressed,
-            style: ButtonStyle(
-              animationDuration: Duration.zero,
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              padding: const WidgetStatePropertyAll(EdgeInsets.zero),
-              minimumSize: WidgetStatePropertyAll(Size.square(controlSize)),
-              maximumSize: WidgetStatePropertyAll(Size.square(controlSize)),
-              backgroundColor: WidgetStateProperty.resolveWith((states) {
-                if (states.contains(WidgetState.disabled)) {
-                  return colors.surfaceAlt.withValues(alpha: .72);
-                }
-                if (states.contains(WidgetState.pressed)) {
-                  return colors.primarySoft.withValues(alpha: .84);
-                }
-                if (states.contains(WidgetState.focused)) {
-                  return colors.primarySoft.withValues(alpha: .72);
-                }
-                if (states.contains(WidgetState.hovered)) {
-                  return colors.surfaceAlt;
-                }
-                return colors.surface;
-              }),
-              overlayColor: const WidgetStatePropertyAll(Colors.transparent),
-              side: WidgetStateProperty.resolveWith((states) {
-                if (states.contains(WidgetState.focused)) {
-                  return BorderSide(color: colors.primary, width: 2);
-                }
-                if (states.contains(WidgetState.hovered)) {
-                  return BorderSide(
-                    color: Color.alphaBlend(
-                      colors.primary.withValues(alpha: .24),
-                      colors.border,
-                    ),
-                  );
-                }
-                return BorderSide(color: colors.border);
-              }),
-              shape: WidgetStatePropertyAll(
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-              ),
-            ),
-            child: TrackStateIcon(
-              glyph,
-              color: enabled ? colors.text : colors.muted,
-              size: size == null ? 18 : _desktopTopBarIconSize,
-            ),
-          ),
-        ),
       ),
     );
   }
@@ -14059,9 +13973,6 @@ class _CompactActionIconButton extends StatelessWidget {
   }
 }
 
-SemanticsSortKey? _semanticsSortKey(double? sortOrder) {
-  return sortOrder == null ? null : OrdinalSortKey(sortOrder);
-}
 
 class _DropdownCreateField extends StatelessWidget {
   const _DropdownCreateField({
@@ -16153,7 +16064,7 @@ class _NavButton extends StatelessWidget {
         identifier: semanticsIdentifier,
         label: item.label,
         onTap: enabled ? onPressed : null,
-        sortKey: _semanticsSortKey(semanticsSortOrder),
+        sortKey: semanticsSortKey(semanticsSortOrder),
         child: CallbackShortcuts(
           bindings: onTabForward == null
               ? const <ShortcutActivator, VoidCallback>{}
@@ -16324,7 +16235,7 @@ class _SyncPill extends StatelessWidget {
       button: onPressed != null,
       container: true,
       label: resolvedSemanticLabel,
-      sortKey: _semanticsSortKey(semanticsSortOrder),
+      sortKey: semanticsSortKey(semanticsSortOrder),
       child: ExcludeSemantics(
         child: Material(
           color: Colors.transparent,
@@ -16349,7 +16260,7 @@ class _SyncPill extends StatelessWidget {
                   TrackStateIcon(
                     TrackStateIconGlyph.sync,
                     color: iconColor,
-                    size: height == null ? 16 : _desktopTopBarIconSize,
+                    size: height == null ? 16 : desktopTopBarIconSize,
                   ),
                   const SizedBox(width: 6),
                   Flexible(
