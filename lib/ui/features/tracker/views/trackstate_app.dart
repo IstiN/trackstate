@@ -12035,7 +12035,7 @@ class _IssueDetailState extends State<_IssueDetail> {
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _IssueTypeGlyph(issue.issueType),
+                  IssueTypeGlyph(issue.issueType),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
@@ -12091,7 +12091,7 @@ class _IssueDetailState extends State<_IssueDetail> {
                     ),
                   ),
                   _PriorityBadge(priority: issue.priority),
-                  for (final label in issue.labels) _Chip(label: label),
+                  for (final label in issue.labels) LabelChip(label: label),
                 ],
               ),
               const SizedBox(height: 18),
@@ -12493,7 +12493,7 @@ class _RecentActivity extends StatelessWidget {
               padding: const EdgeInsets.only(bottom: 12),
               child: Row(
                 children: [
-                  _IssueTypeGlyph(issue.issueType),
+                  IssueTypeGlyph(issue.issueType),
                   const SizedBox(width: 10),
                   Expanded(child: Text('${issue.key} · ${issue.summary}')),
                   Text(
@@ -12641,7 +12641,7 @@ class _IssueCard extends StatelessWidget {
                     children: [
                       Row(
                         children: [
-                          _IssueTypeGlyph(issue.issueType),
+                          IssueTypeGlyph(issue.issueType),
                           const SizedBox(width: 8),
                           Text(
                             issue.key,
@@ -12652,7 +12652,7 @@ class _IssueCard extends StatelessWidget {
                             ),
                           ),
                           const Spacer(),
-                          _Avatar(name: issue.assignee),
+                          Avatar(name: issue.assignee),
                         ],
                       ),
                       const SizedBox(height: 8),
@@ -12667,7 +12667,7 @@ class _IssueCard extends StatelessWidget {
                         spacing: 8,
                         runSpacing: 6,
                         children: [
-                          _Chip(label: issue.issueType.label),
+                          LabelChip(label: issue.issueType.label),
                           _PriorityBadge(priority: issue.priority),
                         ],
                       ),
@@ -12764,7 +12764,7 @@ class _IssueListRow extends StatelessWidget {
                     ExcludeSemantics(
                       child: Row(
                         children: [
-                          _IssueTypeGlyph(issue.issueType),
+                          IssueTypeGlyph(issue.issueType),
                           const SizedBox(width: 10),
                           SizedBox(
                             width: 86,
@@ -12796,7 +12796,7 @@ class _IssueListRow extends StatelessWidget {
                             ),
                           ),
                           const SizedBox(width: 8),
-                          _Avatar(name: issue.assignee),
+                          Avatar(name: issue.assignee),
                         ],
                       ),
                     ),
@@ -16873,7 +16873,7 @@ class _CommentBubble extends StatelessWidget {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _Avatar(name: comment.author),
+              Avatar(name: comment.author),
               const SizedBox(width: 10),
               Expanded(
                 child: Column(
@@ -16983,75 +16983,6 @@ class _PriorityBadge extends StatelessWidget {
     );
   }
 }
-
-class _Chip extends StatelessWidget {
-  const _Chip({required this.label});
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.ts;
-    return Pill(
-      label: label,
-      background: colors.surfaceAlt,
-      foreground: colors.muted,
-    );
-  }
-}
-class _IssueTypeGlyph extends StatelessWidget {
-  const _IssueTypeGlyph(this.type);
-
-  final IssueType type;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.ts;
-    final glyph = switch (type) {
-      IssueType.epic => TrackStateIconGlyph.epic,
-      IssueType.story => TrackStateIconGlyph.story,
-      IssueType.task => TrackStateIconGlyph.issue,
-      IssueType.subtask => TrackStateIconGlyph.subtask,
-      IssueType.bug => TrackStateIconGlyph.issue,
-    };
-    final tone = switch (type) {
-      IssueType.epic => colors.primary,
-      IssueType.story => colors.secondary,
-      IssueType.task => colors.accent,
-      IssueType.subtask => colors.muted,
-      IssueType.bug => colors.error,
-    };
-    return TrackStateIcon(glyph, color: tone, semanticLabel: type.label);
-  }
-}
-
-class _Avatar extends StatelessWidget {
-  const _Avatar({required this.name});
-
-  final String name;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.ts;
-    return Semantics(
-      label: name,
-      image: true,
-      child: CircleAvatar(
-        radius: 14,
-        backgroundColor: colors.primarySoft,
-        child: Text(
-          name.characters.first,
-          style: TextStyle(
-            color: colors.text,
-            fontSize: 11,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 class _SectionTitle extends StatelessWidget {
   const _SectionTitle(this.label);
 

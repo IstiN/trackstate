@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../../../ui/core/trackstate_icons.dart';
 import '../../../../../ui/core/trackstate_theme.dart';
+import '../../../../../domain/models/trackstate_models.dart';
 import '../../view_models/tracker_view_model.dart';
 
 class LoadingPill extends StatelessWidget {
@@ -309,4 +310,73 @@ class NavItem {
   final TrackerSection section;
   final TrackStateIconGlyph glyph;
   final String? semanticsIdentifier;
+}
+
+class LabelChip extends StatelessWidget {
+  const LabelChip({super.key, required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.ts;
+    return Pill(
+      label: label,
+      background: colors.surfaceAlt,
+      foreground: colors.muted,
+    );
+  }
+}
+
+class IssueTypeGlyph extends StatelessWidget {
+  const IssueTypeGlyph(this.type, {super.key});
+
+  final IssueType type;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.ts;
+    final glyph = switch (type) {
+      IssueType.epic => TrackStateIconGlyph.epic,
+      IssueType.story => TrackStateIconGlyph.story,
+      IssueType.task => TrackStateIconGlyph.issue,
+      IssueType.subtask => TrackStateIconGlyph.subtask,
+      IssueType.bug => TrackStateIconGlyph.issue,
+    };
+    final tone = switch (type) {
+      IssueType.epic => colors.primary,
+      IssueType.story => colors.secondary,
+      IssueType.task => colors.accent,
+      IssueType.subtask => colors.muted,
+      IssueType.bug => colors.error,
+    };
+    return TrackStateIcon(glyph, color: tone, semanticLabel: type.label);
+  }
+}
+
+class Avatar extends StatelessWidget {
+  const Avatar({super.key, required this.name});
+
+  final String name;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.ts;
+    return Semantics(
+      label: name,
+      image: true,
+      child: CircleAvatar(
+        radius: 14,
+        backgroundColor: colors.primarySoft,
+        child: Text(
+          name.characters.first,
+          style: TextStyle(
+            color: colors.text,
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ),
+    );
+  }
 }
