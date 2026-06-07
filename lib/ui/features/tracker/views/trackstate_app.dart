@@ -41,6 +41,7 @@ import '../view_models/tracker_view_model.dart';
 import 'trackstate_app_types.dart';
 import 'trackstate_app_helpers.dart';
 import 'widgets/message_banner.dart';
+import 'widgets/access_callout.dart';
 import 'widgets/ordered_focus_action.dart';
 
 export 'trackstate_app_types.dart';
@@ -6689,18 +6690,18 @@ String _attachmentsAccessMessage(
   };
 }
 
-_AccessCalloutTone _repositoryAccessCalloutTone(TrackerViewModel viewModel) {
+AccessCalloutTone _repositoryAccessCalloutTone(TrackerViewModel viewModel) {
   return viewModel.hostedRepositoryAccessMode ==
           HostedRepositoryAccessMode.writable
-      ? _AccessCalloutTone.success
-      : _AccessCalloutTone.warning;
+      ? AccessCalloutTone.success
+      : AccessCalloutTone.warning;
 }
 
-_AccessCalloutTone _attachmentStorageCalloutTone(TrackerViewModel viewModel) {
+AccessCalloutTone _attachmentStorageCalloutTone(TrackerViewModel viewModel) {
   return viewModel.hostedRepositoryAccessMode ==
           HostedRepositoryAccessMode.writable
-      ? _AccessCalloutTone.success
-      : _AccessCalloutTone.warning;
+      ? AccessCalloutTone.success
+      : AccessCalloutTone.warning;
 }
 
 String _attachmentStorageCalloutTitle(
@@ -6858,7 +6859,7 @@ class _RepositoryAccessBanner extends StatelessWidget {
     final l10n = AppLocalizations.of(context)!;
     return Padding(
       padding: const EdgeInsets.fromLTRB(8, 0, 12, 6),
-      child: _AccessCallout(
+      child: AccessCallout(
         semanticLabel: _repositoryAccessTitle(l10n, viewModel),
         title: _repositoryAccessTitle(l10n, viewModel),
         message: _repositoryAccessMessage(l10n, viewModel),
@@ -6876,221 +6877,6 @@ class _RepositoryAccessBanner extends StatelessWidget {
     );
   }
 }
-
-class _AccessCallout extends StatelessWidget {
-  const _AccessCallout({
-    required this.semanticLabel,
-    required this.title,
-    required this.message,
-    this.detailMessage,
-    this.tone = _AccessCalloutTone.warning,
-    this.sortOrder,
-    this.primaryActionLabel,
-    this.onPrimaryAction,
-    this.secondaryActionLabel,
-    this.onSecondaryAction,
-    this.actionTraversalOrderBase,
-  });
-
-  final String semanticLabel;
-  final String title;
-  final String message;
-  final String? detailMessage;
-  final _AccessCalloutTone tone;
-  final double? sortOrder;
-  final String? primaryActionLabel;
-  final VoidCallback? onPrimaryAction;
-  final String? secondaryActionLabel;
-  final VoidCallback? onSecondaryAction;
-  final double? actionTraversalOrderBase;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.ts;
-    final theme = Theme.of(context);
-    final accentColor = switch (tone) {
-      _AccessCalloutTone.warning => colors.accent,
-      _AccessCalloutTone.success => colors.success,
-    };
-    final usesLightWarningTreatment =
-        tone == _AccessCalloutTone.warning &&
-        theme.brightness == Brightness.light;
-    final contentColor = usesLightWarningTreatment
-        ? Color.lerp(colors.text, Colors.black, .3)!
-        : colors.text;
-    return Semantics(
-      container: true,
-      explicitChildNodes: true,
-      readOnly: true,
-      sortKey: sortOrder == null ? null : OrdinalSortKey(sortOrder!),
-      label: [semanticLabel, title, message].join(' '),
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: accentColor.withValues(alpha: .12),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: accentColor),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            ExcludeSemantics(
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  TrackStateIcon(
-                    TrackStateIconGlyph.gitBranch,
-                    size: 18,
-                    color: accentColor,
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      title,
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        color: contentColor,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 8),
-            ExcludeSemantics(
-              child: Text(
-                message,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: contentColor,
-                ),
-              ),
-            ),
-            if (detailMessage != null) ...[
-              const SizedBox(height: 8),
-              Semantics(
-                readOnly: true,
-                label: detailMessage!,
-                child: ExcludeSemantics(
-                  child: Text(
-                    detailMessage!,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: contentColor,
-                      fontFamily: 'JetBrains Mono',
-                    ),
-                  ),
-                ),
-              ),
-            ],
-            if (kIsWeb)
-              Opacity(
-                opacity: 0,
-                alwaysIncludeSemantics: true,
-                child: IgnorePointer(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(title),
-                      Text(message),
-                      if (detailMessage != null) Text(detailMessage!),
-                      if (primaryActionLabel != null) Text(primaryActionLabel!),
-                      if (secondaryActionLabel != null)
-                        Text(secondaryActionLabel!),
-                    ],
-                  ),
-                ),
-              ),
-            if ((primaryActionLabel != null && onPrimaryAction != null) ||
-                (secondaryActionLabel != null &&
-                    onSecondaryAction != null)) ...[
-              const SizedBox(height: 12),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  if (primaryActionLabel != null && onPrimaryAction != null)
-                    OrderedFocusAction(
-                      order: actionTraversalOrderBase,
-                      child: OutlinedButton(
-                        onPressed: onPrimaryAction,
-                        style: usesLightWarningTreatment
-                            ? _warningCalloutPrimaryActionStyle(
-                                accentColor: accentColor,
-                                contentColor: contentColor,
-                                colors: colors,
-                              )
-                            : OutlinedButton.styleFrom(
-                                foregroundColor: colors.text,
-                                side: BorderSide(color: accentColor),
-                              ),
-                        child: Text(primaryActionLabel!),
-                      ),
-                    ),
-                  if (secondaryActionLabel != null && onSecondaryAction != null)
-                    OrderedFocusAction(
-                      order: actionTraversalOrderBase == null
-                          ? null
-                          : actionTraversalOrderBase! + 1,
-                      child: FilledButton(
-                        onPressed: onSecondaryAction,
-                        style: usesLightWarningTreatment
-                            ? _warningCalloutSecondaryActionStyle(colors)
-                            : null,
-                        child: Text(secondaryActionLabel!),
-                      ),
-                    ),
-                ],
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-ButtonStyle _warningCalloutPrimaryActionStyle({
-  required Color accentColor,
-  required Color contentColor,
-  required TrackStateColors colors,
-}) {
-  return ButtonStyle(
-    foregroundColor: WidgetStatePropertyAll<Color>(contentColor),
-    overlayColor: const WidgetStatePropertyAll<Color>(Colors.transparent),
-    backgroundColor: WidgetStateProperty.resolveWith<Color?>((states) {
-      if (states.contains(WidgetState.pressed)) {
-        return Color.lerp(colors.accentSoft, colors.accent, .18);
-      }
-      if (states.contains(WidgetState.hovered) ||
-          states.contains(WidgetState.focused)) {
-        return colors.accentSoft;
-      }
-      return Colors.transparent;
-    }),
-    side: WidgetStatePropertyAll<BorderSide>(BorderSide(color: accentColor)),
-  );
-}
-
-ButtonStyle _warningCalloutSecondaryActionStyle(TrackStateColors colors) {
-  return ButtonStyle(
-    foregroundColor: WidgetStatePropertyAll<Color>(colors.page),
-    overlayColor: const WidgetStatePropertyAll<Color>(Colors.transparent),
-    backgroundColor: WidgetStateProperty.resolveWith<Color?>((states) {
-      if (states.contains(WidgetState.pressed)) {
-        return Color.lerp(colors.primary, colors.text, .26);
-      }
-      if (states.contains(WidgetState.focused)) {
-        return Color.lerp(colors.primary, colors.text, .18);
-      }
-      if (states.contains(WidgetState.hovered)) {
-        return Color.lerp(colors.primary, colors.text, .10);
-      }
-      return colors.primary;
-    }),
-  );
-}
-
-enum _AccessCalloutTone { warning, success }
 
 class _StartupRecoveryView extends StatelessWidget {
   const _StartupRecoveryView({
@@ -7132,7 +6918,7 @@ class _StartupRecoveryView extends StatelessWidget {
                 ),
                 const SizedBox(height: 12),
               ],
-              _AccessCallout(
+              AccessCallout(
                 semanticLabel: l10n.startupRecovery,
                 title: _startupRecoveryTitle(l10n, recovery),
                 message: _startupRecoveryMessage(l10n, viewModel),
@@ -8017,7 +7803,7 @@ class _SettingsState extends State<_Settings> {
           const SizedBox(height: 16),
         ],
         if (workspaceRestoreFailure != null) ...[
-          _AccessCallout(
+          AccessCallout(
             semanticLabel: l10n.startupRecovery,
             title: l10n.startupRecovery,
             message: l10n.workspaceRestoreFailed(
@@ -8029,7 +7815,7 @@ class _SettingsState extends State<_Settings> {
           ),
           const SizedBox(height: 16),
         ] else if (widget.viewModel.startupRecovery case final recovery?) ...[
-          _AccessCallout(
+          AccessCallout(
             semanticLabel: l10n.startupRecovery,
             title: _startupRecoveryTitle(l10n, recovery),
             message: _startupRecoveryMessage(l10n, widget.viewModel),
@@ -12384,7 +12170,7 @@ class _IssueDetailState extends State<_IssueDetail> {
               ),
               const SizedBox(height: 12),
               if (hasBlockedWriteAccess) ...[
-                _AccessCallout(
+                AccessCallout(
                   semanticLabel: l10n.issueDetail,
                   title: _repositoryAccessTitle(l10n, widget.viewModel),
                   message: _repositoryAccessMessage(l10n, widget.viewModel),
@@ -13539,7 +13325,7 @@ class _HostedProviderConfigurationState
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _AccessCallout(
+          AccessCallout(
             semanticLabel: l10n.manageGitHubAccess,
             title: _repositoryAccessTitle(l10n, viewModel),
             message:
@@ -13550,7 +13336,7 @@ class _HostedProviderConfigurationState
             sortOrder: 1,
           ),
           const SizedBox(height: 12),
-          _AccessCallout(
+          AccessCallout(
             semanticLabel: l10n.attachments,
             title: _attachmentStorageCalloutTitle(l10n, viewModel),
             message: _attachmentStorageCalloutMessage(l10n, viewModel),
@@ -13694,13 +13480,13 @@ class _LocalGitConfiguration extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (showGitHubAccess) ...[
-          _AccessCallout(
+          AccessCallout(
             semanticLabel: accessTitle,
             title: accessTitle,
             message: accessMessage,
             tone: hasGitHubAccessSession
-                ? _AccessCalloutTone.success
-                : _AccessCalloutTone.warning,
+                ? AccessCalloutTone.success
+                : AccessCalloutTone.warning,
             primaryActionLabel: hasGitHubAccessSession
                 ? l10n.manageGitHubAccess
                 : l10n.connectGitHub,
@@ -15192,7 +14978,7 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
                         children: [
                           _SectionTitle(l10n.createIssue),
                           const SizedBox(height: 12),
-                          _AccessCallout(
+                          AccessCallout(
                             semanticLabel: l10n.createIssue,
                             title: _repositoryAccessTitle(
                               l10n,
@@ -17044,7 +16830,7 @@ class _CommentsTab extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           if (writeBlocked) ...[
-            _AccessCallout(
+            AccessCallout(
               semanticLabel: l10n.comments,
               title: _repositoryAccessTitle(l10n, viewModel),
               message: _repositoryAccessMessage(l10n, viewModel),
@@ -17173,7 +16959,7 @@ class _AttachmentsTab extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           if (accessMessage.isNotEmpty) ...[
-            _AccessCallout(
+            AccessCallout(
               semanticLabel: l10n.attachments,
               title: accessTitle,
               message: accessMessage,
@@ -17237,7 +17023,7 @@ class _AttachmentsTab extends StatelessWidget {
                   ),
                 if ((uploadNotice ?? '').isNotEmpty) ...[
                   const SizedBox(height: 12),
-                  _AccessCallout(
+                  AccessCallout(
                     semanticLabel: l10n.attachments,
                     title: l10n.attachments,
                     message: uploadNotice!,
