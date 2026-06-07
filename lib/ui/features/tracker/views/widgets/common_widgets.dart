@@ -380,3 +380,17 @@ class Avatar extends StatelessWidget {
     );
   }
 }
+
+class SectionTitle extends StatelessWidget {
+  const SectionTitle(this.label, {super.key});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Text(label, style: Theme.of(context).textTheme.titleMedium),
+    );
+  }
+}

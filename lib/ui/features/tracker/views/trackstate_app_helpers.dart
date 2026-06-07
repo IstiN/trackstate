@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 
 import '../../../../../domain/models/workspace_profile_models.dart';
@@ -59,4 +60,14 @@ String? resolveWorkspaceSwitcherSelectedWorkspaceId({
     return nextWorkspaces.activeWorkspaceId;
   }
   return currentSelectedWorkspaceId;
+}
+
+String cssHexColor(Color color) {
+  String channel(double value) =>
+      (value * 255).round().toRadixString(16).padLeft(2, '0');
+  if (color.a >= 1) {
+    return '#${channel(color.r)}${channel(color.g)}${channel(color.b)}';
+  }
+  return 'rgba(${(color.r * 255).round()}, ${(color.g * 255).round()}, '
+      '${(color.b * 255).round()}, ${color.a})';
 }

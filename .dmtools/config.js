@@ -41,7 +41,8 @@ const FLUTTER_FEEDBACK = {
         enabled: true,
         gates: [
             { name: 'theme-token-lint', command: 'dart run tool/check_theme_tokens.dart', maxAttempts: 2 },
-            { name: 'web-safety-lint', command: 'dart run tool/check_web_safety.dart', maxAttempts: 2 }
+            { name: 'web-safety-lint', command: 'dart run tool/check_web_safety.dart', maxAttempts: 2 },
+            { name: 'file-line-limit-lint', command: 'dart run tool/check_file_line_limits.dart', maxAttempts: 2 }
         ]
     }
 };
