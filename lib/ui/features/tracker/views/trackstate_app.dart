@@ -51,6 +51,7 @@ part 'trackstate_app_widgets_home.dart';
 part 'trackstate_app_widgets_shell.dart';
 part 'trackstate_app_widgets_workspace.dart';
 part 'trackstate_app_widgets_settings.dart';
+part 'trackstate_app_widgets_project_admin.dart';
 part 'trackstate_app_widgets_issue_detail.dart';
 part 'trackstate_app_widgets_dialogs.dart';
 
