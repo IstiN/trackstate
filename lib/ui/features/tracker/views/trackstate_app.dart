@@ -49,6 +49,7 @@ export 'trackstate_app_types.dart';
 export 'trackstate_app_helpers.dart';
 part 'trackstate_app_widgets_main.dart';
 part 'trackstate_app_widgets_settings.dart';
+part 'trackstate_app_widgets_issue_detail.dart';
 part 'trackstate_app_widgets_dialogs.dart';
 
 class TrackStateApp extends StatefulWidget {
