@@ -46,6 +46,7 @@ import 'widgets/startup_recovery_view.dart';
 import 'widgets/workspace_initialization_view.dart';
 import 'widgets/icon_button_surface.dart';
 import 'widgets/action_buttons.dart';
+import 'widgets/common_widgets.dart';
 import 'widgets/ordered_focus_action.dart';
 
 export 'trackstate_app_types.dart';
@@ -3709,12 +3710,12 @@ class _LocalWorkspaceOnboardingScreenState
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _ScreenHeading(
+                  ScreenHeading(
                     title: l10n.addWorkspace,
                     subtitle: l10n.workspaceOnboardingFirstRunDescription,
                   ),
                   const SizedBox(height: 16),
-                  _SurfaceCard(
+                  SurfaceCard(
                     semanticLabel: l10n.addWorkspace,
                     explicitChildNodes: true,
                     child: Column(
@@ -4518,7 +4519,7 @@ class _WorkspaceOnboardingScreenState
                   Row(
                     children: [
                       Expanded(
-                        child: _ScreenHeading(
+                        child: ScreenHeading(
                           title: l10n.addWorkspace,
                           subtitle: widget.canCancel
                               ? l10n.workspaceOnboardingDescription
@@ -4534,7 +4535,7 @@ class _WorkspaceOnboardingScreenState
                     ],
                   ),
                   const SizedBox(height: 16),
-                  _SurfaceCard(
+                  SurfaceCard(
                     semanticLabel: l10n.addWorkspace,
                     explicitChildNodes: true,
                     child: FocusTraversalGroup(
@@ -6940,9 +6941,9 @@ class _Dashboard extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _ScreenHeading(title: l10n.dashboard, subtitle: l10n.appTagline),
+        ScreenHeading(title: l10n.dashboard, subtitle: l10n.appTagline),
         if (showBootstrapHint) ...[
-          _SectionLoadingBanner(
+          SectionLoadingBanner(
             semanticLabel: '${l10n.dashboard} ${l10n.loading}',
             label: l10n.loading,
           ),
@@ -7038,9 +7039,9 @@ class _Board extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _ScreenHeading(title: l10n.board, subtitle: l10n.kanbanHint),
+        ScreenHeading(title: l10n.board, subtitle: l10n.kanbanHint),
         if (showBootstrapHint) ...[
-          _SectionLoadingBanner(
+          SectionLoadingBanner(
             semanticLabel: '${l10n.board} ${l10n.loading}',
             label: l10n.loading,
           ),
@@ -7138,7 +7139,7 @@ class _SearchAndDetail extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Expanded(
-              child: _ScreenHeading(title: l10n.jqlSearch, subtitle: subtitle),
+              child: ScreenHeading(title: l10n.jqlSearch, subtitle: subtitle),
             ),
           ],
         ),
@@ -7399,11 +7400,11 @@ class _Hierarchy extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _ScreenHeading(
+        ScreenHeading(
           title: l10n.hierarchy,
           subtitle: viewModel.project!.repository,
         ),
-        _SurfaceCard(
+        SurfaceCard(
           semanticLabel: l10n.hierarchy,
           child: Column(
             children: [
@@ -7660,7 +7661,7 @@ class _SettingsState extends State<_Settings> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _ScreenHeading(
+        ScreenHeading(
           title: l10n.projectSettings,
           subtitle: project.repository,
         ),
@@ -7671,7 +7672,7 @@ class _SettingsState extends State<_Settings> {
             readOnly: true,
             label: l10n.savedWorkspaces,
             explicitChildNodes: true,
-            child: _SurfaceCard(
+            child: SurfaceCard(
               semanticLabel: l10n.savedWorkspaces,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -7727,7 +7728,7 @@ class _SettingsState extends State<_Settings> {
         ],
         _WorkspaceSyncSettingsCard(viewModel: widget.viewModel),
         const SizedBox(height: 16),
-        _SurfaceCard(
+        SurfaceCard(
           semanticLabel: l10n.repositoryAccessSettings,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -7757,7 +7758,7 @@ class _WorkspaceSyncSettingsCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final status = viewModel.workspaceSyncStatus;
-    return _SurfaceCard(
+    return SurfaceCard(
       semanticLabel: l10n.workspaceSyncSettings,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -7782,14 +7783,14 @@ class _WorkspaceSyncSettingsCard extends StatelessWidget {
           ),
           if (status.lastCheckAt != null) ...[
             const SizedBox(height: 12),
-            _KeyValue(
+            KeyValue(
               label: l10n.workspaceSyncLastCheckedLabel,
               value: _formatSyncDateTime(context, status.lastCheckAt!),
             ),
           ],
           if (status.lastSuccessfulCheckAt != null) ...[
             const SizedBox(height: 8),
-            _KeyValue(
+            KeyValue(
               label: l10n.workspaceSyncLastSuccessfulLabel,
               value: _formatSyncDateTime(
                 context,
@@ -7800,7 +7801,7 @@ class _WorkspaceSyncSettingsCard extends StatelessWidget {
           if (status.latestError case final latestError?
               when latestError.trim().isNotEmpty) ...[
             const SizedBox(height: 8),
-            _KeyValue(label: l10n.workspaceSyncLatestError, value: latestError),
+            KeyValue(label: l10n.workspaceSyncLatestError, value: latestError),
           ],
           if (_workspaceSyncPrimaryActionLabel(l10n, viewModel)
               case final actionLabel?) ...[
@@ -10316,7 +10317,7 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
         canManageCatalogs,
       ),
     };
-    return _SurfaceCard(
+    return SurfaceCard(
       semanticLabel: l10n.projectSettingsAdmin,
       explicitChildNodes: true,
       child: FocusTraversalGroup(
@@ -10669,7 +10670,7 @@ class _LocaleCatalogSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return _SurfaceCard(
+    return SurfaceCard(
       semanticLabel: '$title ${AppLocalizations.of(context)!.locales}',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -10731,7 +10732,7 @@ class _LocaleFieldCatalogSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return _SurfaceCard(
+    return SurfaceCard(
       semanticLabel: '$title ${AppLocalizations.of(context)!.locales}',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -12021,7 +12022,7 @@ class _IssueDetailState extends State<_IssueDetail> {
             : null,
       ),
     ];
-    return _SurfaceCard(
+    return SurfaceCard(
       semanticLabel: '${l10n.issueDetail} ${issue.key}',
       child: FocusScope(
         debugLabel: 'issue-detail-${issue.key}',
@@ -12331,7 +12332,7 @@ class _IssueList extends StatelessWidget {
         ),
         const SizedBox(height: 12),
         if (showSearchBootstrapLoading) ...[
-          _SectionLoadingBanner(
+          SectionLoadingBanner(
             semanticLabel: '${l10n.jqlSearch} ${l10n.loading}',
             label: l10n.loading,
           ),
@@ -12367,7 +12368,7 @@ class _IssueList extends StatelessWidget {
                 project: viewModel.project,
                 onSelect: viewModel.selectIssue,
                 trailingAction: showSearchBootstrapLoading
-                    ? _LoadingPill(
+                    ? LoadingPill(
                         semanticLabel:
                             'Open ${visibleResults[index].key} ${visibleResults[index].summary} ${l10n.loading}',
                         label: l10n.loading,
@@ -12400,7 +12401,7 @@ class _IssueList extends StatelessWidget {
         ],
       ],
     );
-    return _SurfaceCard(
+    return SurfaceCard(
       semanticLabel: l10n.jqlSearch,
       explicitChildNodes: true,
       child: showSearchBootstrapLoading
@@ -12456,7 +12457,7 @@ class _ActiveEpics extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
-    return _SurfaceCard(
+    return SurfaceCard(
       semanticLabel: l10n.activeEpics,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -12481,7 +12482,7 @@ class _RecentActivity extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
-    return _SurfaceCard(
+    return SurfaceCard(
       semanticLabel: l10n.recentActivity,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -12561,7 +12562,7 @@ class _BoardColumn extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(width: 8),
-                    _TinyCount('${issues.length}'),
+                    TinyCount('${issues.length}'),
                   ],
                 ),
                 const SizedBox(height: 12),
@@ -12854,7 +12855,7 @@ class _TreeIssueRow extends StatelessWidget {
       child: _IssueListRow(
         issue: issue,
         onSelect: onSelect,
-        trailingAction: _CompactActionIconButton(
+        trailingAction: CompactActionIconButton(
           label: 'Create child issue for ${issue.key}',
           glyph: TrackStateIconGlyph.plus,
           onPressed: onCreateChild,
@@ -12889,7 +12890,7 @@ class _MetricCard extends StatelessWidget {
       MetricTone.secondary => colors.secondary,
       MetricTone.accent => colors.accent,
     };
-    return _SurfaceCard(
+    return SurfaceCard(
       semanticLabel: showValuePlaceholder ? '$label loading' : '$label $value',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -12897,11 +12898,11 @@ class _MetricCard extends StatelessWidget {
         children: [
           Text(label, style: Theme.of(context).textTheme.labelLarge),
           if (showValuePlaceholder)
-            const _SkeletonBar(widthFactor: .42, height: 34)
+            const SkeletonBar(widthFactor: .42, height: 34)
           else
             Text(value, style: Theme.of(context).textTheme.headlineLarge),
           if (showDeltaPlaceholder)
-            const _SkeletonBar(widthFactor: .34)
+            const SkeletonBar(widthFactor: .34)
           else
             Text(
               delta,
@@ -12914,95 +12915,6 @@ class _MetricCard extends StatelessWidget {
 }
 
 enum MetricTone { primary, secondary, accent }
-
-class _LoadingPill extends StatelessWidget {
-  const _LoadingPill({required this.semanticLabel, required this.label});
-
-  final String semanticLabel;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.ts;
-    final backgroundColor = colors.loadingFeedbackBackground;
-    final foregroundColor = colors.loadingFeedbackForeground;
-    return Semantics(
-      container: true,
-      label: semanticLabel,
-      child: ExcludeSemantics(
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          decoration: BoxDecoration(
-            color: backgroundColor,
-            borderRadius: BorderRadius.circular(999),
-            border: Border.all(color: colors.border),
-          ),
-          child: Text(
-            label,
-            style: Theme.of(
-              context,
-            ).textTheme.labelSmall?.copyWith(color: foregroundColor),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _SectionLoadingBanner extends StatelessWidget {
-  const _SectionLoadingBanner({
-    required this.semanticLabel,
-    required this.label,
-  });
-
-  final String semanticLabel;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.ts;
-    final backgroundColor = colors.loadingFeedbackBackground;
-    final foregroundColor = colors.loadingFeedbackForeground;
-    return Semantics(
-      container: true,
-      label: semanticLabel,
-      child: ExcludeSemantics(
-        child: Container(
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          decoration: BoxDecoration(
-            color: backgroundColor,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: colors.border),
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 12,
-                height: 12,
-                decoration: BoxDecoration(
-                  color: colors.primarySoft,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: colors.primary),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  label,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.labelMedium?.copyWith(color: foregroundColor),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 class _SectionContentPlaceholder extends StatelessWidget {
   const _SectionContentPlaceholder({
     required this.semanticLabel,
@@ -13025,13 +12937,13 @@ class _SectionContentPlaceholder extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _SectionLoadingBanner(
+            SectionLoadingBanner(
               semanticLabel: semanticLabel,
               label: l10n.loading,
             ),
             const SizedBox(height: 12),
             for (final width in lineWidths) ...[
-              _SkeletonBar(widthFactor: width),
+              SkeletonBar(widthFactor: width),
               const SizedBox(height: 10),
             ],
             for (var index = 0; index < blockCount; index += 1) ...[
@@ -13052,31 +12964,6 @@ class _SectionContentPlaceholder extends StatelessWidget {
     );
   }
 }
-
-class _SkeletonBar extends StatelessWidget {
-  const _SkeletonBar({required this.widthFactor, this.height = 12});
-
-  final double widthFactor;
-  final double height;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.ts;
-    return FractionallySizedBox(
-      widthFactor: widthFactor,
-      alignment: Alignment.centerLeft,
-      child: Container(
-        height: height,
-        decoration: BoxDecoration(
-          color: colors.surfaceAlt,
-          borderRadius: BorderRadius.circular(height / 2),
-          border: Border.all(color: colors.border),
-        ),
-      ),
-    );
-  }
-}
-
 class _SettingsProviderButton extends StatelessWidget {
   const _SettingsProviderButton({
     required this.label,
@@ -13559,68 +13446,6 @@ String _cssHexColor(Color color) {
   return 'rgba(${(color.r * 255).round()}, ${(color.g * 255).round()}, '
       '${(color.b * 255).round()}, ${color.a})';
 }
-
-class _SurfaceCard extends StatelessWidget {
-  const _SurfaceCard({
-    required this.child,
-    required this.semanticLabel,
-    this.explicitChildNodes = false,
-  });
-
-  final Widget child;
-  final String semanticLabel;
-  final bool explicitChildNodes;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.ts;
-    return Semantics(
-      label: semanticLabel,
-      container: true,
-      explicitChildNodes: explicitChildNodes,
-      child: Container(
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: colors.surface,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: colors.border),
-          boxShadow: [
-            BoxShadow(
-              color: colors.shadow,
-              blurRadius: 16,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: child,
-      ),
-    );
-  }
-}
-
-class _ScreenHeading extends StatelessWidget {
-  const _ScreenHeading({required this.title, required this.subtitle});
-
-  final String title;
-  final String subtitle;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.ts;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(title, style: Theme.of(context).textTheme.headlineLarge),
-          const SizedBox(height: 4),
-          Text(subtitle, style: TextStyle(color: colors.muted)),
-        ],
-      ),
-    );
-  }
-}
-
 class _WorkspaceSwitcherTriggerButton extends StatelessWidget {
   const _WorkspaceSwitcherTriggerButton({
     required this.summary,
@@ -13826,42 +13651,6 @@ class _WorkspaceSwitcherTriggerButton extends StatelessWidget {
     );
   }
 }
-
-class _CompactActionIconButton extends StatelessWidget {
-  const _CompactActionIconButton({
-    required this.label,
-    required this.glyph,
-    required this.onPressed,
-  });
-
-  final String label;
-  final TrackStateIconGlyph glyph;
-  final VoidCallback? onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.ts;
-    return Semantics(
-      button: true,
-      label: label,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(999),
-        excludeFromSemantics: true,
-        onTap: onPressed,
-        child: Padding(
-          padding: const EdgeInsets.all(6),
-          child: TrackStateIcon(
-            glyph,
-            size: 16,
-            color: onPressed == null ? colors.muted : colors.primary,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-
 class _DropdownCreateField extends StatelessWidget {
   const _DropdownCreateField({
     required this.label,
@@ -14889,7 +14678,7 @@ class _CreateIssueDialogState extends State<_CreateIssueDialog> {
                           ],
                         ),
                       );
-                return _SurfaceCard(
+                return SurfaceCard(
                   semanticLabel: l10n.createIssue,
                   explicitChildNodes: true,
                   child: Column(
@@ -15436,7 +15225,7 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
                 final canEditFields =
                     !widget.viewModel.hasBlockedWriteAccess &&
                     !widget.viewModel.isSaving;
-                return _SurfaceCard(
+                return SurfaceCard(
                   semanticLabel: widget.workflowOnly
                       ? l10n.transitionIssue
                       : l10n.editIssue,
@@ -15927,7 +15716,7 @@ class _NavButton extends StatelessWidget {
     required this.onPressed,
   });
 
-  final _NavItem item;
+  final NavItem item;
   final bool selected;
   final bool selectedCanRequestFocus;
   final double? semanticsSortOrder;
@@ -16260,14 +16049,14 @@ class _GitInfoCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
-    return _SurfaceCard(
+    return SurfaceCard(
       semanticLabel: l10n.repository,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _SectionTitle(l10n.repository),
-          _KeyValue(label: l10n.repository, value: project.repository),
-          _KeyValue(label: l10n.branch, value: project.branch),
+          KeyValue(label: l10n.repository, value: project.repository),
+          KeyValue(label: l10n.branch, value: project.branch),
         ],
       ),
     );
@@ -16287,44 +16076,14 @@ class _DetailGrid extends StatelessWidget {
       spacing: 12,
       runSpacing: 12,
       children: [
-        _KeyValue(label: l10n.status, value: statusLabel),
-        _KeyValue(label: l10n.priority, value: issue.priority.label),
-        _KeyValue(label: l10n.assignee, value: issue.assignee),
-        _KeyValue(label: l10n.reporter, value: issue.reporter),
+        KeyValue(label: l10n.status, value: statusLabel),
+        KeyValue(label: l10n.priority, value: issue.priority.label),
+        KeyValue(label: l10n.assignee, value: issue.assignee),
+        KeyValue(label: l10n.reporter, value: issue.reporter),
       ],
     );
   }
 }
-
-class _KeyValue extends StatelessWidget {
-  const _KeyValue({required this.label, required this.value});
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.ts;
-    return SizedBox(
-      width: 180,
-      child: Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(label, style: Theme.of(context).textTheme.labelSmall),
-            const SizedBox(height: 2),
-            Text(
-              value,
-              style: TextStyle(color: colors.text, fontWeight: FontWeight.w600),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 class _EpicProgress extends StatelessWidget {
   const _EpicProgress({required this.issue});
 
@@ -17199,7 +16958,7 @@ class _StatusBadge extends StatelessWidget {
       IssueStatus.inReview => colors.primary,
       IssueStatus.done => colors.secondary,
     };
-    return _Pill(label: label, background: bg, foreground: fg);
+    return Pill(label: label, background: bg, foreground: fg);
   }
 }
 
@@ -17217,7 +16976,7 @@ class _PriorityBadge extends StatelessWidget {
       IssuePriority.medium => colors.accent,
       IssuePriority.low => colors.secondary,
     };
-    return _Pill(
+    return Pill(
       label: priority.label,
       background: foreground.withValues(alpha: .14),
       foreground: foreground,
@@ -17233,67 +16992,13 @@ class _Chip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.ts;
-    return _Pill(
+    return Pill(
       label: label,
       background: colors.surfaceAlt,
       foreground: colors.muted,
     );
   }
 }
-
-class _Pill extends StatelessWidget {
-  const _Pill({
-    required this.label,
-    required this.background,
-    required this.foreground,
-  });
-
-  final String label;
-  final Color background;
-  final Color foreground;
-
-  @override
-  Widget build(BuildContext context) {
-    return Semantics(
-      label: label,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
-        decoration: BoxDecoration(
-          color: background,
-          borderRadius: BorderRadius.circular(999),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            color: foreground,
-            fontSize: 11,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _TinyCount extends StatelessWidget {
-  const _TinyCount(this.value);
-
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.ts;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: colors.border.withValues(alpha: .45),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(value, style: Theme.of(context).textTheme.labelSmall),
-    );
-  }
-}
-
 class _IssueTypeGlyph extends StatelessWidget {
   const _IssueTypeGlyph(this.type);
 
@@ -17378,49 +17083,35 @@ double _desktopPrimaryNavigationOrder(TrackerSection section) =>
       TrackerSection.settings => 6,
     };
 
-List<_NavItem> _navItems(AppLocalizations l10n) => [
-  _NavItem(
+List<NavItem> _navItems(AppLocalizations l10n) => [
+  NavItem(
     l10n.dashboard,
     TrackerSection.dashboard,
     TrackStateIconGlyph.dashboard,
     semanticsIdentifier: browserDesktopDashboardSemanticsIdentifier,
   ),
-  _NavItem(
+  NavItem(
     l10n.board,
     TrackerSection.board,
     TrackStateIconGlyph.board,
     semanticsIdentifier: browserDesktopBoardSemanticsIdentifier,
   ),
-  _NavItem(
+  NavItem(
     l10n.jqlSearch,
     TrackerSection.search,
     TrackStateIconGlyph.search,
     semanticsIdentifier: browserDesktopSearchSectionSemanticsIdentifier,
   ),
-  _NavItem(
+  NavItem(
     l10n.hierarchy,
     TrackerSection.hierarchy,
     TrackStateIconGlyph.hierarchy,
     semanticsIdentifier: browserDesktopHierarchySemanticsIdentifier,
   ),
-  _NavItem(
+  NavItem(
     l10n.settings,
     TrackerSection.settings,
     TrackStateIconGlyph.settings,
     semanticsIdentifier: browserDesktopSettingsSemanticsIdentifier,
   ),
 ];
-
-class _NavItem {
-  const _NavItem(
-    this.label,
-    this.section,
-    this.glyph, {
-    this.semanticsIdentifier,
-  });
-
-  final String label;
-  final TrackerSection section;
-  final TrackStateIconGlyph glyph;
-  final String? semanticsIdentifier;
-}
