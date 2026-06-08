@@ -281,7 +281,10 @@ def main() -> None:
                     page.confirm_replace_attachment()
                     page.wait_for_replace_attachment_dialog_to_close(timeout_ms=60_000)
                     matched, repo_text_after_confirm = poll_until(
-                        probe=lambda: service.fetch_repo_text(attachment_path),
+                        probe=lambda: service.fetch_repo_text(
+                            attachment_path,
+                            prefer_git_fallback=False,
+                        ),
                         is_satisfied=lambda text: text == REPLACEMENT_ATTACHMENT_TEXT,
                         timeout_seconds=90,
                         interval_seconds=3,

@@ -534,7 +534,10 @@ def _select_attachment(
 
 
 def _observe_manifest_state(service: LiveSetupRepositoryService) -> dict[str, object]:
-    manifest_text = service.fetch_repo_text(MANIFEST_PATH)
+    manifest_text = service.fetch_repo_text(
+        MANIFEST_PATH,
+        prefer_git_fallback=False,
+    )
     entries = json.loads(manifest_text)
     if not isinstance(entries, list):
         raise AssertionError(
