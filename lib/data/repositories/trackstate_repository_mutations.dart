@@ -517,11 +517,32 @@ mixin _TrackStateRepositoryMutations {
           allowedAssetNames: releaseAssetNames,
         ),
       );
+      RepositoryAttachment persistedReleaseArtifact;
+      const maxReleaseReadAttempts = 5;
+      for (var readAttempt = 0; ; readAttempt++) {
+        persistedReleaseArtifact = await releaseStore.readReleaseAttachment(
+          RepositoryReleaseAttachmentReadRequest(
+            releaseTag: releaseWriteResult.releaseTag,
+            assetName: releaseWriteResult.assetName,
+            assetId: releaseWriteResult.assetId,
+          ),
+        );
+        if (persistedReleaseArtifact.bytes.length == bytes.length) {
+          break;
+        }
+        if (readAttempt >= maxReleaseReadAttempts - 1) {
+          throw TrackStateRepositoryException(
+            'Stored release attachment size ${persistedReleaseArtifact.bytes.length} bytes '
+            'does not match uploaded size ${bytes.length} bytes for $assetName.',
+          );
+        }
+        await Future.delayed(const Duration(milliseconds: 400));
+      }
       final updatedAttachment = IssueAttachment(
         id: attachmentPath,
         name: normalizedName,
         mediaType: _mediaTypeForPath(attachmentPath),
-        sizeBytes: bytes.length,
+        sizeBytes: persistedReleaseArtifact.bytes.length,
         author: author,
         createdAt: timestamp,
         storagePath: attachmentPath,
@@ -644,7 +665,7 @@ mixin _TrackStateRepositoryMutations {
       id: attachmentPath,
       name: normalizedName,
       mediaType: _mediaTypeForPath(attachmentPath),
-      sizeBytes: bytes.length,
+      sizeBytes: persistedAttachmentArtifact.bytes.length,
       author: author,
       createdAt: timestamp,
       storagePath: attachmentPath,
