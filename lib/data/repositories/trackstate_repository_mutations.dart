@@ -644,7 +644,7 @@ mixin _TrackStateRepositoryMutations {
       id: attachmentPath,
       name: normalizedName,
       mediaType: _mediaTypeForPath(attachmentPath),
-      sizeBytes: bytes.length,
+      sizeBytes: persistedAttachmentArtifact.bytes.length,
       author: author,
       createdAt: timestamp,
       storagePath: attachmentPath,
