@@ -35,6 +35,9 @@ class LiveHostedRepositoryMetadata:
     components: list[str]
 
 
+_FALLBACK_REFRESH_MIN_INTERVAL_SECONDS = 1.0
+
+
 @dataclass(frozen=True)
 class GitHubAuthenticatedUser:
     login: str
@@ -117,6 +120,7 @@ class LiveSetupRepositoryService:
         self.repository = self.config.repository
         self.ref = self.config.ref
         self.token = token or os.getenv("GH_TOKEN") or os.getenv("GITHUB_TOKEN")
+        self._fallback_refreshed_at: float = 0.0
 
     def fetch_demo_metadata(self) -> LiveHostedRepositoryMetadata:
         project = self._read_repo_json("DEMO/project.json")
@@ -277,6 +281,23 @@ class LiveSetupRepositoryService:
         ]
 
     def fetch_repo_file(self, path: str) -> LiveHostedRepositoryFile:
+        # Prefer a refreshed git fallback because the GitHub REST contents API
+        # can serve a cached version for up to several minutes after a write.
+        # The local shallow clone is cheap to refresh and guarantees we read
+        # exactly what is currently at the remote ref.
+        refreshed = self._refresh_fallback_repo()
+        fallback_file = refreshed / path
+        if fallback_file.is_file():
+            content = fallback_file.read_text(encoding="utf-8")
+            # Resolve the blob SHA so callers that need it still receive it.
+            sha = self._git_file_sha(path)
+            return LiveHostedRepositoryFile(
+                path=path,
+                sha=sha,
+                content=content,
+            )
+        # Fall back to the GitHub REST API when the file is not present in the
+        # working tree (e.g. very large files or directory listings).
         response = self._read_json(
             f"/repos/{self.repository}/contents/{path}?ref={self.ref}",
         )
@@ -876,6 +897,36 @@ class LiveSetupRepositoryService:
 
     def _fallback_repo_relative_path(self, path: Path) -> str:
         return path.relative_to(self._fallback_repo_root()).as_posix()
+
+    def _refresh_fallback_repo(self) -> Path:
+        now = time.monotonic()
+        root = self._fallback_repo_root()
+        if now - self._fallback_refreshed_at < _FALLBACK_REFRESH_MIN_INTERVAL_SECONDS:
+            return root
+        self._fallback_refreshed_at = now
+        for command in (
+            ["git", "-C", str(root), "fetch", "--depth", "1", "origin", self.ref],
+            ["git", "-C", str(root), "checkout", "--force", "FETCH_HEAD"],
+        ):
+            subprocess.run(
+                command,
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+        return root
+
+    def _git_file_sha(self, path: str) -> str:
+        root = self._fallback_repo_root()
+        result = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", f"HEAD:{path}"],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        return result.stdout.strip()
 
     def _fallback_repo_root(self) -> Path:
         safe_repository = re.sub(r"[^A-Za-z0-9._-]+", "__", self.repository)
