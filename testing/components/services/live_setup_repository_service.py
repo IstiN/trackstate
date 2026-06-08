@@ -280,41 +280,76 @@ class LiveSetupRepositoryService:
             if entry_id and name
         ]
 
-    def fetch_repo_file(self, path: str) -> LiveHostedRepositoryFile:
-        # Prefer a refreshed git fallback because the GitHub REST contents API
-        # can serve a cached version for up to several minutes after a write.
-        # The local shallow clone is cheap to refresh and guarantees we read
-        # exactly what is currently at the remote ref.
+    def fetch_repo_file(
+        self,
+        path: str,
+        *,
+        prefer_git_fallback: bool = True,
+    ) -> LiveHostedRepositoryFile:
+        if prefer_git_fallback:
+            # Prefer a refreshed git fallback because the GitHub REST contents API
+            # can serve a cached version for up to several minutes after a write.
+            # The local shallow clone is cheap to refresh and guarantees we read
+            # exactly what is currently at the remote ref.
+            refreshed = self._refresh_fallback_repo()
+            fallback_file = refreshed / path
+            if fallback_file.is_file():
+                content = fallback_file.read_text(encoding="utf-8")
+                # Resolve the blob SHA so callers that need it still receive it.
+                sha = self._git_file_sha(path)
+                return LiveHostedRepositoryFile(
+                    path=path,
+                    sha=sha,
+                    content=content,
+                )
+        # Use the GitHub REST API directly. A cache-bust parameter avoids CDN
+        # caching so we see the latest content immediately after a hosted write.
+        # When the file is large or the API returns 404 we fall back to the
+        # refreshed shallow clone.
+        api_404: urllib.error.HTTPError | None = None
+        try:
+            response = self._read_json(
+                f"/repos/{self.repository}/contents/{path}?ref={self.ref}&_cb={time.time()}",
+            )
+        except urllib.error.HTTPError as error:
+            if error.code != 404:
+                raise
+            api_404 = error
+            response = None
+        if response is not None:
+            encoded = str(response.get("content", "")).replace("\n", "")
+            if encoded:
+                sha = str(response.get("sha", "")).strip()
+                if sha:
+                    return LiveHostedRepositoryFile(
+                        path=path,
+                        sha=sha,
+                        content=base64.b64decode(encoded).decode("utf-8"),
+                    )
         refreshed = self._refresh_fallback_repo()
         fallback_file = refreshed / path
         if fallback_file.is_file():
             content = fallback_file.read_text(encoding="utf-8")
-            # Resolve the blob SHA so callers that need it still receive it.
             sha = self._git_file_sha(path)
             return LiveHostedRepositoryFile(
                 path=path,
                 sha=sha,
                 content=content,
             )
-        # Fall back to the GitHub REST API when the file is not present in the
-        # working tree (e.g. very large files or directory listings).
-        response = self._read_json(
-            f"/repos/{self.repository}/contents/{path}?ref={self.ref}",
-        )
-        encoded = str(response.get("content", "")).replace("\n", "")
-        if not encoded:
-            raise RuntimeError(f"GitHub response for {path} did not include content.")
-        sha = str(response.get("sha", "")).strip()
-        if not sha:
-            raise RuntimeError(f"GitHub response for {path} did not include a blob SHA.")
-        return LiveHostedRepositoryFile(
-            path=path,
-            sha=sha,
-            content=base64.b64decode(encoded).decode("utf-8"),
-        )
+        if api_404 is not None:
+            raise api_404
+        raise RuntimeError(f"File {path} not found via GitHub API or git fallback.")
 
-    def fetch_repo_text(self, path: str) -> str:
-        return self.fetch_repo_file(path).content
+    def fetch_repo_text(
+        self,
+        path: str,
+        *,
+        prefer_git_fallback: bool = True,
+    ) -> str:
+        return self.fetch_repo_file(
+            path,
+            prefer_git_fallback=prefer_git_fallback,
+        ).content
 
     def fetch_branch_head_sha(self, branch: str | None = None) -> str:
         branch_name = (branch or self.ref).strip()

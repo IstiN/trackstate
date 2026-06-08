@@ -615,7 +615,10 @@ def _fetch_repo_text_for_poll(
     path: str,
 ) -> str:
     try:
-        return service.fetch_repo_text(path)
+        return service.fetch_repo_text(
+            path,
+            prefer_git_fallback=False,
+        )
     except (http.client.RemoteDisconnected, urllib.error.URLError) as error:
         return f"<transient GitHub read failure: {type(error).__name__}: {error}>"
 
