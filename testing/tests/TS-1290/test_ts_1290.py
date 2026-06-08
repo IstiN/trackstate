@@ -381,6 +381,10 @@ def main() -> None:
                         observed=dialog_text,
                     )
 
+                    tracker_page.session.start_network_recording(
+                        name="github_api",
+                        url_fragment="api.github.com",
+                    )
                     page.confirm_replace_attachment()
                     page.wait_for_replace_attachment_dialog_to_close(timeout_ms=60_000)
                     matched, repo_text_after_confirm = poll_until(
@@ -394,6 +398,14 @@ def main() -> None:
                     )
                     result["repo_text_after_confirm"] = repo_text_after_confirm
                     if not matched:
+                        network_log = tracker_page.session.read_network_log(
+                            name="github_api",
+                        )
+                        result["github_api_network_log"] = network_log
+                        (OUTPUTS_DIR / "ts1290_network_log.json").write_text(
+                            json.dumps(network_log, indent=2),
+                            encoding="utf-8",
+                        )
                         raise AssertionError(
                             "Step 5 failed: confirming the replacement did not persist the new "
                             "attachment content within the timeout.\n"
