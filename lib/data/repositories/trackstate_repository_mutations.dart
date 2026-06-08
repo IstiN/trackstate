@@ -621,15 +621,23 @@ mixin _TrackStateRepositoryMutations {
         allowLfsTrackedWrite: replacesRepositoryPathAttachment,
       ),
     );
-    final persistedAttachmentArtifact = await _provider.readAttachment(
-      attachmentPath,
-      ref: writeBranch,
-    );
-    if (persistedAttachmentArtifact.bytes.length != bytes.length) {
-      throw TrackStateRepositoryException(
-        'Stored attachment size ${persistedAttachmentArtifact.bytes.length} bytes '
-        'does not match uploaded size ${bytes.length} bytes for $attachmentPath.',
+    RepositoryAttachment persistedAttachmentArtifact;
+    const maxReadAttempts = 5;
+    for (var readAttempt = 0; ; readAttempt++) {
+      persistedAttachmentArtifact = await _provider.readAttachment(
+        attachmentPath,
+        ref: writeBranch,
       );
+      if (persistedAttachmentArtifact.bytes.length == bytes.length) {
+        break;
+      }
+      if (readAttempt >= maxReadAttempts - 1) {
+        throw TrackStateRepositoryException(
+          'Stored attachment size ${persistedAttachmentArtifact.bytes.length} bytes '
+          'does not match uploaded size ${bytes.length} bytes for $attachmentPath.',
+        );
+      }
+      await Future.delayed(const Duration(milliseconds: 400));
     }
     _snapshotArtifactRevisions[attachmentPath] = attachmentWriteResult.revision;
     final updatedAttachment = IssueAttachment(
