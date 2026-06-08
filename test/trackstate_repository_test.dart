@@ -4616,6 +4616,7 @@ class _FakeReleaseAttachmentProvider
   final RepositoryPermission permission;
   final Map<String, String> files;
   final Map<String, Uint8List> binaryFiles = <String, Uint8List>{};
+  final Map<String, Uint8List> releaseAttachmentFiles = <String, Uint8List>{};
   final bool enforceExistingRevisionOnWrite;
   final Set<String> lfsTrackedPaths;
   final List<String> readTextFilePaths = <String>[];
@@ -4802,13 +4803,26 @@ class _FakeReleaseAttachmentProvider
   Future<RepositoryAttachment> readReleaseAttachment(
     RepositoryReleaseAttachmentReadRequest request,
   ) async {
-    throw UnimplementedError();
+    final key = '${request.releaseTag}/${request.assetName}';
+    final bytes = releaseAttachmentFiles[key];
+    if (bytes == null) {
+      throw TrackStateProviderException(
+        'Release attachment $key not found.',
+      );
+    }
+    return RepositoryAttachment(
+      path: request.assetName,
+      bytes: Uint8List.fromList(bytes),
+      revision: request.assetId ?? 'release-attachment-sha',
+    );
   }
 
   @override
   Future<RepositoryReleaseAttachmentWriteResult> writeReleaseAttachment(
     RepositoryReleaseAttachmentWriteRequest request,
   ) async {
+    releaseAttachmentFiles['${request.releaseTag}/${request.assetName}'] =
+        Uint8List.fromList(request.bytes);
     return RepositoryReleaseAttachmentWriteResult(
       releaseTag: request.releaseTag,
       assetName: request.assetName,
