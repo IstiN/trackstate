@@ -2241,32 +2241,26 @@ class ProviderBackedTrackStateRepository
         attachmentsById[attachment.id] = attachment;
       }
     }
-    final historyReader = switch (_provider) {
-      final RepositoryHistoryReader supported => supported,
-      _ => null,
-    };
     for (final entry in tree.where(
       (candidate) =>
           candidate.type == 'blob' &&
           candidate.path.startsWith(attachmentPrefix) &&
           candidate.path.length > attachmentPrefix.length,
     )) {
-      final attachment = await _provider.readAttachment(
-        entry.path,
-        ref: _provider.dataRef,
-      );
-      List<RepositoryHistoryCommit> history = const <RepositoryHistoryCommit>[];
-      if (historyReader != null) {
-        try {
-          history = await historyReader.listHistory(
-            ref: _provider.dataRef,
-            path: entry.path,
-          );
-        } on TrackStateProviderException {
-          history = const <RepositoryHistoryCommit>[];
+      RepositoryAttachment? attachment;
+      try {
+        attachment = await _provider.readAttachment(
+          entry.path,
+          ref: _provider.dataRef,
+        );
+      } on TrackStateProviderException catch (error) {
+        // Only skip attachments that are genuinely missing (404). Other read
+        // errors should still surface as deferred section errors.
+        if (error.message.contains('(404):') || error.message.contains('404')) {
+          continue;
         }
+        rethrow;
       }
-      final createdCommit = history.isEmpty ? null : history.last;
       _snapshotArtifactRevisions[entry.path] = attachment.revision;
       final existing = attachmentsById[entry.path];
       if (existing?.storageBackend == AttachmentStorageMode.githubReleases) {
@@ -2280,9 +2274,8 @@ class ProviderBackedTrackStateRepository
             existing?.sizeBytes ??
             attachment.declaredSizeBytes ??
             attachment.bytes.length,
-        author: existing?.author ?? createdCommit?.author ?? 'unknown',
-        createdAt:
-            existing?.createdAt ?? createdCommit?.timestamp ?? 'from repo',
+        author: existing?.author ?? 'unknown',
+        createdAt: existing?.createdAt ?? 'from repo',
         storagePath: existing?.storagePath ?? entry.path,
         revisionOrOid: _attachmentRevisionOrOid(
           attachment: attachment,

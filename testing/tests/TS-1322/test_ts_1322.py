@@ -18,8 +18,10 @@ from testing.components.pages.live_issue_detail_collaboration_page import (  # n
 )
 from testing.components.services.live_setup_repository_service import (  # noqa: E402
     LiveHostedIssueFixture,
+    LiveHostedRepositoryFile,
     LiveSetupRepositoryService,
 )
+import urllib.error  # noqa: E402
 from testing.core.config.live_setup_test_config import (  # noqa: E402
     load_live_setup_test_config,
 )
@@ -31,6 +33,7 @@ from testing.tests.support.live_tracker_app_factory import (  # noqa: E402
 TICKET_KEY = "TS-1322"
 ISSUE_PATH = "DEMO/DEMO-1/DEMO-2"
 ATTACHMENT_NAME = "design_doc.pdf"
+MANIFEST_PATH = f"{ISSUE_PATH}/attachments.json"
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 JIRA_COMMENT_PATH = OUTPUTS_DIR / "jira_comment.md"
 PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
@@ -47,6 +50,18 @@ REPLACEMENT_ATTACHMENT_BYTES = (
     b"New Content.\n"
     b"The cache should be invalidated after replacement.\n"
 )
+
+
+def _fetch_repo_file_if_exists(
+    service: LiveSetupRepositoryService,
+    path: str,
+) -> LiveHostedRepositoryFile | None:
+    try:
+        return service.fetch_repo_file(path)
+    except urllib.error.HTTPError as error:
+        if error.code == 404:
+            return None
+        raise
 
 
 def main() -> None:
@@ -73,6 +88,7 @@ def main() -> None:
         + "/attachments/"
         + ATTACHMENT_NAME
     )
+    original_manifest = _fetch_repo_file_if_exists(repository_service, MANIFEST_PATH)
     result: dict[str, object] = {
         "ticket": TICKET_KEY,
         "repository": repository_service.repository,
@@ -127,6 +143,21 @@ def main() -> None:
                 except Exception as error:  # pragma: no cover - cleanup failure is rare
                     cleanup_error = error
                     cleanup_traceback = traceback.format_exc()
+            if original_manifest is not None:
+                try:
+                    current_manifest = _fetch_repo_file_if_exists(
+                        repository_service, MANIFEST_PATH
+                    )
+                    if current_manifest is None or current_manifest.content != original_manifest.content:
+                        repository_service.write_repo_text(
+                            MANIFEST_PATH,
+                            content=original_manifest.content,
+                            message=f"{TICKET_KEY}: restore original attachments manifest",
+                        )
+                except Exception as error:  # pragma: no cover - cleanup failure is rare
+                    if cleanup_error is None:
+                        cleanup_error = error
+                        cleanup_traceback = traceback.format_exc()
 
         if failure_error is None and cleanup_error is None:
             _write_pass_outputs(result)
