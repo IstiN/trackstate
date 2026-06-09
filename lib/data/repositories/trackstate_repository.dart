@@ -460,7 +460,12 @@ class ProviderBackedTrackStateRepository
       );
     }
 
-    if (_snapshotTree.isEmpty || _snapshotBlobPaths.isEmpty) {
+    final shouldLoadAttachments =
+        scopes.contains(IssueHydrationScope.attachments) ||
+        currentIssue.hasAttachmentsLoaded;
+    if (_snapshotTree.isEmpty ||
+        _snapshotBlobPaths.isEmpty ||
+        shouldLoadAttachments) {
       final tree = await _provider.listTree(ref: _provider.dataRef);
       _snapshotTree = tree;
       _snapshotBlobPaths = tree
@@ -476,9 +481,6 @@ class ProviderBackedTrackStateRepository
     final shouldLoadComments =
         scopes.contains(IssueHydrationScope.comments) ||
         currentIssue.hasCommentsLoaded;
-    final shouldLoadAttachments =
-        scopes.contains(IssueHydrationScope.attachments) ||
-        currentIssue.hasAttachmentsLoaded;
 
     final markdown = !force && currentIssue.rawMarkdown.isNotEmpty
         ? currentIssue.rawMarkdown
