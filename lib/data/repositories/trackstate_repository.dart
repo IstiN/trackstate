@@ -2241,6 +2241,10 @@ class ProviderBackedTrackStateRepository
         attachmentsById[attachment.id] = attachment;
       }
     }
+    final historyReader = switch (_provider) {
+      final RepositoryHistoryReader supported => supported,
+      _ => null,
+    };
     for (final entry in tree.where(
       (candidate) =>
           candidate.type == 'blob' &&
@@ -2261,6 +2265,19 @@ class ProviderBackedTrackStateRepository
         }
         rethrow;
       }
+      List<RepositoryHistoryCommit> history = const <RepositoryHistoryCommit>[];
+      if (historyReader != null) {
+        try {
+          history = await historyReader.listHistory(
+            ref: _provider.dataRef,
+            path: entry.path,
+            limit: 1,
+          );
+        } on TrackStateProviderException {
+          history = const <RepositoryHistoryCommit>[];
+        }
+      }
+      final createdCommit = history.isEmpty ? null : history.last;
       _snapshotArtifactRevisions[entry.path] = attachment.revision;
       final existing = attachmentsById[entry.path];
       if (existing?.storageBackend == AttachmentStorageMode.githubReleases) {
@@ -2274,8 +2291,9 @@ class ProviderBackedTrackStateRepository
             existing?.sizeBytes ??
             attachment.declaredSizeBytes ??
             attachment.bytes.length,
-        author: existing?.author ?? 'unknown',
-        createdAt: existing?.createdAt ?? 'from repo',
+        author: existing?.author ?? createdCommit?.author ?? 'unknown',
+        createdAt:
+            existing?.createdAt ?? createdCommit?.timestamp ?? 'from repo',
         storagePath: existing?.storagePath ?? entry.path,
         revisionOrOid: _attachmentRevisionOrOid(
           attachment: attachment,
