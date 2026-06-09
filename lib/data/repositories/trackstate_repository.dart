@@ -2251,16 +2251,27 @@ class ProviderBackedTrackStateRepository
           candidate.path.startsWith(attachmentPrefix) &&
           candidate.path.length > attachmentPrefix.length,
     )) {
-      final attachment = await _provider.readAttachment(
-        entry.path,
-        ref: _provider.dataRef,
-      );
+      RepositoryAttachment? attachment;
+      try {
+        attachment = await _provider.readAttachment(
+          entry.path,
+          ref: _provider.dataRef,
+        );
+      } on TrackStateProviderException catch (error) {
+        // Only skip attachments that are genuinely missing (404). Other read
+        // errors should still surface as deferred section errors.
+        if (error.message.contains('(404):') || error.message.contains('404')) {
+          continue;
+        }
+        rethrow;
+      }
       List<RepositoryHistoryCommit> history = const <RepositoryHistoryCommit>[];
       if (historyReader != null) {
         try {
           history = await historyReader.listHistory(
             ref: _provider.dataRef,
             path: entry.path,
+            limit: 1,
           );
         } on TrackStateProviderException {
           history = const <RepositoryHistoryCommit>[];
