@@ -66,7 +66,7 @@ jobs:
           AI_TEAMMATE_CONFIG_FILE: ${{ inputs.config_file }}
           AI_TEAMMATE_CONCURRENCY_KEY: ${{ inputs.concurrency_key }}
           AI_TEAMMATE_DISPLAY_KEY: ${{ inputs.display_key || inputs.concurrency_key }}
-        run: bash agents/setup/cache.sh keys dmtools:v1.7.196 codegraph copilot:1.0.44 copilot-session playwright
+        run: bash agents/setup/cache.sh keys dmtools:v1.7.196 codegraph copilot:1.0.44 copilot-session playwright kimi
 
       - name: Cache Playwright browsers
         uses: actions/cache@v4
@@ -141,6 +141,14 @@ jobs:
           restore-keys: |
             ${{ env.CODEGRAPH_INDEX_CACHE_KEY }}-${{ github.ref_name }}-
             ${{ env.CODEGRAPH_INDEX_CACHE_KEY }}-
+
+      - name: Cache Kimi CLI
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.KIMI_CACHE_PATH }}
+          key: ${{ env.KIMI_CACHE_KEY }}
+          restore-keys: |
+            kimi-
 
       - name: Install AI Teammate tools
         run: bash agents/setup/install.sh java:17 node:20 dmtools:v1.7.196 codegraph playwright kimi
