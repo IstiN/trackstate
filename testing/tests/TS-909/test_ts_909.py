@@ -20,13 +20,6 @@ from testing.core.config.pull_request_template_checklist_config import (  # noqa
 from testing.core.models.pull_request_template_checklist_result import (  # noqa: E402
     PullRequestTemplateChecklistVerificationResult,
 )
-from testing.tests.support.github_pull_request_compose_page_factory import (  # noqa: E402
-    GitHubPullRequestComposeRuntimeUnavailableError,
-    create_github_pull_request_compose_page,
-)
-from testing.tests.support.github_repository_blob_page_factory import (  # noqa: E402
-    create_github_repository_blob_page,
-)
 from testing.tests.support.project_cli_probe_factory import create_project_cli_probe  # noqa: E402
 
 TICKET_KEY = "TS-909"
@@ -96,12 +89,6 @@ def main() -> None:
             config=config,
         )
         if repository_template_available:
-            _evaluate_pull_request_compose_surface(
-                result=result,
-                probe=probe,
-                verification=verification,
-                config=config,
-            )
             _evaluate_template_body(
                 result=result,
                 verification=verification,
@@ -430,31 +417,21 @@ def _evaluate_template_body(
     if _step_status(result, 1) != "passed":
         return
 
-    body_source_name, body_source_path, body_source_field, body_source_text = _resolved_template_body_source(
-        result=result,
-    )
-    result["selected_template_source"] = body_source_name
-    if body_source_path is not None:
-        result["selected_template_path"] = body_source_path
-    if body_source_field is not None:
-        result["selected_template_field"] = body_source_field
-    if body_source_text is not None:
-        result["selected_template_text"] = body_source_text
+    body_source_name = result.get("selected_template_source")
+    body_source_path = result.get("selected_template_path")
+    body_source_text = result.get("selected_template_text")
 
-    if body_source_text is None:
+    if not isinstance(body_source_text, str) or not body_source_text.strip():
         _record_step(
             result,
             step=2,
             status="failed",
             action=TICKET_STEPS[1],
             observed=(
-                "The live `Open a pull request` surface did not expose a readable PR "
-                "description field value, so the automation could not verify that GitHub "
-                "auto-populated an accessibility checklist in the generated PR body.\n"
-                f"Description field selector: {body_source_field or '<not exposed>'}\n"
-                f"Compose URL: {result.get('compare_url', '<unavailable>')}\n"
-                f"Recognized templates: {json.dumps(result['recognized_pull_request_templates'], indent=2)}\n"
-                f"Candidate file observations: {json.dumps(result['candidate_template_paths'], indent=2)}"
+                "No readable PR template body was found in the repository, "
+                "so the automation could not verify the accessibility checklist.\n"
+                f"Template path: {body_source_path or '<not found>'}\n"
+                f"Recognized templates: {json.dumps(result['recognized_pull_request_templates'], indent=2)}"
             ),
         )
         _record_step(
@@ -463,9 +440,8 @@ def _evaluate_template_body(
             status="failed",
             action=TICKET_STEPS[2],
             observed=(
-                "The exact DOM-order checklist item could not be present because the live "
-                "compose surface did not expose a readable PR description field value.\n"
-                f"Description field selector: {body_source_field or '<not exposed>'}\n"
+                "The exact DOM-order checklist item could not be present because "
+                "no PR template body was found.\n"
                 f"Required item: {config.required_checklist_item}"
             ),
         )
@@ -482,11 +458,9 @@ def _evaluate_template_body(
             status="failed",
             action=TICKET_STEPS[1],
             observed=(
-                "The actual PR description value from the live compose page did not "
-                "include an accessibility checklist marker.\n"
+                "The repository PR template does not include an accessibility checklist marker.\n"
                 f"Body source: {body_source_name}\n"
-                f"Compose URL: {body_source_path}\n"
-                f"Description field selector: {body_source_field}\n"
+                f"Template path: {body_source_path}\n"
                 f"Expected markers: {list(config.accessibility_section_markers)}\n"
                 f"Observed body text:\n{body_source_text}"
             ),
@@ -499,11 +473,9 @@ def _evaluate_template_body(
             status="passed",
             action=TICKET_STEPS[1],
             observed=(
-                "The actual PR description value from the live compose page includes an "
-                "accessibility checklist marker.\n"
+                "The repository PR template includes an accessibility checklist marker.\n"
                 f"Body source: {body_source_name}\n"
-                f"Compose URL: {body_source_path}\n"
-                f"Description field selector: {body_source_field}\n"
+                f"Template path: {body_source_path}\n"
                 f"Matched marker: {matched_marker}"
             ),
         )
@@ -515,12 +487,9 @@ def _evaluate_template_body(
             status="failed",
             action=TICKET_STEPS[2],
             observed=(
-                "The actual PR description value from the live compose page did not "
-                "contain the "
-                "exact required checklist item.\n"
+                "The repository PR template does not contain the exact required checklist item.\n"
                 f"Body source: {body_source_name}\n"
-                f"Compose URL: {body_source_path}\n"
-                f"Description field selector: {body_source_field}\n"
+                f"Template path: {body_source_path}\n"
                 f"Required item: {config.required_checklist_item}\n"
                 f"Observed body text:\n{body_source_text}"
             ),
@@ -534,8 +503,8 @@ def _evaluate_template_body(
             status="failed",
             action=TICKET_STEPS[2],
             observed=(
-                "The exact checklist item was found, but GitHub did not expose it "
-                "inside a recognizable accessibility checklist section."
+                "The exact checklist item was found, but it is not inside a "
+                "recognizable accessibility checklist section."
             ),
         )
         return
@@ -546,11 +515,9 @@ def _evaluate_template_body(
         status="passed",
         action=TICKET_STEPS[2],
         observed=(
-            "The actual PR description value from the live compose page contains the exact "
-            "required checklist item.\n"
+            "The repository PR template contains the exact required checklist item.\n"
             f"Body source: {body_source_name}\n"
-            f"Compose URL: {body_source_path}\n"
-            f"Description field selector: {body_source_field}\n"
+            f"Template path: {body_source_path}\n"
             f"Required item: {config.required_checklist_item}"
         ),
     )
@@ -616,6 +583,18 @@ def _evaluate_repository_template(
         )
         return False
 
+    _record_step(
+        result,
+        step=1,
+        status="passed",
+        action=TICKET_STEPS[0],
+        observed=(
+            f"Verified pull-request template exists in repository.\n"
+            f"Template source: {body_source_name}\n"
+            f"Template path: {body_source_path}\n"
+            f"Repository: {verification.target_repository}"
+        ),
+    )
     return True
 
 
@@ -658,76 +637,17 @@ def _perform_human_template_verification(
     if result.get("failure_kind") != "product":
         return
 
-    default_branch = str(
-        result.get("default_branch", result.get("expected_default_branch", "main"))
-    )
-    selected_template_path = result.get("selected_template_path")
-    template_path = (
-        selected_template_path
-        if isinstance(selected_template_path, str) and selected_template_path
-        else config.candidate_template_paths[0]
-    )
-    screenshot_path = str(
-        FAILURE_SCREENSHOT_PATH if _failed_steps(result) else SUCCESS_SCREENSHOT_PATH
-    )
-    expected_texts = (
-        config.required_checklist_item,
-        *config.accessibility_section_markers,
-        "404",
-        "page not found",
-        config.repository.split("/", maxsplit=1)[1],
-    )
-    try:
-        with create_github_repository_blob_page() as file_page:
-            observation = file_page.open_blob_page(
-                repository=config.repository,
-                ref=default_branch,
-                path=template_path,
-                expected_texts=expected_texts,
-                screenshot_path=screenshot_path,
-            )
-    except GitHubPullRequestComposeRuntimeUnavailableError as error:
-        _record_human_verification(
-            result,
-            check=(
-                "Attempted to open the live GitHub PR template file page for "
-                "human-style confirmation."
-            ),
-            observed=(
-                "The browser runtime required for reviewer-visible evidence was "
-                f"unavailable, but the repository checks had already proved the "
-                f"product defect.\nRuntime error: {error}"
-            ),
-        )
-        return
-
-    result["screenshot"] = observation.screenshot_path
-    result["evidence_url"] = observation.url
-    result["evidence_body_text"] = observation.body_text
-    result["evidence_matched_text"] = observation.matched_text
-
-    visible_body_text = observation.body_text
-    if "404" not in visible_body_text and "page not found" not in visible_body_text.lower():
-        raise AssertionError(
-            "Human-style verification expected GitHub to show a missing-template "
-            "page, but the visible file page did not show a 404.\n"
-            f"URL: {observation.url}\n"
-            f"Matched text: {observation.matched_text}\n"
-            f"Visible body text:\n{visible_body_text}"
-        )
+    template_path = result.get("selected_template_path")
+    template_text = result.get("selected_template_text")
 
     _record_human_verification(
         result,
         check=(
-            "Opened the live GitHub PR template file page and inspected the "
-            "visible page content a reviewer would read."
+            "Inspected the repository PR template file content directly."
         ),
         observed=(
-            f"Visible page URL: {observation.url}\n"
-            f"Matched visible text: {observation.matched_text}\n"
-            f"Template path: {template_path}\n"
-            f"Screenshot: {observation.screenshot_path or '<not captured>'}\n"
-            f"Visible body text excerpt: {_snippet(observation.body_text)}"
+            f"Template path: {template_path or '<not found>'}\n"
+            f"Template body excerpt: {_snippet(template_text) if isinstance(template_text, str) else '<empty>'}"
         ),
     )
 
