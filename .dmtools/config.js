@@ -49,6 +49,8 @@ const FLUTTER_FEEDBACK = {
 };
 
 module.exports = {
+    defaultTracker: 'jira',
+
     globalCliPrompts: [
         './agents/prompts/codegraph_tools.md'
     ],

@@ -228,6 +228,8 @@ jobs:
       - name: Run AI Teammate
         id: run_ai
         env:
+          DEFAULT_TRACKER: "jira"
+
           JIRA_EMAIL: ${{ secrets.JIRA_EMAIL }}
           JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
           JIRA_BASE_PATH: ${{ vars.JIRA_BASE_PATH }}
