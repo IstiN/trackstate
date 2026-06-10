@@ -249,6 +249,10 @@ jobs:
           COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN || secrets.PAT_TOKEN }}
           COPILOT_MODEL: ${{ vars.COPILOT_MODEL }}
           AI_AGENT_PROVIDER: ${{ vars.AI_AGENT_PROVIDER }}
+
+          KIMI_API_KEY: ${{ secrets.KIMI_API_KEY }}
+          KIMI_MODEL: ${{ vars.KIMI_MODEL }}
+          KIMI_BASE_URL: ${{ vars.KIMI_BASE_URL }}
           AI_TEAMMATE_CONFIG_FILE: ${{ inputs.config_file }}
           AI_TEAMMATE_CONCURRENCY_KEY: ${{ inputs.concurrency_key }}
           AI_TEAMMATE_DISPLAY_KEY: ${{ inputs.display_key || inputs.concurrency_key }}
