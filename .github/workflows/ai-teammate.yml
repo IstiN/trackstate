@@ -151,6 +151,10 @@ jobs:
             kimi-
 
       - name: Install AI Teammate tools
+        env:
+          KIMI_API_KEY: ${{ secrets.KIMI_API_KEY }}
+          KIMI_MODEL: ${{ vars.KIMI_MODEL }}
+          KIMI_BASE_URL: ${{ vars.KIMI_BASE_URL }}
         run: bash agents/setup/install.sh java:17 node:20 dmtools:v1.7.196 codegraph playwright kimi
 
       - name: Install CodeGraph usage guard
