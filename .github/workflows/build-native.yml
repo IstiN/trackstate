@@ -118,7 +118,7 @@ jobs:
                 return;
               }
 
-              if (error.status === 403) {
+              if (error.status === 403 || error.status === 401) {
                 core.warning(
                   `${readinessFailureMessage} Continuing without runner inventory preflight; the macOS build job will rely on its runs-on labels.`,
                 );
