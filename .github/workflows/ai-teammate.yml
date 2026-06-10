@@ -143,7 +143,7 @@ jobs:
             ${{ env.CODEGRAPH_INDEX_CACHE_KEY }}-
 
       - name: Install AI Teammate tools
-        run: bash agents/setup/install.sh java:17 node:20 dmtools:v1.7.196 codegraph playwright
+        run: bash agents/setup/install.sh java:17 node:20 dmtools:v1.7.196 codegraph playwright kimi
 
       - name: Install CodeGraph usage guard
         run: |
