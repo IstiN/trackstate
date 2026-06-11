@@ -82,9 +82,11 @@ module.exports = {
         },
         parentContextFetch: {
             enabled: true,
-            // Fields fetched for the parent story itself (written to parent-TS-XX.md)
-            parentFields: ['key', 'summary', 'description', 'status', 'Acceptance Criteria', 'Solution', 'Diagrams'],
-            // Fields fetched for [BA]/[SA]/[VD] sibling subtasks
+            resolveFieldNames: true,
+            // parentFields defaults are auto-aggregated from jira.fields above
+            // + DEFAULT_FIELDS ['key','summary','description','status','comment']
+            // Explicit override example:
+            // parentFields: ['key','summary','description','status','Acceptance Criteria','Solution','Diagrams'],
             siblingFields: ['key', 'summary', 'description', 'status', 'comment', 'Acceptance Criteria']
         }
     },

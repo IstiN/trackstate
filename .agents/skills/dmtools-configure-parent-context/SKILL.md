@@ -51,42 +51,49 @@ input/
 
 ### 1. Project Config (`.dmtools/config.js`)
 
-Add `jira.parentContextFetch` to enable globally:
+**Recommended: aggregation from `jira.fields`**
+
+Define your custom fields once in `jira.fields`. `fetchParentContextToInput.js` automatically aggregates all human-readable field names into the default field set:
 
 ```js
 module.exports = {
   jira: {
     project: 'TS',
     parentTicket: 'TS-1',
+    fields: {
+      acceptanceCriteria: 'Acceptance Criteria',
+      solution: 'Solution',
+      diagrams: 'Diagrams',
+      answer: 'Answer'
+      // Skip raw customfield_* IDs here — they are technical, not for context
+    },
     parentContextFetch: {
       enabled: true,
-      resolveFieldNames: true,     // resolves "Acceptance Criteria" → "customfield_10397"
-      parentFields: [              // fields for parent-KEY.md
-        'key',
-        'summary',
-        'description',
-        'status',
-        'Acceptance Criteria',
-        'Solution',
-        'Diagrams'
-      ],
-      siblingFields: [             // fields for parent_context_*.md
-        'key',
-        'summary',
-        'description',
-        'status',
-        'comment',
-        'Acceptance Criteria'
-      ]
+      resolveFieldNames: true,   // resolves "Acceptance Criteria" → "customfield_10397"
+      // parentFields omitted → auto-aggregated from jira.fields + DEFAULT_FIELDS
+      siblingFields: ['key', 'summary', 'description', 'status', 'comment', 'Acceptance Criteria']
     }
   },
   defaultTracker: 'jira'
 };
 ```
 
-**Field names:** Use human-readable names (e.g. `"Acceptance Criteria"`). DMTools resolves them to `customfield_*` IDs automatically when `resolveFieldNames: true`.
+**How aggregation works:**
+- `buildDefaultFields()` starts with `['key', 'summary', 'description', 'status', 'comment']`
+- Then appends every human-readable value from `jira.fields` (skips raw `customfield_*` IDs)
+- Result for the example above: `['key', 'summary', 'description', 'status', 'comment', 'Acceptance Criteria', 'Solution', 'Diagrams', 'Answer']`
 
-**Project-specific fields:** Find your custom field names via:
+**Explicit override** (when you need different fields for parent vs siblings):
+
+```js
+parentContextFetch: {
+  enabled: true,
+  parentFields: ['key', 'summary', 'description', 'status', 'Acceptance Criteria', 'Solution', 'Diagrams'],
+  siblingFields: ['key', 'summary', 'description', 'status', 'comment', 'Acceptance Criteria']
+}
+```
+
+**Find your custom field names:**
 
 ```bash
 curl -u "$JIRA_EMAIL:$JIRA_API_TOKEN" \
