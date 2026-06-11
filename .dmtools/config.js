@@ -148,6 +148,27 @@ module.exports = {
         ]
     },
 
+    cliPromptsByTracker: {
+        jira: {
+            story_questions: ['./agents/instructions/tracker/jira_markup_transform.md'],
+            story_description: ['./agents/instructions/tracker/jira_markup_transform.md'],
+            story_acceptance_criteria: ['./agents/instructions/tracker/jira_markup_transform.md'],
+            story_acceptance_criterias: ['./agents/instructions/tracker/jira_markup_transform.md'],
+            story_solution: ['./agents/instructions/tracker/jira_markup_transform.md'],
+            solution_description: ['./agents/instructions/tracker/jira_markup_transform.md'],
+            po_refinement: ['./agents/instructions/tracker/jira_markup_transform.md']
+        },
+        ado: {
+            story_questions: ['./agents/instructions/tracker/ado_markup_transform.md'],
+            story_description: ['./agents/instructions/tracker/ado_markup_transform.md'],
+            story_acceptance_criteria: ['./agents/instructions/tracker/ado_markup_transform.md'],
+            story_acceptance_criterias: ['./agents/instructions/tracker/ado_markup_transform.md'],
+            story_solution: ['./agents/instructions/tracker/ado_markup_transform.md'],
+            solution_description: ['./agents/instructions/tracker/ado_markup_transform.md'],
+            po_refinement: ['./agents/instructions/tracker/ado_markup_transform.md']
+        }
+    },
+
     additionalInstructions: {
         po_refinement: [
             GOAL_INSTRUCTIONS,
