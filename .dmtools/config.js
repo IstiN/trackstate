@@ -76,6 +76,13 @@ module.exports = {
         fields: {
             acceptanceCriteria: 'Acceptance Criteria',
             bugSolution: 'customfield_10400'
+        },
+        parentContextFetch: {
+            enabled: true,
+            // Fields fetched for the parent story itself (written to parent-TS-XX.md)
+            parentFields: ['key', 'summary', 'description', 'status', 'Acceptance Criteria', 'Solution', 'Diagrams'],
+            // Fields fetched for [BA]/[SA]/[VD] sibling subtasks
+            siblingFields: ['key', 'summary', 'description', 'status', 'comment', 'Acceptance Criteria']
         }
     },
 
