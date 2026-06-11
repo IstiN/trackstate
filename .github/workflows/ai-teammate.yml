@@ -122,7 +122,7 @@ jobs:
           path: ${{ env.DMTOOLS_CACHE_PATH }}
           key: ${{ env.DMTOOLS_CACHE_KEY }}
           restore-keys: |
-            dmtools-
+            ${{ env.DMTOOLS_CACHE_RESTORE_KEY }}
 
       - name: Cache CodeGraph binary
         uses: actions/cache@v4
