@@ -75,6 +75,9 @@ module.exports = {
         },
         fields: {
             acceptanceCriteria: 'Acceptance Criteria',
+            solution: 'Solution',
+            diagrams: 'Diagrams',
+            answer: 'Answer',
             bugSolution: 'customfield_10400'
         },
         parentContextFetch: {
