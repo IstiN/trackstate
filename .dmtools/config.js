@@ -148,6 +148,14 @@ module.exports = {
         ]
     },
 
+    // Tracker-specific CLI prompts that EXTEND the agent JSON's cliPromptsByTracker.
+    // The agent submodule defines the base tracker prompts; this block only adds
+    // project-specific extras. Empty objects mean "use agent defaults".
+    cliPromptsByTracker: {
+        jira: {},
+        ado: {}
+    },
+
     additionalInstructions: {
         po_refinement: [
             GOAL_INSTRUCTIONS,
