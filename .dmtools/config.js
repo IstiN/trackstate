@@ -152,20 +152,62 @@ module.exports = {
         jira: {
             story_questions: ['./agents/instructions/tracker/jira_markup_transform.md'],
             story_description: ['./agents/instructions/tracker/jira_markup_transform.md'],
-            story_acceptance_criteria: ['./agents/instructions/tracker/jira_markup_transform.md'],
-            story_acceptance_criterias: ['./agents/instructions/tracker/jira_markup_transform.md'],
-            story_solution: ['./agents/instructions/tracker/jira_markup_transform.md'],
-            solution_description: ['./agents/instructions/tracker/jira_markup_transform.md'],
-            po_refinement: ['./agents/instructions/tracker/jira_markup_transform.md']
+            story_acceptance_criteria: [
+                './agents/instructions/story/enhanced_story_formatting.md',
+                './agents/instructions/tracker/jira_markup_transform.md'
+            ],
+            story_acceptance_criterias: [
+                './agents/instructions/story/enhanced_story_formatting.md',
+                './agents/instructions/tracker/jira_markup_transform.md'
+            ],
+            story_solution: [
+                './agents/instructions/common/jira_context.md',
+                './agents/instructions/tracker/jira_markup_transform.md',
+                './agents/instructions/enhancement/solution_design_ac_reference_format.md'
+            ],
+            solution_description: [
+                './agents/instructions/common/jira_context.md',
+                './agents/instructions/tracker/jira_markup_transform.md'
+            ],
+            po_refinement: ['./agents/instructions/tracker/jira_markup_transform.md'],
+            bug_creation: ['./agents/instructions/tracker/jira_comment_format.md'],
+            bulk_bugs_creation: ['./agents/instructions/tracker/jira_comment_format.md'],
+            intake: ['./agents/instructions/tracker/jira_comment_format.md'],
+            pr_review: ['./agents/instructions/tracker/jira_comment_format.md'],
+            pr_rework: ['./agents/instructions/tracker/jira_comment_format.md'],
+            pr_test_automation_review: ['./agents/instructions/tracker/jira_comment_format.md'],
+            pr_test_automation_rework: ['./agents/instructions/tracker/jira_comment_format.md'],
+            test_case_automation: ['./agents/instructions/tracker/jira_comment_format.md']
         },
         ado: {
             story_questions: ['./agents/instructions/tracker/ado_markup_transform.md'],
             story_description: ['./agents/instructions/tracker/ado_markup_transform.md'],
-            story_acceptance_criteria: ['./agents/instructions/tracker/ado_markup_transform.md'],
-            story_acceptance_criterias: ['./agents/instructions/tracker/ado_markup_transform.md'],
-            story_solution: ['./agents/instructions/tracker/ado_markup_transform.md'],
-            solution_description: ['./agents/instructions/tracker/ado_markup_transform.md'],
-            po_refinement: ['./agents/instructions/tracker/ado_markup_transform.md']
+            story_acceptance_criteria: [
+                './agents/instructions/story/enhanced_story_formatting.md',
+                './agents/instructions/tracker/ado_markup_transform.md'
+            ],
+            story_acceptance_criterias: [
+                './agents/instructions/story/enhanced_story_formatting.md',
+                './agents/instructions/tracker/ado_markup_transform.md'
+            ],
+            story_solution: [
+                './agents/instructions/tracker/ado_context.md',
+                './agents/instructions/tracker/ado_markup_transform.md',
+                './agents/instructions/enhancement/solution_design_ac_reference_format.md'
+            ],
+            solution_description: [
+                './agents/instructions/tracker/ado_context.md',
+                './agents/instructions/tracker/ado_markup_transform.md'
+            ],
+            po_refinement: ['./agents/instructions/tracker/ado_markup_transform.md'],
+            bug_creation: ['./agents/instructions/tracker/ado_comment_format.md'],
+            bulk_bugs_creation: ['./agents/instructions/tracker/ado_comment_format.md'],
+            intake: ['./agents/instructions/tracker/ado_comment_format.md'],
+            pr_review: ['./agents/instructions/tracker/ado_comment_format.md'],
+            pr_rework: ['./agents/instructions/tracker/ado_comment_format.md'],
+            pr_test_automation_review: ['./agents/instructions/tracker/ado_comment_format.md'],
+            pr_test_automation_rework: ['./agents/instructions/tracker/ado_comment_format.md'],
+            test_case_automation: ['./agents/instructions/tracker/ado_comment_format.md']
         }
     },
 
