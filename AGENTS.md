@@ -51,3 +51,28 @@ Use **repomix** to generate a full-repo overview or targeted code snapshots for 
 > - `--compress` uses Tree-sitter to keep signatures and replace method bodies with `⋮----`, significantly reducing token count.
 > - Always use `--stdin` for specific file lists — multiple `--include` flags are unreliable.
 > - `snapshots/` is `.gitignore`d — never commit generated XML files.
+
+---
+
+## 🤖 Agent Prompt Snapshots
+
+The `agents/` directory is a Git submodule pointing to `IstiN/dmtools-agents`. The dmtools runtime feeds agents the flattened prompt snapshots under `agents/snapshots/` rather than the raw Markdown sources. **Any edit to an agent instruction `.md` file in `dmtools-agents` must be followed by regenerating the snapshots; otherwise the runtime will keep using the stale flattened version.**
+
+### Regenerate snapshots after changing agent prompts
+
+```bash
+cd agents
+node generate_agent_snapshots.js
+```
+
+Then commit the regenerated `snapshots/*.md` files inside `dmtools-agents`, merge the submodule PR, and bump the `agents` submodule in this repo.
+
+### Bump the agents submodule in trackstate
+
+```bash
+cd /Users/Uladzimir_Klyshevich/git/trackstate
+git submodule update --remote agents
+git add agents
+git commit -m "chore(agents): bump submodule to regenerated prompt snapshots"
+git push
+```
