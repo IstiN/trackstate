@@ -7,10 +7,10 @@ import yaml
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-WORKFLOW_PATH = REPO_ROOT / ".github/workflows/build-native.yml"
+WORKFLOW_PATH = REPO_ROOT / ".github/workflows/build-macos-reusable.yml"
 
 
-class BuildNativeWorkflowRegressionTest(unittest.TestCase):
+class BuildMacosReusableWorkflowRegressionTest(unittest.TestCase):
     def setUp(self) -> None:
         workflow = yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
         if not isinstance(workflow, dict):

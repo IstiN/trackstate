@@ -8,9 +8,11 @@ dependencies:
 runtime_inputs:
   repository: IstiN/trackstate
   default_branch: main
-  workflow_name: Apple Release Builds
-  workflow_file: build-native.yml
-  workflow_path: .github/workflows/build-native.yml
+  workflow_name: Build macOS release artifacts
+  workflow_file: build-macos-reusable.yml
+  workflow_path: .github/workflows/build-macos-reusable.yml
+  caller_workflow_file: build-native.yml
+  caller_workflow_path: .github/workflows/build-native.yml
   verify_runner_job_name: Verify macOS runner availability
   build_job_name: Build macOS desktop and CLI artifacts
   setup_flutter_step_name: Set up Flutter
@@ -24,6 +26,6 @@ runtime_inputs:
   poll_interval_seconds: 10
   log_excerpt_lines: 40
 notes:
-  - Uses the live Apple release workflow from IstiN/trackstate and a disposable semantic tag whose workflow file is modified only for the test run to inject a Flutter 3.30.0 shim immediately before the validation step while leaving Set up Flutter on 3.35.3.
-  - Expects the production validation step to reject that mismatched Flutter version with an explicit 3.35.3-required error before the desktop or CLI build steps proceed.
-  - Treats the workflow's runner-availability guard as a precondition check; unavailable or offline release runners block the test instead of generating product-bug evidence.
+  - The macOS build logic has been extracted into `.github/workflows/build-macos-reusable.yml`.
+  - The toolchain validation steps (Set up Flutter, Verify runner toolchain, Build macOS desktop app, Build macOS CLI) now live in the reusable workflow.
+  - The live probe must trigger the caller workflow (`build-native.yml`) and observe the nested reusable workflow jobs; the file-page check should inspect `.github/workflows/build-macos-reusable.yml` for the toolchain contract.

@@ -70,9 +70,9 @@ class TS706OutputRegressionTest(unittest.TestCase):
         config = ts_706.GitHubActionsPreflightGateConfig(
             repository="IstiN/trackstate",
             default_branch="main",
-            workflow_name="Apple Release Builds",
-            workflow_file="build-native.yml",
-            workflow_path=".github/workflows/build-native.yml",
+            workflow_name="Build macOS release artifacts",
+            workflow_file="build-macos-reusable.yml",
+            workflow_path=".github/workflows/build-macos-reusable.yml",
             preflight_job_name="Verify macOS runner availability",
             downstream_job_name="Build macOS desktop and CLI artifacts",
             expected_preflight_runner="ubuntu-latest",
@@ -97,7 +97,7 @@ class TS706OutputRegressionTest(unittest.TestCase):
         base_result = {
             "repository": "IstiN/trackstate",
             "default_branch": "main",
-            "workflow_name": "Apple Release Builds",
+            "workflow_name": "Build macOS release artifacts",
             "tag_name": "v98.test",
             "head_sha": "head-sha",
             "error": "Precondition failed: queued run observed",
@@ -178,9 +178,9 @@ class TS706OutputRegressionTest(unittest.TestCase):
         config = ts_706.GitHubActionsPreflightGateConfig(
             repository="IstiN/trackstate",
             default_branch="main",
-            workflow_name="Apple Release Builds",
-            workflow_file="build-native.yml",
-            workflow_path=".github/workflows/build-native.yml",
+            workflow_name="Build macOS release artifacts",
+            workflow_file="build-macos-reusable.yml",
+            workflow_path=".github/workflows/build-macos-reusable.yml",
             preflight_job_name="Verify macOS runner availability",
             downstream_job_name="Build macOS desktop and CLI artifacts",
             expected_preflight_runner="ubuntu-latest",
@@ -216,7 +216,7 @@ class TS706OutputRegressionTest(unittest.TestCase):
         result = {
             "repository": "IstiN/trackstate",
             "default_branch": "main",
-            "workflow_name": "Apple Release Builds",
+            "workflow_name": "Build macOS release artifacts",
             "tag_name": "v98.test",
             "head_sha": "head-sha",
             "error": "Precondition failed: downstream job proceeded",
@@ -254,6 +254,7 @@ class TS706OutputRegressionTest(unittest.TestCase):
         self.assertEqual(result["steps"][-1]["status"], "blocked")
         self.assertIn("proves the ticket precondition was not met", result["steps"][-1]["observed"])
         self.assertNotIn("ambiguous", result["steps"][-1]["observed"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -46,7 +46,11 @@ dart run trackstate jira_execute_request --target local --method GET --request-p
 
 `.github/workflows/unit-tests.yml` runs Flutter required checks on pull requests. `.github/workflows/flutter-ci.yml` builds the GitHub Pages web app, uploads the `trackstate-web` artifact, and deploys Pages from `main`.
 
-`.github/workflows/build-native.yml` is the dedicated Apple release workflow. It runs only for semantic version tags (`v*`) or manual recovery dispatches, verifies the TrackState macOS runner contract before scheduling release work, and publishes the zipped macOS app bundle, CLI archive, and SHA256 manifest to the source repository release. `.github/workflows/repair-historical-apple-releases.yml` now watches successful `main` validation runs and re-dispatches `build-native.yml` for `v0.0.98` when the published Apple Silicon archive still contains a universal binary. Runner ownership, labels, and toolchain requirements are documented in [`docs/macos-release-runner.md`](docs/macos-release-runner.md).
+`.github/workflows/release-on-main.yml` orchestrates semantic releases from `main`. It resolves the next `vX.Y.Z` version, runs the required Flutter validation, fans out Linux, Windows, and macOS release builds, and publishes a single GitHub release with desktop and CLI archives plus a unified SHA256 checksum.
+
+`.github/workflows/build-macos-reusable.yml` encapsulates the macOS runner verification, desktop app build, CLI compilation, ARM64-only thinning, packaging, and artifact upload so it can be reused by the main release orchestration and by manual recovery dispatches.
+
+`.github/workflows/build-native.yml` is the legacy manual recovery wrapper for macOS releases. It no longer triggers on tags; it runs only via `workflow_dispatch`, resolves a semantic tag, calls `.github/workflows/build-macos-reusable.yml`, and publishes the resulting macOS assets to a GitHub release. `.github/workflows/repair-historical-apple-releases.yml` continues to watch successful `main` validation runs and re-dispatches `build-native.yml` for `v0.0.98` when the published Apple Silicon archive still contains a universal binary. Runner ownership, labels, and toolchain requirements are documented in [`docs/macos-release-runner.md`](docs/macos-release-runner.md).
 
 ## Fork-and-run setup repository
 

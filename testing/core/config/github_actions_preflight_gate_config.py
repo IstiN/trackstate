@@ -54,19 +54,19 @@ class GitHubActionsPreflightGateConfig:
                 runtime_inputs,
                 env_key="TS706_WORKFLOW_NAME",
                 payload_key="workflow_name",
-                default="Apple Release Builds",
+                default="Build macOS release artifacts",
             ),
             workflow_file=_read_string(
                 runtime_inputs,
                 env_key="TS706_WORKFLOW_FILE",
                 payload_key="workflow_file",
-                default="build-native.yml",
+                default="build-macos-reusable.yml",
             ),
             workflow_path=_read_string(
                 runtime_inputs,
                 env_key="TS706_WORKFLOW_PATH",
                 payload_key="workflow_path",
-                default=".github/workflows/build-native.yml",
+                default=".github/workflows/build-macos-reusable.yml",
             ),
             preflight_job_name=_read_string(
                 runtime_inputs,

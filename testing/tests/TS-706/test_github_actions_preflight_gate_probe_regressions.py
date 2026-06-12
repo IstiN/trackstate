@@ -76,9 +76,9 @@ class GitHubActionsPreflightGateProbeRegressionTest(unittest.TestCase):
         self.config = GitHubActionsPreflightGateConfig(
             repository="IstiN/trackstate",
             default_branch="main",
-            workflow_name="Apple Release Builds",
-            workflow_file="build-native.yml",
-            workflow_path=".github/workflows/build-native.yml",
+            workflow_name="Build macOS release artifacts",
+            workflow_file="build-macos-reusable.yml",
+            workflow_path=".github/workflows/build-macos-reusable.yml",
             preflight_job_name="Verify macOS runner availability",
             downstream_job_name="Build macOS desktop and CLI artifacts",
             expected_preflight_runner="ubuntu-latest",
@@ -129,24 +129,24 @@ jobs:
                 ],
                 (
                     "GET",
-                    "/repos/IstiN/trackstate/actions/workflows/build-native.yml",
+                    "/repos/IstiN/trackstate/actions/workflows/build-macos-reusable.yml",
                 ): [
                     {
-                        "html_url": "https://github.com/IstiN/trackstate/actions/workflows/build-native.yml",
+                        "html_url": "https://github.com/IstiN/trackstate/actions/workflows/build-macos-reusable.yml",
                         "state": "active",
-                        "path": ".github/workflows/build-native.yml",
+                        "path": ".github/workflows/build-macos-reusable.yml",
                     }
                 ],
                 (
                     "GET",
-                    "/repos/IstiN/trackstate/contents/.github/workflows/build-native.yml?ref=main",
+                    "/repos/IstiN/trackstate/contents/.github/workflows/build-macos-reusable.yml?ref=main",
                 ): [self.workflow_yaml],
                 ("GET", "/repos/IstiN/trackstate/branches/main"): [
                     {"commit": {"sha": "head-sha"}}
                 ],
                 (
                     "GET",
-                    "/repos/IstiN/trackstate/actions/workflows/build-native.yml/runs?event=push&per_page=50",
+                    "/repos/IstiN/trackstate/actions/workflows/build-macos-reusable.yml/runs?event=push&per_page=50",
                 ): [{"workflow_runs": []}],
                 ("POST", "/repos/IstiN/trackstate/git/refs"): [""],
                 ("GET", "/repos/IstiN/trackstate/actions/runs/91/jobs?per_page=20"): [
@@ -216,24 +216,24 @@ jobs:
                 ],
                 (
                     "GET",
-                    "/repos/IstiN/trackstate/actions/workflows/build-native.yml",
+                    "/repos/IstiN/trackstate/actions/workflows/build-macos-reusable.yml",
                 ): [
                     {
-                        "html_url": "https://github.com/IstiN/trackstate/actions/workflows/build-native.yml",
+                        "html_url": "https://github.com/IstiN/trackstate/actions/workflows/build-macos-reusable.yml",
                         "state": "active",
-                        "path": ".github/workflows/build-native.yml",
+                        "path": ".github/workflows/build-macos-reusable.yml",
                     }
                 ],
                 (
                     "GET",
-                    "/repos/IstiN/trackstate/contents/.github/workflows/build-native.yml?ref=main",
+                    "/repos/IstiN/trackstate/contents/.github/workflows/build-macos-reusable.yml?ref=main",
                 ): [self.workflow_yaml],
                 ("GET", "/repos/IstiN/trackstate/branches/main"): [
                     {"commit": {"sha": "head-sha"}}
                 ],
                 (
                     "GET",
-                    "/repos/IstiN/trackstate/actions/workflows/build-native.yml/runs?event=push&per_page=50",
+                    "/repos/IstiN/trackstate/actions/workflows/build-macos-reusable.yml/runs?event=push&per_page=50",
                 ): [{"workflow_runs": []}],
                 ("POST", "/repos/IstiN/trackstate/git/refs"): [""],
                 ("GET", "/repos/IstiN/trackstate/actions/runs/91"): [
@@ -382,24 +382,24 @@ jobs:
                 ],
                 (
                     "GET",
-                    "/repos/IstiN/trackstate/actions/workflows/build-native.yml",
+                    "/repos/IstiN/trackstate/actions/workflows/build-macos-reusable.yml",
                 ): [
                     {
-                        "html_url": "https://github.com/IstiN/trackstate/actions/workflows/build-native.yml",
+                        "html_url": "https://github.com/IstiN/trackstate/actions/workflows/build-macos-reusable.yml",
                         "state": "active",
-                        "path": ".github/workflows/build-native.yml",
+                        "path": ".github/workflows/build-macos-reusable.yml",
                     }
                 ],
                 (
                     "GET",
-                    "/repos/IstiN/trackstate/contents/.github/workflows/build-native.yml?ref=main",
+                    "/repos/IstiN/trackstate/contents/.github/workflows/build-macos-reusable.yml?ref=main",
                 ): [self.workflow_yaml],
                 ("GET", "/repos/IstiN/trackstate/branches/main"): [
                     {"commit": {"sha": "head-sha"}}
                 ],
                 (
                     "GET",
-                    "/repos/IstiN/trackstate/actions/workflows/build-native.yml/runs?event=push&per_page=50",
+                    "/repos/IstiN/trackstate/actions/workflows/build-macos-reusable.yml/runs?event=push&per_page=50",
                 ): [{"workflow_runs": []}],
                 ("POST", "/repos/IstiN/trackstate/git/refs"): [""],
                 ("GET", "/repos/IstiN/trackstate/actions/runs/91/jobs?per_page=20"): [

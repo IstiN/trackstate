@@ -8,9 +8,9 @@ dependencies:
 runtime_inputs:
   repository: IstiN/trackstate
   default_branch: main
-  workflow_name: Apple Release Builds
-  workflow_file: build-native.yml
-  workflow_path: .github/workflows/build-native.yml
+  workflow_name: Build macOS release artifacts
+  workflow_file: build-macos-reusable.yml
+  workflow_path: .github/workflows/build-macos-reusable.yml
   preflight_job_name: Verify macOS runner availability
   downstream_job_name: Build macOS desktop and CLI artifacts
   expected_preflight_runner: ubuntu-latest
@@ -27,5 +27,5 @@ runtime_inputs:
   run_timeout_seconds: 240
   ui_timeout_seconds: 60
 notes:
-  - Creates a disposable semantic version tag on the live main branch, waits for the Apple release workflow, and deletes the tag after observation.
-  - Verifies the Ubuntu preflight gate fails before any macOS release job can queue, then captures GitHub Actions UI evidence.
+  - The macOS preflight gate now lives in the reusable workflow `.github/workflows/build-macos-reusable.yml` so it can be shared between the main-branch release orchestration and the legacy manual Apple release path.
+  - Live observation should trigger a caller workflow (`release-on-main.yml` or `build-native.yml`) and look for the nested preflight/downstream jobs from the reusable workflow.
