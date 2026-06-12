@@ -30,6 +30,14 @@ jobs:
       - name: Fetch tags
         run: git fetch --force --tags origin
 
+      - name: Guard manual dispatch branch
+        shell: bash
+        run: |
+          if [[ "${{ github.ref }}" != "refs/heads/main" ]]; then
+            echo "::error::Release on main workflow must run from the main branch; got ${{ github.ref }}."
+            exit 1
+          fi
+
       - name: Determine next semantic version
         id: version
         shell: bash
@@ -60,6 +68,7 @@ jobs:
     name: Validate before release
     needs: resolve-version
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     permissions:
       contents: read
     steps:
@@ -343,6 +352,7 @@ jobs:
             "windows/${{ needs.build-windows.outputs.cli_archive }}" \
             "macos/${{ needs.build-macos.outputs.desktop_archive }}" \
             "macos/${{ needs.build-macos.outputs.cli_archive }}" \
+            | awk '{ sub(/^[^\/]+\//, "", $2); print $1 "  " $2 }' \
             > "trackstate-${release_tag}.sha256"
 
       - name: Publish release

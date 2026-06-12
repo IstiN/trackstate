@@ -95,5 +95,22 @@ void main() {
         contains('Install commands and detailed asset descriptions will be added in a follow-up story.'),
       );
     });
+
+    test('only allows manual dispatches from the main branch', () {
+      expect(workflow, contains('Guard manual dispatch branch'));
+      expect(workflow, contains('refs/heads/main'));
+    });
+
+    test('checksum file lists assets without subdirectory prefixes', () {
+      final checksumStep = workflow.substring(
+        workflow.indexOf('Generate unified SHA256 checksums'),
+      );
+      expect(checksumStep, contains('sha256sum'));
+      expect(checksumStep, contains(r'trackstate-${release_tag}.sha256'));
+      expect(
+        checksumStep,
+        contains(r"""awk '{ sub(/^[^\/]+\//, "", $2); print $1 "  " $2 }'"""),
+      );
+    });
   });
 }

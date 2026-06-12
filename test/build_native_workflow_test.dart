@@ -73,6 +73,9 @@ void main() {
       expect(workflow, contains('--draft=false'));
       expect(workflow, contains('--prerelease=false'));
       expect(workflow, contains('--clobber'));
+      expect(workflow, contains('sha256sum'));
+      expect(workflow, isNot(contains('shasum -a 256')));
+      expect(workflow, contains('::warning::Could not generate release notes from the GitHub API'));
       expect(workflow, contains('::notice::GitHub release asset publishing is still running...'));
     });
 

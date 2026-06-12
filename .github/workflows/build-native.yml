@@ -109,7 +109,7 @@ jobs:
           set -euo pipefail
 
           cd build
-          shasum -a 256 \
+          sha256sum \
             "${{ needs.build-macos.outputs.desktop_archive }}" \
             "${{ needs.build-macos.outputs.cli_archive }}" \
             > "trackstate-apple-${release_tag}.sha256"
@@ -145,13 +145,28 @@ jobs:
               gh release delete-asset "$release_tag" "$legacy_checksum_asset" --yes
             fi
           else
-            gh api \
+            if gh api \
               -H "Accept: application/vnd.github+json" \
               -H "X-GitHub-Api-Version: 2022-11-28" \
               "/repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
               -f tag_name="$release_tag" \
               -f target_commitish="$release_target_commit" \
-              --jq '.body' > "$release_notes"
+              --jq '.body' > "$release_notes" 2>/dev/null; then
+              echo ""
+            else
+              echo "::warning::Could not generate release notes from the GitHub API; using fallback scaffold."
+              printf '%s\n' \
+                '## macOS compiled artifacts' \
+                '' \
+                '| Platform | Desktop | CLI |' \
+                '|---|---|---|' \
+                '| macOS | ${{ needs.build-macos.outputs.desktop_archive }} | ${{ needs.build-macos.outputs.cli_archive }} |' \
+                '' \
+                "Verify downloads with \`trackstate-apple-${release_tag}.sha256\`." \
+                '' \
+                '> Install commands and detailed asset descriptions will be added in a follow-up story.' \
+                > "$release_notes"
+            fi
 
             gh release create "$release_tag" \
               --title "TrackState $release_tag" \

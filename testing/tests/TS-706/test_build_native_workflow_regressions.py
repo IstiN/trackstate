@@ -1,17 +1,16 @@
 from __future__ import annotations
 
 from pathlib import Path
-import re
 import unittest
 
 import yaml
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-WORKFLOW_PATH = REPO_ROOT / ".github/workflows/build-macos-reusable.yml"
+WORKFLOW_PATH = REPO_ROOT / ".github/workflows/build-native.yml"
 
 
-class BuildMacosReusableWorkflowRegressionTest(unittest.TestCase):
+class BuildNativeWorkflowRegressionTest(unittest.TestCase):
     def setUp(self) -> None:
         workflow = yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
         if not isinstance(workflow, dict):
@@ -31,9 +30,21 @@ class BuildMacosReusableWorkflowRegressionTest(unittest.TestCase):
         )
         script = runner_check_step["with"]["script"]
 
+        self.assertRegex(
+            script,
+            r"if \(matchingRunners\.length === 0\)\s*\{\s*core\.setFailed\(",
+        )
         self.assertIn(
             "No online runners found with required labels",
             script,
+        )
+        self.assertNotIn(
+            "core.warning(",
+            script,
+        )
+        self.assertRegex(
+            script,
+            r"if \(onlineRunners\.length === 0\)\s*\{\s*core\.setFailed\(",
         )
         self.assertIn(
             "Runner labels ${runnerLabels} are registered, but none are online.",
@@ -42,32 +53,6 @@ class BuildMacosReusableWorkflowRegressionTest(unittest.TestCase):
         self.assertIn(
             "No online runners found with required labels ${runnerLabels} for ${owner}/${repo}.",
             script,
-        )
-
-        # The script legitimately uses core.warning on 401/403 token errors, so only
-        # the label-mismatch branch must fail fast without warning about runners.
-        label_mismatch_match = re.search(
-            r"if \(matchingRunners\.length === 0\)\s*\{.*?\n\s*\}",
-            script,
-            re.DOTALL,
-        )
-        self.assertIsNotNone(
-            label_mismatch_match,
-            "Expected an if (matchingRunners.length === 0) { ... } block in the script.",
-        )
-        label_mismatch_block = label_mismatch_match.group(0)
-        self.assertRegex(
-            label_mismatch_block,
-            r"core\.setFailed\(",
-        )
-        self.assertNotIn(
-            "core.warning(",
-            label_mismatch_block,
-        )
-
-        self.assertRegex(
-            script,
-            r"if \(onlineRunners\.length === 0\)\s*\{\s*core\.setFailed\(",
         )
 
 
