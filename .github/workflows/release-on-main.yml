@@ -122,6 +122,7 @@ jobs:
     name: Build Linux release artifacts
     needs: [resolve-version, validate]
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     env:
       release_tag: ${{ needs.resolve-version.outputs.release_tag }}
       release_checkout_ref: ${{ needs.resolve-version.outputs.release_checkout_ref }}
@@ -208,6 +209,7 @@ jobs:
     name: Build Windows release artifacts
     needs: [resolve-version, validate]
     runs-on: windows-latest
+    timeout-minutes: 45
     env:
       release_tag: ${{ needs.resolve-version.outputs.release_tag }}
       release_checkout_ref: ${{ needs.resolve-version.outputs.release_checkout_ref }}
@@ -301,11 +303,13 @@ jobs:
     runs-on: ubuntu-latest
     env:
       release_tag: ${{ needs.resolve-version.outputs.release_tag }}
+      release_checkout_ref: ${{ needs.resolve-version.outputs.release_checkout_ref }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ env.release_checkout_ref }}
           token: ${{ secrets.PAT_TOKEN || github.token }}
 
       - name: Download Linux artifacts
