@@ -327,6 +327,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
+      actions: read
       contents: write
     env:
       release_tag: ${{ needs.resolve-version.outputs.release_tag }}

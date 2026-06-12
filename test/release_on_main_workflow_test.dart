@@ -55,6 +55,14 @@ void main() {
         contains('--base-href /trackstate/'),
       );
       expect(workflow, contains('needs: [resolve-version, validate]'));
+
+      final validateJob = workflow.substring(
+        workflow.indexOf('validate:'),
+        workflow.indexOf('build-linux:'),
+      );
+      expect(validateJob, contains('timeout-minutes: 45'));
+      expect(validateJob, contains('permissions:'));
+      expect(validateJob, contains('contents: read'));
     });
 
     test('builds web app with env-backed configuration values', () {
@@ -175,6 +183,7 @@ void main() {
       );
       expect(publishJob, contains('timeout-minutes: 45'));
       expect(publishJob, contains('permissions:'));
+      expect(publishJob, contains('actions: read'));
       expect(publishJob, contains('contents: write'));
     });
 
