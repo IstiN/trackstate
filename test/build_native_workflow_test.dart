@@ -34,18 +34,25 @@ void main() {
     });
 
     test('delegates macOS build to the reusable workflow', () {
-      expect(workflow, contains('uses: ./.github/workflows/build-macos-reusable.yml'));
+      final macosJob = workflow.substring(
+        workflow.indexOf('build-macos:'),
+        workflow.indexOf('publish-release:'),
+      );
+      expect(macosJob, contains('uses: ./.github/workflows/build-macos-reusable.yml'));
       expect(
-        workflow,
+        macosJob,
         contains(r'release_tag: ${{ needs.resolve-release.outputs.release_tag }}'),
       );
       expect(
-        workflow,
+        macosJob,
         contains(r'release_checkout_ref: ${{ needs.resolve-release.outputs.release_checkout_ref }}'),
       );
-      expect(workflow, contains('needs: resolve-release'));
-      expect(workflow, contains('secrets:'));
-      expect(workflow, contains(r'PAT_TOKEN: ${{ secrets.PAT_TOKEN }}'));
+      expect(macosJob, contains('needs: resolve-release'));
+      expect(macosJob, contains('secrets:'));
+      expect(macosJob, contains(r'PAT_TOKEN: ${{ secrets.PAT_TOKEN }}'));
+      expect(macosJob, contains('permissions:'));
+      expect(macosJob, contains('contents: read'));
+      expect(macosJob, contains('actions: read'));
     });
 
     test('resolve-release job runs with least privilege and a timeout', () {

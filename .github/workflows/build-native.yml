@@ -79,6 +79,9 @@ jobs:
   build-macos:
     name: Build macOS release artifacts
     needs: resolve-release
+    permissions:
+      actions: read
+      contents: read
     uses: ./.github/workflows/build-macos-reusable.yml
     with:
       release_tag: ${{ needs.resolve-release.outputs.release_tag }}

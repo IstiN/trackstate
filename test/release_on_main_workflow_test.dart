@@ -57,6 +57,54 @@ void main() {
       expect(workflow, contains('needs: [resolve-version, validate]'));
     });
 
+    test('builds web app with env-backed configuration values', () {
+      final webBuildStep = workflow.substring(
+        workflow.indexOf('Build GitHub Pages web app'),
+        workflow.indexOf('build-linux:'),
+      );
+      expect(webBuildStep, contains('env:'));
+      expect(
+        webBuildStep,
+        contains(
+          r'TRACKSTATE_GITHUB_APP_CLIENT_ID: ${{ vars.TRACKSTATE_GITHUB_APP_CLIENT_ID }}',
+        ),
+      );
+      expect(
+        webBuildStep,
+        contains(
+          r'TRACKSTATE_GITHUB_AUTH_PROXY_URL: ${{ vars.TRACKSTATE_GITHUB_AUTH_PROXY_URL }}',
+        ),
+      );
+      expect(
+        webBuildStep,
+        contains(
+          r'--dart-define TRACKSTATE_GITHUB_APP_CLIENT_ID="$TRACKSTATE_GITHUB_APP_CLIENT_ID"',
+        ),
+      );
+      expect(
+        webBuildStep,
+        contains(
+          r'--dart-define TRACKSTATE_GITHUB_AUTH_PROXY_URL="$TRACKSTATE_GITHUB_AUTH_PROXY_URL"',
+        ),
+      );
+      expect(
+        webBuildStep,
+        isNot(
+          contains(
+            r'--dart-define TRACKSTATE_GITHUB_APP_CLIENT_ID="${{ vars.TRACKSTATE_GITHUB_APP_CLIENT_ID }}"',
+          ),
+        ),
+      );
+      expect(
+        webBuildStep,
+        isNot(
+          contains(
+            r'--dart-define TRACKSTATE_GITHUB_AUTH_PROXY_URL="${{ vars.TRACKSTATE_GITHUB_AUTH_PROXY_URL }}"',
+          ),
+        ),
+      );
+    });
+
     test('fans out to Linux, Windows, and macOS build jobs', () {
       expect(workflow, contains('name: Build Linux release artifacts'));
       expect(workflow, contains('runs-on: ubuntu-latest'));
@@ -111,13 +159,23 @@ void main() {
       );
       expect(windowsJob, contains('permissions:'));
       expect(windowsJob, contains('contents: read'));
+
+      final macosJob = workflow.substring(
+        workflow.indexOf('build-macos:'),
+        workflow.indexOf('publish-release:'),
+      );
+      expect(macosJob, contains('permissions:'));
+      expect(macosJob, contains('contents: read'));
+      expect(macosJob, contains('actions: read'));
     });
 
-    test('publish-release job has a timeout', () {
+    test('publish-release job has a timeout and release permission', () {
       final publishJob = workflow.substring(
         workflow.indexOf('publish-release:'),
       );
       expect(publishJob, contains('timeout-minutes: 45'));
+      expect(publishJob, contains('permissions:'));
+      expect(publishJob, contains('contents: write'));
     });
 
     test('generates a release body scaffold for later enrichment', () {

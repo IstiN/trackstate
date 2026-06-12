@@ -123,14 +123,17 @@ jobs:
         run: flutter test
 
       - name: Build GitHub Pages web app
+        env:
+          TRACKSTATE_GITHUB_APP_CLIENT_ID: ${{ vars.TRACKSTATE_GITHUB_APP_CLIENT_ID }}
+          TRACKSTATE_GITHUB_AUTH_PROXY_URL: ${{ vars.TRACKSTATE_GITHUB_AUTH_PROXY_URL }}
         run: |
           flutter build web --release \
             --base-href /trackstate/ \
             --dart-define TRACKSTATE_REPOSITORY=IstiN/trackstate-setup \
             --dart-define TRACKSTATE_SOURCE_REF=main \
             --dart-define TRACKSTATE_DATA_REF=main \
-            --dart-define TRACKSTATE_GITHUB_APP_CLIENT_ID="${{ vars.TRACKSTATE_GITHUB_APP_CLIENT_ID }}" \
-            --dart-define TRACKSTATE_GITHUB_AUTH_PROXY_URL="${{ vars.TRACKSTATE_GITHUB_AUTH_PROXY_URL }}"
+            --dart-define TRACKSTATE_GITHUB_APP_CLIENT_ID="$TRACKSTATE_GITHUB_APP_CLIENT_ID" \
+            --dart-define TRACKSTATE_GITHUB_AUTH_PROXY_URL="$TRACKSTATE_GITHUB_AUTH_PROXY_URL"
 
   build-linux:
     name: Build Linux release artifacts
@@ -308,6 +311,9 @@ jobs:
   build-macos:
     name: Build macOS release artifacts
     needs: [resolve-version, validate]
+    permissions:
+      actions: read
+      contents: read
     uses: ./.github/workflows/build-macos-reusable.yml
     with:
       release_tag: ${{ needs.resolve-version.outputs.release_tag }}
@@ -320,6 +326,8 @@ jobs:
     needs: [resolve-version, build-linux, build-windows, build-macos]
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    permissions:
+      contents: write
     env:
       release_tag: ${{ needs.resolve-version.outputs.release_tag }}
       release_checkout_ref: ${{ needs.resolve-version.outputs.release_checkout_ref }}
