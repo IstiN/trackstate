@@ -65,11 +65,14 @@ void main() {
       expect(resolveJob, contains('contents: read'));
     });
 
-    test('publish-release job has a timeout', () {
+    test('publish-release job has a timeout and release permission', () {
       final publishJob = workflow.substring(
         workflow.indexOf('publish-release:'),
       );
       expect(publishJob, contains('timeout-minutes: 45'));
+      expect(publishJob, contains('permissions:'));
+      expect(publishJob, contains('contents: write'));
+      expect(publishJob, contains('actions: read'));
     });
 
     test('publishes zip, cli archive, and checksums for macOS', () {
