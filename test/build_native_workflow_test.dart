@@ -43,6 +43,23 @@ void main() {
       expect(workflow, contains(r'PAT_TOKEN: ${{ secrets.PAT_TOKEN }}'));
     });
 
+    test('resolve-release job runs with least privilege and a timeout', () {
+      final resolveJob = workflow.substring(
+        workflow.indexOf('resolve-release:'),
+        workflow.indexOf('build-macos:'),
+      );
+      expect(resolveJob, contains('timeout-minutes: 10'));
+      expect(resolveJob, contains('permissions:'));
+      expect(resolveJob, contains('contents: read'));
+    });
+
+    test('publish-release job has a timeout', () {
+      final publishJob = workflow.substring(
+        workflow.indexOf('publish-release:'),
+      );
+      expect(publishJob, contains('timeout-minutes: 45'));
+    });
+
     test('publishes zip, cli archive, and checksums for macOS', () {
       expect(workflow, contains(r'trackstate-apple-${release_tag}.sha256'));
       expect(
@@ -104,6 +121,15 @@ void main() {
       expect(workflow, contains('desktop_archive:'));
       expect(workflow, contains('cli_archive:'));
       expect(workflow, contains('artifact_name:'));
+    });
+
+    test('declares read-only permissions including actions runner inventory', () {
+      final permissionsBlock = workflow.substring(
+        workflow.indexOf('permissions:'),
+        workflow.indexOf('env:'),
+      );
+      expect(permissionsBlock, contains('contents: read'));
+      expect(permissionsBlock, contains('actions: read'));
     });
 
     test('checks runner readiness before scheduling the macOS build', () {

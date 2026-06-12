@@ -24,6 +24,9 @@ jobs:
   resolve-release:
     name: Resolve release tag
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
     outputs:
       release_tag: ${{ steps.release.outputs.tag }}
       release_checkout_ref: ${{ steps.release.outputs.checkout_ref }}
@@ -87,6 +90,7 @@ jobs:
     name: Publish macOS release assets
     needs: [resolve-release, build-macos]
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     env:
       release_tag: ${{ needs.resolve-release.outputs.release_tag }}
     steps:

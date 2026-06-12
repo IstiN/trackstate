@@ -23,6 +23,7 @@ on:
         value: ${{ jobs.build-macos-release.outputs.artifact_name }}
 
 permissions:
+  actions: read
   contents: read
 
 env:
