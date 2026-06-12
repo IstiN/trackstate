@@ -17,6 +17,9 @@ jobs:
   resolve-version:
     name: Resolve semantic version
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
     outputs:
       release_tag: ${{ steps.version.outputs.release_tag }}
       release_checkout_ref: ${{ steps.version.outputs.release_checkout_ref }}
@@ -32,9 +35,11 @@ jobs:
 
       - name: Guard manual dispatch branch
         shell: bash
+        env:
+          REF: ${{ github.ref }}
         run: |
-          if [[ "${{ github.ref }}" != "refs/heads/main" ]]; then
-            echo "::error::Release on main workflow must run from the main branch; got ${{ github.ref }}."
+          if [[ "$REF" != "refs/heads/main" ]]; then
+            echo "::error::Release on main workflow must run from the main branch; got $REF."
             exit 1
           fi
 
@@ -132,6 +137,8 @@ jobs:
     needs: [resolve-version, validate]
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    permissions:
+      contents: read
     env:
       release_tag: ${{ needs.resolve-version.outputs.release_tag }}
       release_checkout_ref: ${{ needs.resolve-version.outputs.release_checkout_ref }}
@@ -219,6 +226,8 @@ jobs:
     needs: [resolve-version, validate]
     runs-on: windows-latest
     timeout-minutes: 45
+    permissions:
+      contents: read
     env:
       release_tag: ${{ needs.resolve-version.outputs.release_tag }}
       release_checkout_ref: ${{ needs.resolve-version.outputs.release_checkout_ref }}
@@ -310,6 +319,7 @@ jobs:
     name: Publish GitHub release
     needs: [resolve-version, build-linux, build-windows, build-macos]
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     env:
       release_tag: ${{ needs.resolve-version.outputs.release_tag }}
       release_checkout_ref: ${{ needs.resolve-version.outputs.release_checkout_ref }}

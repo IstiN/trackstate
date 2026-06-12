@@ -109,6 +109,7 @@ void main() {
     test('checks runner readiness before scheduling the macOS build', () {
       expect(workflow, contains('name: Verify macOS runner availability'));
       expect(workflow, contains('runs-on: ubuntu-latest'));
+      expect(workflow, contains('timeout-minutes: 10'));
       expect(workflow, contains('GET /repos/{owner}/{repo}/actions/runners'));
       expect(workflow, contains('const readinessTimeoutMs = 5 * 60 * 1000;'));
       expect(workflow, contains('response = await Promise.race(['));

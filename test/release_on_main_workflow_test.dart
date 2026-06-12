@@ -33,6 +33,16 @@ void main() {
       expect(workflow, contains('release_tag='));
     });
 
+    test('resolve-version job runs with least privilege and a timeout', () {
+      final resolveVersionJob = workflow.substring(
+        workflow.indexOf('resolve-version:'),
+        workflow.indexOf('validate:'),
+      );
+      expect(resolveVersionJob, contains('timeout-minutes: 10'));
+      expect(resolveVersionJob, contains('permissions:'));
+      expect(resolveVersionJob, contains('contents: read'));
+    });
+
     test('runs required validation before building release assets', () {
       expect(workflow, contains('name: Validate before release'));
       expect(workflow, contains('flutter analyze'));
@@ -87,6 +97,29 @@ void main() {
       expect(workflow, contains('--prerelease=false'));
     });
 
+    test('build jobs use least-privilege permissions', () {
+      final linuxJob = workflow.substring(
+        workflow.indexOf('build-linux:'),
+        workflow.indexOf('build-windows:'),
+      );
+      expect(linuxJob, contains('permissions:'));
+      expect(linuxJob, contains('contents: read'));
+
+      final windowsJob = workflow.substring(
+        workflow.indexOf('build-windows:'),
+        workflow.indexOf('build-macos:'),
+      );
+      expect(windowsJob, contains('permissions:'));
+      expect(windowsJob, contains('contents: read'));
+    });
+
+    test('publish-release job has a timeout', () {
+      final publishJob = workflow.substring(
+        workflow.indexOf('publish-release:'),
+      );
+      expect(publishJob, contains('timeout-minutes: 45'));
+    });
+
     test('generates a release body scaffold for later enrichment', () {
       expect(workflow, contains('## Compiled artifacts'));
       expect(workflow, contains('Verify downloads with'));
@@ -99,6 +132,15 @@ void main() {
     test('only allows manual dispatches from the main branch', () {
       expect(workflow, contains('Guard manual dispatch branch'));
       expect(workflow, contains('refs/heads/main'));
+
+      final guardStep = workflow.substring(
+        workflow.indexOf('Guard manual dispatch branch'),
+        workflow.indexOf('Determine next semantic version'),
+      );
+      expect(guardStep, contains('env:'));
+      expect(guardStep, contains(r'REF: ${{ github.ref }}'));
+      expect(guardStep, contains(r'if [[ "$REF" != "refs/heads/main" ]]; then'));
+      expect(guardStep, contains(r'got $REF.'));
     });
 
     test('checksum file lists assets without subdirectory prefixes', () {
