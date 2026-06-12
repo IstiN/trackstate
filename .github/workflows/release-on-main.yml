@@ -378,6 +378,12 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          DESKTOP_LINUX: ${{ needs.build-linux.outputs.desktop_archive }}
+          CLI_LINUX: ${{ needs.build-linux.outputs.cli_archive }}
+          DESKTOP_MACOS: ${{ needs.build-macos.outputs.desktop_archive }}
+          CLI_MACOS: ${{ needs.build-macos.outputs.cli_archive }}
+          DESKTOP_WINDOWS: ${{ needs.build-windows.outputs.desktop_archive }}
+          CLI_WINDOWS: ${{ needs.build-windows.outputs.cli_archive }}
         run: |
           set -euo pipefail
 
@@ -396,19 +402,19 @@ jobs:
             echo "::warning::Could not generate release notes from the GitHub API; using fallback scaffold."
           fi
 
-          cat >> "$release_notes" <<EOF
-          ## Compiled artifacts
-
-          | Platform | Desktop | CLI |
-          |---|---|---|
-          | Linux | ${{ needs.build-linux.outputs.desktop_archive }} | ${{ needs.build-linux.outputs.cli_archive }} |
-          | macOS | ${{ needs.build-macos.outputs.desktop_archive }} | ${{ needs.build-macos.outputs.cli_archive }} |
-          | Windows | ${{ needs.build-windows.outputs.desktop_archive }} | ${{ needs.build-windows.outputs.cli_archive }} |
-
-          Verify downloads with \`trackstate-${release_tag}.sha256\`.
-
-          > Install commands and detailed asset descriptions will be added in a follow-up story.
-          EOF
+          {
+            echo "## Compiled artifacts"
+            echo ""
+            echo "| Platform | Desktop | CLI |"
+            echo "|---|---|---|"
+            echo "| Linux | $DESKTOP_LINUX | $CLI_LINUX |"
+            echo "| macOS | $DESKTOP_MACOS | $CLI_MACOS |"
+            echo "| Windows | $DESKTOP_WINDOWS | $CLI_WINDOWS |"
+            echo ""
+            echo "Verify downloads with \`trackstate-${release_tag}.sha256\`."
+            echo ""
+            echo "> Install commands and detailed asset descriptions will be added in a follow-up story."
+          } >> "$release_notes"
 
           if gh release view "$release_tag" >/dev/null 2>&1; then
             echo "Updating existing release $release_tag"
@@ -420,12 +426,12 @@ jobs:
           fi
 
           gh release upload "$release_tag" \
-            "build/linux/${{ needs.build-linux.outputs.desktop_archive }}" \
-            "build/linux/${{ needs.build-linux.outputs.cli_archive }}" \
-            "build/windows/${{ needs.build-windows.outputs.desktop_archive }}" \
-            "build/windows/${{ needs.build-windows.outputs.cli_archive }}" \
-            "build/macos/${{ needs.build-macos.outputs.desktop_archive }}" \
-            "build/macos/${{ needs.build-macos.outputs.cli_archive }}" \
+            "build/linux/$DESKTOP_LINUX" \
+            "build/linux/$CLI_LINUX" \
+            "build/windows/$DESKTOP_WINDOWS" \
+            "build/windows/$CLI_WINDOWS" \
+            "build/macos/$DESKTOP_MACOS" \
+            "build/macos/$CLI_MACOS" \
             "build/trackstate-${release_tag}.sha256" \
             --clobber
 

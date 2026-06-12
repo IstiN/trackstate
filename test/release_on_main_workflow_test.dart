@@ -188,12 +188,38 @@ void main() {
     });
 
     test('generates a release body scaffold for later enrichment', () {
-      expect(workflow, contains('## Compiled artifacts'));
-      expect(workflow, contains('Verify downloads with'));
+      final publishStep = workflow.substring(
+        workflow.indexOf('Publish release'),
+      );
+      expect(publishStep, contains('## Compiled artifacts'));
+      expect(publishStep, contains('Verify downloads with'));
       expect(
-        workflow,
+        publishStep,
         contains('Install commands and detailed asset descriptions will be added in a follow-up story.'),
       );
+      expect(publishStep, isNot(contains('<<EOF')));
+      expect(publishStep, contains(r'echo "## Compiled artifacts"'));
+      expect(publishStep, contains(r'echo "| Linux | $DESKTOP_LINUX | $CLI_LINUX |"'));
+      expect(publishStep, contains(r'echo "| macOS | $DESKTOP_MACOS | $CLI_MACOS |"'));
+      expect(publishStep, contains(r'echo "| Windows | $DESKTOP_WINDOWS | $CLI_WINDOWS |"'));
+    });
+
+    test('publishes release with env-backed asset names', () {
+      final publishStep = workflow.substring(
+        workflow.indexOf('Publish release'),
+      );
+      expect(publishStep, contains(r'DESKTOP_LINUX: ${{ needs.build-linux.outputs.desktop_archive }}'));
+      expect(publishStep, contains(r'CLI_LINUX: ${{ needs.build-linux.outputs.cli_archive }}'));
+      expect(publishStep, contains(r'DESKTOP_MACOS: ${{ needs.build-macos.outputs.desktop_archive }}'));
+      expect(publishStep, contains(r'CLI_MACOS: ${{ needs.build-macos.outputs.cli_archive }}'));
+      expect(publishStep, contains(r'DESKTOP_WINDOWS: ${{ needs.build-windows.outputs.desktop_archive }}'));
+      expect(publishStep, contains(r'CLI_WINDOWS: ${{ needs.build-windows.outputs.cli_archive }}'));
+      expect(publishStep, contains(r'"build/linux/$DESKTOP_LINUX"'));
+      expect(publishStep, contains(r'"build/linux/$CLI_LINUX"'));
+      expect(publishStep, contains(r'"build/macos/$DESKTOP_MACOS"'));
+      expect(publishStep, contains(r'"build/macos/$CLI_MACOS"'));
+      expect(publishStep, contains(r'"build/windows/$DESKTOP_WINDOWS"'));
+      expect(publishStep, contains(r'"build/windows/$CLI_WINDOWS"'));
     });
 
     test('only allows manual dispatches from the main branch', () {
