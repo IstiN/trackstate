@@ -186,11 +186,13 @@ jobs:
       - name: Prepare agent config
         env:
           RAW_ENCODED_CONFIG: ${{ inputs.encoded_config }}
+          CONFIG_FILE: ${{ inputs.config_file }}
         run: |
           node <<'NODE'
           const fs = require('fs');
 
           const raw = process.env.RAW_ENCODED_CONFIG || '';
+          const configFile = process.env.CONFIG_FILE || '';
           let config = {};
 
           if (raw.trim()) {
@@ -214,10 +216,28 @@ jobs:
           }
 
           config.params = config.params || {};
-          const prompts = Array.isArray(config.params.cliPrompts)
-            ? config.params.cliPrompts.slice()
+
+          // Start from the agent JSON's own cliPrompts so the workflow does not
+          // accidentally replace the whole prompt list with only the common
+          // bash/codegraph prompts when no encoded_config is provided.
+          const agentPrompts = [];
+          if (configFile) {
+            try {
+              const agentJson = JSON.parse(fs.readFileSync(configFile, 'utf8'));
+              const agentCliPrompts = agentJson.params && agentJson.params.cliPrompts;
+              if (Array.isArray(agentCliPrompts)) {
+                agentPrompts.push(...agentCliPrompts);
+              }
+            } catch (error) {
+              console.warn('Could not read agent config cliPrompts from ' + configFile + ': ' + (error.message || error));
+            }
+          }
+
+          const encodedPrompts = Array.isArray(config.params.cliPrompts)
+            ? config.params.cliPrompts
             : [];
-          ['./agents/prompts/bash_tools.md', './agents/prompts/codegraph_tools.md'].forEach((prompt) => {
+          const prompts = [...agentPrompts];
+          [...encodedPrompts, './agents/prompts/bash_tools.md', './agents/prompts/codegraph_tools.md'].forEach((prompt) => {
             if (!prompts.includes(prompt)) prompts.push(prompt);
           });
           config.params.cliPrompts = prompts;
