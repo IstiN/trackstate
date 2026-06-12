@@ -43,7 +43,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          release_ref="${{ env.release_ref }}"
+          release_ref="$release_ref"
           git fetch --tags --force
 
           if [[ -z "$release_ref" || "$release_ref" == "auto" ]]; then
