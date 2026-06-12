@@ -27,9 +27,10 @@ flowchart TD
   Permission --> Analyze
   Analyze --> Test[flutter test → all pass]
   Test --> NoTesting{Touched testing/ ?}
-  NoTesting -->|Yes| Justify[Add justification in outputs/response.md]
+  NoTesting -->|Yes| Revert[Revert all changes in testing/ —
+dev agent must not own that tree]
   NoTesting -->|No| Output[Write outputs/response.md]
-  Justify --> Output
+  Revert --> Output
 ```
 
 ## Permission & Storage implementation rules
@@ -211,12 +212,24 @@ flowchart TD
 | 5 | Theme tokens only — no hardcoded `Color(0xFF...)` or pixel sizes |
 | 6 | All `Text()` content must go through the localization system |
 | 7 | For CLI: validate `--path`, run from repo root, keep JSON response schema stable |
-| 8 | Do not touch `testing/` unless ticket requires it; justify in `outputs/response.md` |
+| 8 | **NEVER** create or modify files under `testing/` during development. If production changes break existing regression tests there, mention it in `outputs/response.md` and let the test-automation agent handle updates |
 | 9 | `flutter analyze` → 0 issues; `flutter test` → all pass before finishing |
 | 10 | Null safety: no `dynamic`, no unjustified `!` |
 | 11 | Every code path that uses `Process.run` or `dart:io` MUST have a `kIsWeb` gate or web fallback |
 | 12 | Every `unawaited()` deferred operation that changes state MUST call `notifyListeners()` on completion |
 | 13 | Workspace state changes must cover ALL branches (success, web failure, directory mismatch, token expired) |
+
+## `testing/` ownership
+
+`testing/` contains regression probes, workflow-observation tests, accessibility
+gates, and other automation owned by test-automation agents. It is **not** a
+unit-test directory for development TDD.
+
+- Development agents must **not** write, edit, or delete files under `testing/`.
+- If your changes break existing `testing/` tests, note the breakage in
+  `outputs/response.md` under `issues/notes`.
+- Updating `testing/` to match new workflow / architecture contracts is the
+  responsibility of `test_case_automation` / `pr_test_automation_*` agents.
 
 ## Bug-fix additional rules
 
