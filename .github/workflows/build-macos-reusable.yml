@@ -248,6 +248,8 @@ jobs:
           if [[ -f ./tool/thin_macos_app_bundle.sh ]]; then
             source ./tool/thin_macos_app_bundle.sh
           else
+            # Fallback for historical tags that predate tool/thin_macos_app_bundle.sh.
+            # Keep this inline copy in sync with the helper script.
             read_file_mode() {
               local file_path="$1"
               stat -f '%Lp' "$file_path"

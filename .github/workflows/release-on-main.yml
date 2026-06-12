@@ -359,6 +359,8 @@ jobs:
             -f target_commitish="$release_target_commit" \
             --jq '.body' > "$release_notes" 2>/dev/null; then
             echo "" >> "$release_notes"
+          else
+            echo "::warning::Could not generate release notes from the GitHub API; using fallback scaffold."
           fi
 
           cat >> "$release_notes" <<EOF

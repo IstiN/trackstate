@@ -94,6 +94,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ needs.resolve-release.outputs.release_checkout_ref }}
           token: ${{ secrets.PAT_TOKEN || github.token }}
 
       - name: Download macOS artifacts
