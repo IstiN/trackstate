@@ -11,6 +11,10 @@ on:
         description: 'Git ref to checkout for the build'
         required: true
         type: string
+    secrets:
+      PAT_TOKEN:
+        description: 'PAT used for checkout and runner inventory'
+        required: false
     outputs:
       desktop_archive:
         description: 'Name of the produced desktop archive'

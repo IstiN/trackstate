@@ -123,6 +123,18 @@ void main() {
       expect(workflow, contains('artifact_name:'));
     });
 
+    test('declares PAT_TOKEN secret for authenticated checkout and runner inventory', () {
+      expect(workflow, contains('secrets:'));
+      expect(workflow, contains('PAT_TOKEN:'));
+      expect(
+        workflow,
+        contains(
+          "description: 'PAT used for checkout and runner inventory'",
+        ),
+      );
+      expect(workflow, contains('required: false'));
+    });
+
     test('declares read-only permissions including actions runner inventory', () {
       final permissionsBlock = workflow.substring(
         workflow.indexOf('permissions:'),
