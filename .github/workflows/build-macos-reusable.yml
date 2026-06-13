@@ -269,7 +269,8 @@ jobs:
             source ./tool/thin_macos_app_bundle.sh
           else
             # Inline fallback for historical tags that predate tool/thin_macos_app_bundle.sh.
-            # Keep this in sync with the helper script.
+            # Keep this in sync with the helper script; run
+            # ./tool/check_macos_thinning_fallback_sync.sh to verify parity.
             read_file_mode() {
               local file_path="$1"
               stat -f '%Lp' "$file_path"
@@ -278,17 +279,25 @@ jobs:
             preserve_file_mode() {
               local source_path="$1"
               local target_path="$2"
-              chmod "$(read_file_mode "$source_path")" "$target_path"
+              local file_mode=""
+
+              file_mode="$(read_file_mode "$source_path")"
+              chmod "$file_mode" "$target_path"
             }
 
             thin_macho_to_arm64() {
               local binary_path="$1"
-              local thinned_path="${binary_path}.arm64"
               local file_output=""
+              local thinned_path="${binary_path}.arm64"
 
-              [[ -f "$binary_path" ]] || return
+              if [[ ! -f "$binary_path" ]]; then
+                return
+              fi
+
               file_output="$(file "$binary_path")"
-              [[ "$file_output" == *"Mach-O"* ]] || return
+              if [[ "$file_output" != *"Mach-O"* ]]; then
+                return
+              fi
 
               if [[ "$file_output" == *"Mach-O universal binary"* ]]; then
                 lipo -thin arm64 "$binary_path" -output "$thinned_path"
@@ -299,7 +308,7 @@ jobs:
 
             thin_app_bundle_to_arm64() {
               local app_bundle_path="$1"
-              local bundle_file=""
+
               while IFS= read -r -d '' bundle_file; do
                 thin_macho_to_arm64 "$bundle_file"
               done < <(find "$app_bundle_path" -type f -print0)

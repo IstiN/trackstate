@@ -6,11 +6,10 @@ on:
   workflow_dispatch:
 
 permissions:
-  actions: read
-  contents: write
+  contents: read
 
 concurrency:
-  group: release-on-main-${{ github.ref }}
+  group: release-on-main-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
