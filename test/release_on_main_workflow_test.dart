@@ -22,6 +22,26 @@ void main() {
       expect(workflow, contains('contents: write'));
     });
 
+    test('serializes release runs for the same ref regardless of trigger event', () {
+      final concurrencyBlock = workflow.substring(
+        workflow.indexOf('concurrency:'),
+        workflow.indexOf('jobs:'),
+      );
+      expect(concurrencyBlock, contains('cancel-in-progress: false'));
+      expect(
+        concurrencyBlock,
+        contains(r'group: release-on-main-${{ github.ref }}'),
+      );
+      expect(
+        concurrencyBlock,
+        isNot(contains(r'group: release-on-main-${{ github.event_name }}')),
+      );
+      expect(
+        concurrencyBlock,
+        isNot(contains(r'${{ github.event_name }}-${{ github.ref }}')),
+      );
+    });
+
     test('resolves the next semantic version using the shared resolver', () {
       final resolveJob = workflow.substring(
         workflow.indexOf('resolve-version:'),
