@@ -128,6 +128,8 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          DESKTOP_MACOS: ${{ needs.build-macos.outputs.desktop_archive }}
+          CLI_MACOS: ${{ needs.build-macos.outputs.cli_archive }}
         run: |
           set -euo pipefail
 
@@ -170,7 +172,7 @@ jobs:
                 '' \
                 '| Platform | Desktop | CLI |' \
                 '|---|---|---|' \
-                '| macOS | ${{ needs.build-macos.outputs.desktop_archive }} | ${{ needs.build-macos.outputs.cli_archive }} |' \
+                "| macOS | $DESKTOP_MACOS | $CLI_MACOS |" \
                 '' \
                 "Verify downloads with \`trackstate-apple-${release_tag}.sha256\`." \
                 '' \

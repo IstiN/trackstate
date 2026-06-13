@@ -185,6 +185,9 @@ jobs:
 
       - name: Build macOS desktop app
         shell: bash
+        env:
+          BUILD_NAME: ${{ steps.metadata.outputs.build_name }}
+          BUILD_NUMBER: ${{ steps.metadata.outputs.build_number }}
         run: |
           set -euo pipefail
 
@@ -208,8 +211,8 @@ jobs:
           export EXCLUDED_ARCHS=x86_64
 
           flutter build macos --release \
-            --build-name="${{ steps.metadata.outputs.build_name }}" \
-            --build-number="${{ steps.metadata.outputs.build_number }}"
+            --build-name="$BUILD_NAME" \
+            --build-number="$BUILD_NUMBER"
 
           cleanup_heartbeat
           trap - EXIT
@@ -224,6 +227,9 @@ jobs:
 
       - name: Package desktop and CLI artifacts
         shell: bash
+        env:
+          DESKTOP_ARCHIVE: ${{ steps.metadata.outputs.desktop_archive }}
+          CLI_ARCHIVE: ${{ steps.metadata.outputs.cli_archive }}
         run: |
           set -euo pipefail
 
@@ -332,17 +338,21 @@ jobs:
 
           ditto -c -k --sequesterRsrc --keepParent \
             "$app_path" \
-            "build/${{ steps.metadata.outputs.desktop_archive }}"
+            "build/$DESKTOP_ARCHIVE"
 
-          tar -czf "build/${{ steps.metadata.outputs.cli_archive }}" \
+          tar -czf "build/$CLI_ARCHIVE" \
             -C build/release \
             trackstate
 
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v4
+        env:
+          ARTIFACT_NAME: ${{ steps.metadata.outputs.artifact_name }}
+          DESKTOP_ARCHIVE: ${{ steps.metadata.outputs.desktop_archive }}
+          CLI_ARCHIVE: ${{ steps.metadata.outputs.cli_archive }}
         with:
-          name: ${{ steps.metadata.outputs.artifact_name }}
+          name: ${{ env.ARTIFACT_NAME }}
           path: |
-            build/${{ steps.metadata.outputs.desktop_archive }}
-            build/${{ steps.metadata.outputs.cli_archive }}
+            build/${{ env.DESKTOP_ARCHIVE }}
+            build/${{ env.CLI_ARCHIVE }}
           if-no-files-found: error

@@ -118,6 +118,33 @@ void main() {
       expect(workflow, isNot(contains('./tool/check_macos_release_runner.sh')));
       expect(workflow, isNot(contains('[self-hosted, macOS, trackstate-release, ARM64]')));
     });
+
+    test('env-backs macOS archive names in legacy release notes fallback', () {
+      final publishStep = workflow.substring(
+        workflow.indexOf('Publish release assets'),
+      );
+      expect(publishStep, contains('env:'));
+      expect(
+        publishStep,
+        contains(r'DESKTOP_MACOS: ${{ needs.build-macos.outputs.desktop_archive }}'),
+      );
+      expect(
+        publishStep,
+        contains(r'CLI_MACOS: ${{ needs.build-macos.outputs.cli_archive }}'),
+      );
+      expect(
+        publishStep,
+        contains(r'"| macOS | $DESKTOP_MACOS | $CLI_MACOS |"'),
+      );
+      expect(
+        publishStep,
+        isNot(
+          contains(
+            r'| macOS | ${{ needs.build-macos.outputs.desktop_archive }} | ${{ needs.build-macos.outputs.cli_archive }} |',
+          ),
+        ),
+      );
+    });
   });
 
   group('Reusable macOS build workflow contract', () {
@@ -203,6 +230,67 @@ void main() {
       expect(workflow, contains('Mach-O 64-bit executable arm64'));
       expect(workflow, contains('universal binary'));
       expect(workflow, contains('x86_64'));
+    });
+
+    test('env-backs Flutter build metadata in the macOS build step', () {
+      final buildStep = workflow.substring(
+        workflow.indexOf('Build macOS desktop app'),
+        workflow.indexOf('Build macOS CLI'),
+      );
+      expect(buildStep, contains('env:'));
+      expect(
+        buildStep,
+        contains(r'BUILD_NAME: ${{ steps.metadata.outputs.build_name }}'),
+      );
+      expect(
+        buildStep,
+        contains(r'BUILD_NUMBER: ${{ steps.metadata.outputs.build_number }}'),
+      );
+      expect(buildStep, contains(r'--build-name="$BUILD_NAME"'));
+      expect(buildStep, contains(r'--build-number="$BUILD_NUMBER"'));
+      expect(
+        buildStep,
+        isNot(
+          contains(
+            r'--build-name="${{ steps.metadata.outputs.build_name }}"',
+          ),
+        ),
+      );
+    });
+
+    test('env-backs archive names in macOS package and upload steps', () {
+      final packageStep = workflow.substring(
+        workflow.indexOf('Package desktop and CLI artifacts'),
+        workflow.indexOf('Upload workflow artifacts'),
+      );
+      expect(packageStep, contains('env:'));
+      expect(
+        packageStep,
+        contains(r'DESKTOP_ARCHIVE: ${{ steps.metadata.outputs.desktop_archive }}'),
+      );
+      expect(
+        packageStep,
+        contains(r'CLI_ARCHIVE: ${{ steps.metadata.outputs.cli_archive }}'),
+      );
+      expect(packageStep, contains(r'"build/$DESKTOP_ARCHIVE"'));
+      expect(packageStep, contains(r'"build/$CLI_ARCHIVE"'));
+
+      final uploadStep = workflow.substring(
+        workflow.indexOf('Upload workflow artifacts'),
+      );
+      expect(uploadStep, contains('env:'));
+      expect(
+        uploadStep,
+        contains(r'ARTIFACT_NAME: ${{ steps.metadata.outputs.artifact_name }}'),
+      );
+      expect(
+        uploadStep,
+        contains(r'DESKTOP_ARCHIVE: ${{ steps.metadata.outputs.desktop_archive }}'),
+      );
+      expect(
+        uploadStep,
+        contains(r'CLI_ARCHIVE: ${{ steps.metadata.outputs.cli_archive }}'),
+      );
     });
 
     test('uploads workflow artifacts without creating a release', () {

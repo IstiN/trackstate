@@ -138,6 +138,56 @@ void main() {
       );
     });
 
+    test('build steps env-back Flutter build metadata', () {
+      final linuxBuildStep = workflow.substring(
+        workflow.indexOf('Build Linux desktop app'),
+        workflow.indexOf('Build Linux CLI'),
+      );
+      expect(linuxBuildStep, contains('env:'));
+      expect(
+        linuxBuildStep,
+        contains(r'BUILD_NAME: ${{ steps.metadata.outputs.build_name }}'),
+      );
+      expect(
+        linuxBuildStep,
+        contains(r'BUILD_NUMBER: ${{ steps.metadata.outputs.build_number }}'),
+      );
+      expect(linuxBuildStep, contains(r'--build-name="$BUILD_NAME"'));
+      expect(linuxBuildStep, contains(r'--build-number="$BUILD_NUMBER"'));
+      expect(
+        linuxBuildStep,
+        isNot(
+          contains(
+            r'--build-name="${{ steps.metadata.outputs.build_name }}"',
+          ),
+        ),
+      );
+
+      final windowsBuildStep = workflow.substring(
+        workflow.indexOf('Build Windows desktop app'),
+        workflow.indexOf('Build Windows CLI'),
+      );
+      expect(windowsBuildStep, contains('env:'));
+      expect(
+        windowsBuildStep,
+        contains(r'BUILD_NAME: ${{ steps.metadata.outputs.build_name }}'),
+      );
+      expect(
+        windowsBuildStep,
+        contains(r'BUILD_NUMBER: ${{ steps.metadata.outputs.build_number }}'),
+      );
+      expect(windowsBuildStep, contains(r'--build-name="$BUILD_NAME"'));
+      expect(windowsBuildStep, contains(r'--build-number="$BUILD_NUMBER"'));
+      expect(
+        windowsBuildStep,
+        isNot(
+          contains(
+            r'--build-name="${{ steps.metadata.outputs.build_name }}"',
+          ),
+        ),
+      );
+    });
+
     test('publishes a single unified GitHub release', () {
       expect(
         workflow,
@@ -262,6 +312,51 @@ void main() {
       expect(
         checksumStep,
         contains(r"""awk '{ sub(/^[^\/]+\//, "", $2); print $1 "  " $2 }'"""),
+      );
+    });
+
+    test('checksum step env-backs archive names', () {
+      final checksumStep = workflow.substring(
+        workflow.indexOf('Generate unified SHA256 checksums'),
+      );
+      expect(checksumStep, contains('env:'));
+      expect(
+        checksumStep,
+        contains(r'DESKTOP_LINUX: ${{ needs.build-linux.outputs.desktop_archive }}'),
+      );
+      expect(
+        checksumStep,
+        contains(r'CLI_LINUX: ${{ needs.build-linux.outputs.cli_archive }}'),
+      );
+      expect(
+        checksumStep,
+        contains(r'DESKTOP_MACOS: ${{ needs.build-macos.outputs.desktop_archive }}'),
+      );
+      expect(
+        checksumStep,
+        contains(r'CLI_MACOS: ${{ needs.build-macos.outputs.cli_archive }}'),
+      );
+      expect(
+        checksumStep,
+        contains(r'DESKTOP_WINDOWS: ${{ needs.build-windows.outputs.desktop_archive }}'),
+      );
+      expect(
+        checksumStep,
+        contains(r'CLI_WINDOWS: ${{ needs.build-windows.outputs.cli_archive }}'),
+      );
+      expect(checksumStep, contains(r'"linux/$DESKTOP_LINUX"'));
+      expect(checksumStep, contains(r'"linux/$CLI_LINUX"'));
+      expect(checksumStep, contains(r'"macos/$DESKTOP_MACOS"'));
+      expect(checksumStep, contains(r'"macos/$CLI_MACOS"'));
+      expect(checksumStep, contains(r'"windows/$DESKTOP_WINDOWS"'));
+      expect(checksumStep, contains(r'"windows/$CLI_WINDOWS"'));
+      expect(
+        checksumStep,
+        isNot(
+          contains(
+            r'"linux/${{ needs.build-linux.outputs.desktop_archive }}"',
+          ),
+        ),
       );
     });
   });
