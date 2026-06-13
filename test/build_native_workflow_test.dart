@@ -30,6 +30,38 @@ void main() {
       expect(workflow, isNot(contains('branches: [main]')));
     });
 
+    test('serializes manual recovery runs by event, ref, and release_ref', () {
+      final concurrencyBlock = workflow.substring(
+        workflow.indexOf('concurrency:'),
+        workflow.indexOf('env:'),
+      );
+      expect(concurrencyBlock, contains('cancel-in-progress: false'));
+      expect(
+        concurrencyBlock,
+        contains(
+          r"group: apple-release-${{ github.event_name }}-${{ github.ref }}-${{ inputs.release_ref || 'auto' }}",
+        ),
+      );
+      expect(
+        concurrencyBlock,
+        isNot(
+          contains(
+            r"group: apple-release-${{ github.event.inputs.release_ref || 'auto' }}",
+          ),
+        ),
+      );
+    });
+
+    test('defaults to read-only workflow permissions', () {
+      final permissionsBlock = workflow.substring(
+        workflow.indexOf('permissions:'),
+        workflow.indexOf('concurrency:'),
+      );
+      expect(permissionsBlock, contains('actions: read'));
+      expect(permissionsBlock, contains('contents: read'));
+      expect(permissionsBlock, isNot(contains('contents: write')));
+    });
+
     test('delegates macOS build to the reusable workflow', () {
       final macosJob = workflow.substring(
         workflow.indexOf('build-macos:'),

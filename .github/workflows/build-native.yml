@@ -9,12 +9,15 @@ on:
         default: auto
         type: string
 
+# Default to read-only permissions. Individual jobs override this explicitly
+# (e.g., publish-release requests contents: write) so a future job added without
+# its own permissions block does not accidentally inherit release-write access.
 permissions:
   actions: read
-  contents: write
+  contents: read
 
 concurrency:
-  group: apple-release-${{ github.event.inputs.release_ref || 'auto' }}
+  group: apple-release-${{ github.event_name }}-${{ github.ref }}-${{ inputs.release_ref || 'auto' }}
   cancel-in-progress: false
 
 env:
