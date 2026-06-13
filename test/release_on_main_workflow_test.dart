@@ -467,5 +467,40 @@ void main() {
         ),
       );
     });
+
+    test('fails fast when downloaded release artifacts are missing', () {
+      final publishJob = workflow.substring(
+        workflow.indexOf('publish-release:'),
+      );
+      expect(publishJob, contains('actions/download-artifact@v4'));
+
+      final linuxDownload = publishJob.substring(
+        publishJob.indexOf('Download Linux artifacts'),
+        publishJob.indexOf('Download Windows artifacts'),
+      );
+      expect(linuxDownload, contains('if-no-files-found: error'));
+
+      final windowsDownload = publishJob.substring(
+        publishJob.indexOf('Download Windows artifacts'),
+        publishJob.indexOf('Download macOS artifacts'),
+      );
+      expect(windowsDownload, contains('if-no-files-found: error'));
+
+      final macosDownload = publishJob.substring(
+        publishJob.indexOf('Download macOS artifacts'),
+      );
+      expect(macosDownload, contains('if-no-files-found: error'));
+    });
+
+    test('cleans up temporary release notes file', () {
+      final publishStep = workflow.substring(
+        workflow.indexOf('Publish release'),
+      );
+      expect(publishStep, contains(r'release_notes="$(mktemp)"'));
+      expect(
+        publishStep,
+        contains("trap 'rm -f \"\$release_notes\"' EXIT"),
+      );
+    });
   });
 }

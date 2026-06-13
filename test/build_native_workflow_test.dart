@@ -236,6 +236,33 @@ void main() {
         ),
       );
     });
+
+    test('fails fast when downloaded macOS artifacts are missing', () {
+      final publishJob = workflow.substring(
+        workflow.indexOf('publish-release:'),
+      );
+      final downloadStep = publishJob.substring(
+        publishJob.indexOf('Download macOS artifacts'),
+      );
+      expect(downloadStep, contains('actions/download-artifact@v4'));
+      expect(downloadStep, contains('if-no-files-found: error'));
+    });
+
+    test('cleans up temporary release notes file', () {
+      final publishStep = workflow.substring(
+        workflow.indexOf('Publish release assets'),
+      );
+      expect(publishStep, contains(r'release_notes="$(mktemp)"'));
+      expect(publishStep, contains('rm -f "\$release_notes"'));
+      expect(
+        publishStep,
+        isNot(
+          contains(
+            "trap 'rm -f \"\$release_notes\"' EXIT",
+          ),
+        ),
+      );
+    });
   });
 
   group('Reusable macOS build workflow contract', () {

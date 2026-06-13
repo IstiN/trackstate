@@ -85,6 +85,7 @@ jobs:
         with:
           name: ${{ needs.build-macos.outputs.artifact_name }}
           path: build
+          if-no-files-found: error
 
       - name: Generate SHA256 checksums
         shell: bash
@@ -116,15 +117,27 @@ jobs:
             done
           }
 
+          release_notes=""
+
+          heartbeat() {
+            while true; do
+              sleep 60
+              echo "::notice::GitHub release asset publishing is still running..."
+            done
+          }
+
           heartbeat &
           heartbeat_pid="$!"
           cleanup_heartbeat() {
             kill "$heartbeat_pid" 2>/dev/null || true
             wait "$heartbeat_pid" 2>/dev/null || true
           }
-          trap cleanup_heartbeat EXIT
+          cleanup_publish() {
+            cleanup_heartbeat
+            rm -f "$release_notes"
+          }
+          trap cleanup_publish EXIT
 
-          release_notes="$(mktemp)"
           release_target_commit="$(git rev-parse HEAD)"
           legacy_checksum_asset="trackstate-apple-${release_tag}-sha256.txt"
           if gh release view "$release_tag" >/dev/null 2>&1; then
@@ -133,6 +146,7 @@ jobs:
               gh release delete-asset "$release_tag" "$legacy_checksum_asset" --yes
             fi
           else
+            release_notes="$(mktemp)"
             if gh api \
               -H "Accept: application/vnd.github+json" \
               -H "X-GitHub-Api-Version: 2022-11-28" \
@@ -173,6 +187,3 @@ jobs:
             --target "$release_target_commit" \
             --draft=false \
             --prerelease=false
-
-          cleanup_heartbeat
-          trap - EXIT

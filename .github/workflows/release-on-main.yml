@@ -327,18 +327,21 @@ jobs:
         with:
           name: ${{ needs.build-linux.outputs.artifact_name }}
           path: build/linux
+          if-no-files-found: error
 
       - name: Download Windows artifacts
         uses: actions/download-artifact@v4
         with:
           name: ${{ needs.build-windows.outputs.artifact_name }}
           path: build/windows
+          if-no-files-found: error
 
       - name: Download macOS artifacts
         uses: actions/download-artifact@v4
         with:
           name: ${{ needs.build-macos.outputs.artifact_name }}
           path: build/macos
+          if-no-files-found: error
 
       - name: Generate unified SHA256 checksums
         shell: bash
@@ -379,6 +382,7 @@ jobs:
           release_target_commit="$(git rev-parse HEAD)"
 
           release_notes="$(mktemp)"
+          trap 'rm -f "$release_notes"' EXIT
           if gh api \
             -H "Accept: application/vnd.github+json" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
