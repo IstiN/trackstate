@@ -78,7 +78,8 @@ module.exports = {
             solution: 'Solution',
             diagrams: 'Diagrams',
             answer: 'Answer',
-            bugSolution: 'customfield_10400'
+            bugSolution: 'customfield_10400',
+            failedReason: 'customfield_10535'
         },
         parentContextFetch: {
             enabled: true,
@@ -144,6 +145,30 @@ module.exports = {
             GOAL_INSTRUCTIONS,
             SETUP_REPO_INSTRUCTIONS,
             './.dmtools/instructions/architecture/trackstate_scope.md',
+            TEST_AUTOMATION_ANTIPATTERNS
+        ],
+        story_test_automation: [
+            GOAL_INSTRUCTIONS,
+            SETUP_REPO_INSTRUCTIONS,
+            './.dmtools/instructions/architecture/trackstate_scope.md',
+            TEST_AUTOMATION_ANTIPATTERNS
+        ],
+        bug_test_automation: [
+            GOAL_INSTRUCTIONS,
+            SETUP_REPO_INSTRUCTIONS,
+            './.dmtools/instructions/architecture/trackstate_scope.md',
+            TEST_AUTOMATION_ANTIPATTERNS
+        ],
+        pr_story_test_automation_review: [
+            GOAL_INSTRUCTIONS,
+            './.dmtools/instructions/architecture/trackstate_scope.md',
+            './.dmtools/prompts/test_review_focus.md',
+            TEST_AUTOMATION_ANTIPATTERNS
+        ],
+        pr_bug_test_automation_review: [
+            GOAL_INSTRUCTIONS,
+            './.dmtools/instructions/architecture/trackstate_scope.md',
+            './.dmtools/prompts/test_review_focus.md',
             TEST_AUTOMATION_ANTIPATTERNS
         ]
     },
@@ -227,6 +252,26 @@ module.exports = {
         pr_test_automation_rework: [
             TRACKSTATE_TEST_AUTOMATION_RULES
         ],
+        story_test_automation: [
+            TRACKSTATE_TEST_AUTOMATION_RULES
+        ],
+        story_test_automation_rework: [
+            TRACKSTATE_TEST_AUTOMATION_RULES
+        ],
+        pr_story_test_automation_review: [
+            TRACKSTATE_TEST_AUTOMATION_RULES,
+            TRACKSTATE_TEST_REVIEW_CHECKLIST
+        ],
+        bug_test_automation: [
+            TRACKSTATE_TEST_AUTOMATION_RULES
+        ],
+        bug_test_automation_rework: [
+            TRACKSTATE_TEST_AUTOMATION_RULES
+        ],
+        pr_bug_test_automation_review: [
+            TRACKSTATE_TEST_AUTOMATION_RULES,
+            TRACKSTATE_TEST_REVIEW_CHECKLIST
+        ],
         bug_creation: [
             GOAL_INSTRUCTIONS,
             './.dmtools/instructions/product/trackstate_domain_knowledge.md'
@@ -243,7 +288,19 @@ module.exports = {
                 DESIGN_REFERENCE,
                 './agents/instructions/test_cases/test_case_creation_rules.md',
                 './.dmtools/instructions/test_cases/trackstate_functional_test_case_rules.md'
-            ]
+            ],
+            postJSAction: 'agents/js/triggerStoryTestAutomation.js',
+            customParams: {
+                autoStartStoryTestAutomation: true,
+                autoStartStoryTestAutomationConfigFile: 'agents/story_test_automation.json'
+            }
+        },
+        bug_test_cases_generator: {
+            postJSAction: 'agents/js/triggerBugTestAutomation.js',
+            customParams: {
+                autoStartBugTestAutomation: true,
+                autoStartBugTestAutomationConfigFile: 'agents/bug_test_automation.json'
+            }
         },
         story_questions: {
             customParams: {
@@ -323,6 +380,50 @@ module.exports = {
                 feedbackLoop: POST_ACTION_FEEDBACK
             }
         },
+        story_test_automation: {
+            customParams: {
+                autoStartReview: true,
+                autoStartReviewConfigFile: 'agents/pr_story_test_automation_review.json'
+            }
+        },
+        story_test_automation_rework: {
+            customParams: {
+                autoStartReview: true,
+                autoStartReviewConfigFile: 'agents/pr_story_test_automation_review.json',
+                feedbackLoop: POST_ACTION_FEEDBACK
+            }
+        },
+        pr_story_test_automation_review: {
+            customParams: {
+                autoStartMerge: true,
+                autoStartMergeConfigFile: 'agents/story_test_automation_merge.json',
+                autoStartRework: true,
+                autoStartReworkConfigFile: 'agents/story_test_automation_rework.json',
+                maxReviewThreadsBeforeForceApprove: 100
+            }
+        },
+        bug_test_automation: {
+            customParams: {
+                autoStartReview: true,
+                autoStartReviewConfigFile: 'agents/pr_bug_test_automation_review.json'
+            }
+        },
+        bug_test_automation_rework: {
+            customParams: {
+                autoStartReview: true,
+                autoStartReviewConfigFile: 'agents/pr_bug_test_automation_review.json',
+                feedbackLoop: POST_ACTION_FEEDBACK
+            }
+        },
+        pr_bug_test_automation_review: {
+            customParams: {
+                autoStartMerge: true,
+                autoStartMergeConfigFile: 'agents/bug_test_automation_merge.json',
+                autoStartRework: true,
+                autoStartReworkConfigFile: 'agents/bug_test_automation_rework.json',
+                maxReviewThreadsBeforeForceApprove: 100
+            }
+        },
         retry_merge: {
             customParams: {
                 autoStartRework: true,
@@ -337,5 +438,11 @@ module.exports = {
         }
     },
 
-    agentParamPatches: {}
+    agentParamPatches: {},
+
+    smRuleOverrides: {
+        'agents/test_case_automation.json': {
+            enabled: false
+        }
+    }
 };
