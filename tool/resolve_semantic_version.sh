@@ -84,7 +84,9 @@ else
     else
       version_part="${latest_tag#v}"
       IFS='.' read -r major minor patch <<< "$version_part"
-      release_tag="v${major}.${minor}.$((patch + 1))"
+      # Force decimal interpretation so leading-zero patch components (e.g. 08)
+      # are not treated as invalid octal values by bash arithmetic.
+      release_tag="v${major}.${minor}.$((10#$patch + 1))"
     fi
 
     release_checkout_ref="$current_sha"
