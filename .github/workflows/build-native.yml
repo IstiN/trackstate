@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       release_ref:
-        description: 'Semantic version tag to rebuild, or auto to create the next patch tag'
+        description: 'Semantic version tag to rebuild, or auto to create the next patch tag. Auto dispatches must be run from the main branch; explicit historical tags may be rebuilt from any branch.'
         required: false
         default: auto
         type: string
@@ -23,13 +23,17 @@ env:
 jobs:
   resolve-release:
     name: Resolve release tag
+    # Allow auto dispatches only from main; explicit historical-tag repairs may
+    # be dispatched from any branch.
+    if: github.ref == 'refs/heads/main' || inputs.release_ref != 'auto'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: read
     outputs:
-      release_tag: ${{ steps.release.outputs.tag }}
-      release_checkout_ref: ${{ steps.release.outputs.checkout_ref }}
+      release_tag: ${{ steps.release.outputs.release_tag }}
+      release_checkout_ref: ${{ steps.release.outputs.release_checkout_ref }}
+      build_number: ${{ steps.release.outputs.build_number }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -40,40 +44,9 @@ jobs:
       - name: Resolve release tag
         id: release
         shell: bash
-        run: |
-          set -euo pipefail
-
-          git fetch --tags --force
-
-          if [[ -z "$release_ref" || "$release_ref" == "auto" ]]; then
-            latest_tag="$(
-              git tag --list 'v[0-9]*.[0-9]*.[0-9]*' |
-                sed -E 's/^v([0-9]+)\.([0-9]+)\.([0-9]+)$/\1 \2 \3 &/' |
-                sort -n -k1,1 -k2,2 -k3,3 |
-                tail -n 1 |
-                awk '{print $4}'
-            )"
-
-            if [[ -z "$latest_tag" ]]; then
-              release_ref="v0.0.1"
-            else
-              IFS=. read -r major minor patch <<< "${latest_tag#v}"
-              release_ref="v${major}.${minor}.$((patch + 1))"
-            fi
-
-            checkout_ref="$GITHUB_SHA"
-            echo "Resolved next release tag $release_ref for $checkout_ref"
-          else
-            checkout_ref="$release_ref"
-          fi
-
-          if [[ ! "$release_ref" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::Apple release workflow requires a semantic version tag such as v1.2.3, or auto."
-            exit 1
-          fi
-
-          echo "tag=$release_ref" >> "$GITHUB_OUTPUT"
-          echo "checkout_ref=$checkout_ref" >> "$GITHUB_OUTPUT"
+        env:
+          RELEASE_REF: ${{ inputs.release_ref || 'auto' }}
+        run: ./tool/resolve_semantic_version.sh >> "$GITHUB_OUTPUT"
 
   build-macos:
     name: Build macOS release artifacts
@@ -85,6 +58,7 @@ jobs:
     with:
       release_tag: ${{ needs.resolve-release.outputs.release_tag }}
       release_checkout_ref: ${{ needs.resolve-release.outputs.release_checkout_ref }}
+      build_number: ${{ needs.resolve-release.outputs.build_number }}
     secrets:
       PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
 

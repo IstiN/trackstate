@@ -24,6 +24,7 @@ jobs:
     outputs:
       release_tag: ${{ steps.version.outputs.release_tag }}
       release_checkout_ref: ${{ steps.version.outputs.release_checkout_ref }}
+      build_number: ${{ steps.version.outputs.build_number }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -31,34 +32,10 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.PAT_TOKEN || github.token }}
 
-      - name: Fetch tags
-        run: git fetch --force --tags origin
-
-      - name: Determine next semantic version
+      - name: Resolve release version
         id: version
         shell: bash
-        run: |
-          set -euo pipefail
-
-          EXISTING_HEAD_TAG="$(git tag --points-at "$GITHUB_SHA" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1 || true)"
-          if [[ -n "$EXISTING_HEAD_TAG" ]]; then
-            echo "release_tag=$EXISTING_HEAD_TAG" >> "$GITHUB_OUTPUT"
-            echo "release_checkout_ref=$EXISTING_HEAD_TAG" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          LATEST_TAG="$(git tag --list | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1 || true)"
-          if [[ -z "$LATEST_TAG" ]]; then
-            NEXT_VERSION="v0.0.1"
-          else
-            VERSION_PART="${LATEST_TAG#v}"
-            IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION_PART"
-            PATCH=$((PATCH + 1))
-            NEXT_VERSION="v${MAJOR}.${MINOR}.${PATCH}"
-          fi
-
-          echo "release_tag=$NEXT_VERSION" >> "$GITHUB_OUTPUT"
-          echo "release_checkout_ref=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+        run: ./tool/resolve_semantic_version.sh >> "$GITHUB_OUTPUT"
 
   validate:
     name: Validate before release
@@ -136,6 +113,7 @@ jobs:
     env:
       release_tag: ${{ needs.resolve-version.outputs.release_tag }}
       release_checkout_ref: ${{ needs.resolve-version.outputs.release_checkout_ref }}
+      BUILD_NUMBER: ${{ needs.resolve-version.outputs.build_number }}
     outputs:
       desktop_archive: ${{ steps.metadata.outputs.desktop_archive }}
       cli_archive: ${{ steps.metadata.outputs.cli_archive }}
@@ -171,7 +149,7 @@ jobs:
           set -euo pipefail
 
           build_name="${release_tag#v}"
-          build_number="$(git rev-list --count HEAD)"
+          build_number="$BUILD_NUMBER"
 
           echo "build_name=$build_name" >> "$GITHUB_OUTPUT"
           echo "build_number=$build_number" >> "$GITHUB_OUTPUT"
@@ -231,6 +209,7 @@ jobs:
     env:
       release_tag: ${{ needs.resolve-version.outputs.release_tag }}
       release_checkout_ref: ${{ needs.resolve-version.outputs.release_checkout_ref }}
+      BUILD_NUMBER: ${{ needs.resolve-version.outputs.build_number }}
     outputs:
       desktop_archive: ${{ steps.metadata.outputs.desktop_archive }}
       cli_archive: ${{ steps.metadata.outputs.cli_archive }}
@@ -261,7 +240,7 @@ jobs:
           set -euo pipefail
 
           build_name="${release_tag#v}"
-          build_number="$(git rev-list --count HEAD)"
+          build_number="$BUILD_NUMBER"
 
           echo "build_name=$build_name" >> "$GITHUB_OUTPUT"
           echo "build_number=$build_number" >> "$GITHUB_OUTPUT"
@@ -321,6 +300,7 @@ jobs:
     with:
       release_tag: ${{ needs.resolve-version.outputs.release_tag }}
       release_checkout_ref: ${{ needs.resolve-version.outputs.release_checkout_ref }}
+      build_number: ${{ needs.resolve-version.outputs.build_number }}
     secrets:
       PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
 

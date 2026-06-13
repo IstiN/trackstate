@@ -22,15 +22,31 @@ void main() {
       expect(workflow, contains('contents: write'));
     });
 
-    test('resolves the next semantic version from tags', () {
-      expect(workflow, contains('fetch-depth: 0'));
-      expect(workflow, contains("git tag --points-at \"\$GITHUB_SHA\""));
+    test('resolves the next semantic version using the shared resolver', () {
+      final resolveJob = workflow.substring(
+        workflow.indexOf('resolve-version:'),
+        workflow.indexOf('validate:'),
+      );
+      expect(resolveJob, contains('./tool/resolve_semantic_version.sh'));
+      expect(resolveJob, contains('release_tag:'));
+      expect(resolveJob, contains('release_checkout_ref:'));
+      expect(resolveJob, contains('build_number:'));
+    });
+
+    test('passes resolved build_number to platform build jobs', () {
       expect(
         workflow,
-        contains("grep -E '^v[0-9]+\\.[0-9]+\\.[0-9]+\$'"),
+        contains(r'BUILD_NUMBER: ${{ needs.resolve-version.outputs.build_number }}'),
       );
-      expect(workflow, contains(r'PATCH=$((PATCH + 1))'));
-      expect(workflow, contains('release_tag='));
+
+      final macosJob = workflow.substring(
+        workflow.indexOf('build-macos:'),
+        workflow.indexOf('publish-release:'),
+      );
+      expect(
+        macosJob,
+        contains(r'build_number: ${{ needs.resolve-version.outputs.build_number }}'),
+      );
     });
 
     test('resolve-version job runs with least privilege and a timeout', () {

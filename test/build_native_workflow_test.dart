@@ -19,16 +19,12 @@ void main() {
       expect(workflow, contains('workflow_dispatch:'));
       expect(workflow, contains('release_ref:'));
       expect(workflow, contains('default: auto'));
-      expect(workflow, contains('release_ref="v0.0.1"'));
+      expect(workflow, contains('./tool/resolve_semantic_version.sh'));
       expect(
         workflow,
-        contains(r'release_ref="v${major}.${minor}.$((patch + 1))"'),
-      );
-      expect(workflow, isNot(contains(r'release_ref="$release_ref"')));
-      expect(workflow, contains(r'if [[ -z "$release_ref" || "$release_ref" == "auto" ]]; then'));
-      expect(
-        workflow,
-        isNot(contains(r'release_ref="${{ env.release_ref }}"')),
+        contains(
+          "if: github.ref == 'refs/heads/main' || inputs.release_ref != 'auto'",
+        ),
       );
       expect(workflow, isNot(contains("tags: ['v*']")));
       expect(workflow, isNot(contains('branches: [main]')));
@@ -48,6 +44,10 @@ void main() {
         macosJob,
         contains(r'release_checkout_ref: ${{ needs.resolve-release.outputs.release_checkout_ref }}'),
       );
+      expect(
+        macosJob,
+        contains(r'build_number: ${{ needs.resolve-release.outputs.build_number }}'),
+      );
       expect(macosJob, contains('needs: resolve-release'));
       expect(macosJob, contains('secrets:'));
       expect(macosJob, contains(r'PAT_TOKEN: ${{ secrets.PAT_TOKEN }}'));
@@ -64,6 +64,25 @@ void main() {
       expect(resolveJob, contains('timeout-minutes: 10'));
       expect(resolveJob, contains('permissions:'));
       expect(resolveJob, contains('contents: read'));
+    });
+
+    test('resolve-release job outputs release metadata including build_number', () {
+      final resolveJob = workflow.substring(
+        workflow.indexOf('resolve-release:'),
+        workflow.indexOf('build-macos:'),
+      );
+      expect(
+        resolveJob,
+        contains(r'release_tag: ${{ steps.release.outputs.release_tag }}'),
+      );
+      expect(
+        resolveJob,
+        contains(r'release_checkout_ref: ${{ steps.release.outputs.release_checkout_ref }}'),
+      );
+      expect(
+        resolveJob,
+        contains(r'build_number: ${{ steps.release.outputs.build_number }}'),
+      );
     });
 
     test('publish-release job has a timeout and release permission', () {

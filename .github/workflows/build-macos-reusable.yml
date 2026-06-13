@@ -11,6 +11,10 @@ on:
         description: 'Git ref to checkout for the build'
         required: true
         type: string
+      build_number:
+        description: 'Build number (commit count) for the release'
+        required: true
+        type: string
     secrets:
       PAT_TOKEN:
         description: 'PAT used for checkout and runner inventory'
@@ -148,6 +152,7 @@ jobs:
     env:
       release_tag: ${{ inputs.release_tag }}
       release_checkout_ref: ${{ inputs.release_checkout_ref }}
+      BUILD_NUMBER: ${{ inputs.build_number }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -178,7 +183,7 @@ jobs:
           set -euo pipefail
 
           build_name="${release_tag#v}"
-          build_number="$(git rev-list --count HEAD)"
+          build_number="$BUILD_NUMBER"
 
           echo "build_name=$build_name" >> "$GITHUB_OUTPUT"
           echo "build_number=$build_number" >> "$GITHUB_OUTPUT"
