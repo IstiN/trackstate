@@ -24,7 +24,8 @@ void main() {
         workflow,
         contains(r'release_ref="v${major}.${minor}.$((patch + 1))"'),
       );
-      expect(workflow, contains(r'release_ref="$release_ref"'));
+      expect(workflow, isNot(contains(r'release_ref="$release_ref"')));
+      expect(workflow, contains(r'if [[ -z "$release_ref" || "$release_ref" == "auto" ]]; then'));
       expect(
         workflow,
         isNot(contains(r'release_ref="${{ env.release_ref }}"')),

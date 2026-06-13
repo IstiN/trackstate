@@ -26,6 +26,9 @@ on:
         description: 'Name of the uploaded artifact bundle'
         value: ${{ jobs.build-macos-release.outputs.artifact_name }}
 
+# Top-level permissions on a reusable workflow are documentation-only when the
+# workflow is invoked with `uses:`. Callers must grant `actions: read` and
+# `contents: read` at the job level for these permissions to take effect.
 permissions:
   actions: read
   contents: read
