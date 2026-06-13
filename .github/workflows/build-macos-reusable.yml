@@ -1,0 +1,367 @@
+name: Build macOS release artifacts
+
+on:
+  workflow_call:
+    inputs:
+      release_tag:
+        description: 'Semantic version tag to build, e.g. v1.2.3'
+        required: true
+        type: string
+      release_checkout_ref:
+        description: 'Git ref to checkout for the build'
+        required: true
+        type: string
+      build_number:
+        description: 'Build number (commit count) for the release'
+        required: true
+        type: string
+    secrets:
+      PAT_TOKEN:
+        description: 'PAT used for checkout and runner inventory'
+        required: false
+    outputs:
+      desktop_archive:
+        description: 'Name of the produced desktop archive'
+        value: ${{ jobs.build-macos-release.outputs.desktop_archive }}
+      cli_archive:
+        description: 'Name of the produced CLI archive'
+        value: ${{ jobs.build-macos-release.outputs.cli_archive }}
+      artifact_name:
+        description: 'Name of the uploaded artifact bundle'
+        value: ${{ jobs.build-macos-release.outputs.artifact_name }}
+
+# These permissions cap the GITHUB_TOKEN scope for jobs inside this reusable
+# workflow. Callers may grant fewer permissions, but they cannot grant more than
+# what is declared here.
+permissions:
+  actions: read
+  contents: read
+
+env:
+  required_runner_labels: self-hosted,macOS,trackstate-release,ARM64
+
+jobs:
+  verify-runner:
+    name: Verify macOS runner availability
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check configured macOS runner labels
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.PAT_TOKEN || github.token }}
+          script: |
+            const requiredLabels = process.env.REQUIRED_LABELS.split(',');
+            const readinessTimeoutMs = 5 * 60 * 1000;
+            const readinessFailureMessage =
+              'Unable to verify TrackState runner labels because the token cannot read repository runners.';
+            let readinessTimeoutId;
+            const { owner, repo } = context.repo;
+
+            let response;
+            try {
+              const runnerInventoryPromise = github.request(
+                'GET /repos/{owner}/{repo}/actions/runners',
+                {
+                  owner,
+                  repo,
+                  per_page: 100,
+                },
+              );
+              const readinessTimeoutPromise = new Promise((_, reject) => {
+                readinessTimeoutId = setTimeout(
+                  () => reject(new Error('runner-inventory-timeout')),
+                  readinessTimeoutMs,
+                );
+                readinessTimeoutId.unref?.();
+              });
+
+              response = await Promise.race([
+                runnerInventoryPromise,
+                readinessTimeoutPromise,
+              ]);
+            } catch (error) {
+              if (error.message === 'runner-inventory-timeout') {
+                core.setFailed(
+                  `${readinessFailureMessage} Failing closed after the readiness timeout expired.`,
+                );
+                return;
+              }
+
+              if (error.status === 403 || error.status === 401) {
+                core.warning(
+                  `${readinessFailureMessage} Continuing without runner inventory preflight; the macOS build job will rely on its runs-on labels.`,
+                );
+                return;
+              }
+              throw error;
+            } finally {
+              if (readinessTimeoutId) {
+                clearTimeout(readinessTimeoutId);
+              }
+            }
+
+            const matchingRunners = response.data.runners.filter((runner) =>
+              requiredLabels.every((label) =>
+                runner.labels.some(
+                  (runnerLabel) =>
+                    runnerLabel.name.toLowerCase() === label.toLowerCase(),
+                ),
+              ),
+            );
+
+            const runnerLabels = `[${requiredLabels.join(', ')}]`;
+            const noMatchingRunnerMessage =
+              `No online runners found with required labels ${runnerLabels} for ${owner}/${repo}. ` +
+              `No runner registered for ${owner}/${repo} matches labels ${runnerLabels}. ` +
+              'Provision the TrackState maintainer-owned macOS release runner before rerunning this workflow.';
+            const offlineRunnerMessage =
+              `No online runners found with required labels ${runnerLabels} for ${owner}/${repo}. ` +
+              `Runner labels ${runnerLabels} are registered, but none are online. ` +
+              'Bring the TrackState release runner online before rerunning this workflow.';
+
+            if (matchingRunners.length === 0) {
+              core.setFailed(noMatchingRunnerMessage);
+              return;
+            }
+
+            const onlineRunners = matchingRunners.filter(
+              (runner) => runner.status === 'online',
+            );
+
+            if (onlineRunners.length === 0) {
+              core.setFailed(offlineRunnerMessage);
+              return;
+            }
+
+            core.notice(
+              `Using TrackState release runner contract: ${onlineRunners.map((runner) => runner.name).join(', ')}`,
+            );
+        env:
+          REQUIRED_LABELS: ${{ env.required_runner_labels }}
+
+  build-macos-release:
+    name: Build macOS desktop and CLI artifacts
+    needs: verify-runner
+    runs-on: [self-hosted, macOS, trackstate-release, ARM64]
+    timeout-minutes: 45
+    outputs:
+      desktop_archive: ${{ steps.metadata.outputs.desktop_archive }}
+      cli_archive: ${{ steps.metadata.outputs.cli_archive }}
+      artifact_name: ${{ steps.metadata.outputs.artifact_name }}
+    env:
+      release_tag: ${{ inputs.release_tag }}
+      release_checkout_ref: ${{ inputs.release_checkout_ref }}
+      BUILD_NUMBER: ${{ inputs.build_number }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ env.release_checkout_ref }}
+          submodules: true
+          token: ${{ secrets.PAT_TOKEN || github.token }}
+
+      - name: Verify runner toolchain
+        shell: bash
+        run: ./tool/check_macos_release_runner.sh
+
+      - name: Use runner Flutter SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          flutter --version
+          dart --version
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Compute release metadata
+        id: metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          build_name="${release_tag#v}"
+          build_number="$BUILD_NUMBER"
+
+          echo "build_name=$build_name" >> "$GITHUB_OUTPUT"
+          echo "build_number=$build_number" >> "$GITHUB_OUTPUT"
+          echo "desktop_archive=TrackState-macos-arm64-${release_tag}.zip" >> "$GITHUB_OUTPUT"
+          echo "cli_archive=trackstate-cli-macos-arm64-${release_tag}.tar.gz" >> "$GITHUB_OUTPUT"
+          echo "artifact_name=trackstate-macos-${release_tag}" >> "$GITHUB_OUTPUT"
+
+      - name: Build macOS desktop app
+        shell: bash
+        env:
+          BUILD_NAME: ${{ steps.metadata.outputs.build_name }}
+          BUILD_NUMBER: ${{ steps.metadata.outputs.build_number }}
+        run: |
+          set -euo pipefail
+
+          heartbeat() {
+            while true; do
+              sleep 60
+              echo "::notice::flutter build macos is still running..."
+            done
+          }
+
+          heartbeat &
+          heartbeat_pid="$!"
+          cleanup_heartbeat() {
+            kill "$heartbeat_pid" 2>/dev/null || true
+            wait "$heartbeat_pid" 2>/dev/null || true
+          }
+          trap cleanup_heartbeat EXIT
+
+          export ARCHS=arm64
+          export ONLY_ACTIVE_ARCH=YES
+          export EXCLUDED_ARCHS=x86_64
+
+          flutter build macos --release \
+            --build-name="$BUILD_NAME" \
+            --build-number="$BUILD_NUMBER"
+
+          cleanup_heartbeat
+          trap - EXIT
+
+      - name: Build macOS CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p build/release
+          dart compile exe bin/trackstate.dart -o build/release/trackstate
+
+      - name: Package desktop and CLI artifacts
+        shell: bash
+        env:
+          DESKTOP_ARCHIVE: ${{ steps.metadata.outputs.desktop_archive }}
+          CLI_ARCHIVE: ${{ steps.metadata.outputs.cli_archive }}
+        run: |
+          set -euo pipefail
+
+          verify_arm64_binary() {
+            local binary_path="$1"
+            local label="$2"
+            local file_output=""
+
+            if [[ ! -f "$binary_path" ]]; then
+              echo "::error::$label binary was not found at $binary_path."
+              exit 1
+            fi
+
+            file_output="$(file "$binary_path")"
+            if [[ "$file_output" != *"Mach-O 64-bit executable arm64"* ]]; then
+              echo "::error::$label binary was not reported as Mach-O 64-bit executable arm64."
+              echo "::error::Observed file output: $file_output"
+              exit 1
+            fi
+
+            if [[ "$file_output" == *"universal binary"* || "$file_output" == *"x86_64"* ]]; then
+              echo "::error::$label binary still includes a non-arm64 architecture."
+              echo "::error::Observed file output: $file_output"
+              exit 1
+            fi
+          }
+
+          if [[ -f ./tool/thin_macos_app_bundle.sh ]]; then
+            source ./tool/thin_macos_app_bundle.sh
+          else
+            # Inline fallback for historical tags that predate tool/thin_macos_app_bundle.sh.
+            # Keep this in sync with the helper script; run
+            # ./tool/check_macos_thinning_fallback_sync.sh to verify parity.
+            read_file_mode() {
+              local file_path="$1"
+              stat -f '%Lp' "$file_path"
+            }
+
+            preserve_file_mode() {
+              local source_path="$1"
+              local target_path="$2"
+              local file_mode=""
+
+              file_mode="$(read_file_mode "$source_path")"
+              chmod "$file_mode" "$target_path"
+            }
+
+            thin_macho_to_arm64() {
+              local binary_path="$1"
+              local file_output=""
+              local thinned_path="${binary_path}.arm64"
+
+              if [[ ! -f "$binary_path" ]]; then
+                return
+              fi
+
+              file_output="$(file "$binary_path")"
+              if [[ "$file_output" != *"Mach-O"* ]]; then
+                return
+              fi
+
+              if [[ "$file_output" == *"Mach-O universal binary"* ]]; then
+                lipo -thin arm64 "$binary_path" -output "$thinned_path"
+                preserve_file_mode "$binary_path" "$thinned_path"
+                mv "$thinned_path" "$binary_path"
+              fi
+            }
+
+            thin_app_bundle_to_arm64() {
+              local app_bundle_path="$1"
+
+              while IFS= read -r -d '' bundle_file; do
+                thin_macho_to_arm64 "$bundle_file"
+              done < <(find "$app_bundle_path" -type f -print0)
+            }
+          fi
+
+          app_path="build/macos/Build/Products/Release/trackstate.app"
+          if [[ ! -d "$app_path" ]]; then
+            app_path=""
+            while IFS= read -r candidate_app_path; do
+              app_path="$candidate_app_path"
+              break
+            done < <(find build/macos/Build/Products/Release -maxdepth 1 -name '*.app')
+          fi
+
+          if [[ -z "$app_path" || ! -d "$app_path" ]]; then
+            echo "::error::macOS app bundle was not produced by flutter build macos."
+            exit 1
+          fi
+
+          thin_app_bundle_to_arm64 "$app_path"
+
+          app_binary=""
+          while IFS= read -r candidate_app_binary; do
+            app_binary="$candidate_app_binary"
+            break
+          done < <(find "$app_path/Contents/MacOS" -maxdepth 1 -type f)
+
+          if [[ -z "$app_binary" || ! -f "$app_binary" ]]; then
+            echo "::error::Unable to locate the macOS app executable inside $app_path."
+            exit 1
+          fi
+
+          verify_arm64_binary "$app_binary" "macOS desktop"
+          verify_arm64_binary "build/release/trackstate" "macOS CLI"
+
+          ditto -c -k --sequesterRsrc --keepParent \
+            "$app_path" \
+            "build/$DESKTOP_ARCHIVE"
+
+          tar -czf "build/$CLI_ARCHIVE" \
+            -C build/release \
+            trackstate
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        env:
+          ARTIFACT_NAME: ${{ steps.metadata.outputs.artifact_name }}
+          DESKTOP_ARCHIVE: ${{ steps.metadata.outputs.desktop_archive }}
+          CLI_ARCHIVE: ${{ steps.metadata.outputs.cli_archive }}
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: |
+            build/${{ env.DESKTOP_ARCHIVE }}
+            build/${{ env.CLI_ARCHIVE }}
+          if-no-files-found: error

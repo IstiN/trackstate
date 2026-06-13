@@ -99,14 +99,17 @@ jobs:
 
       - name: Build web app
         if: steps.changes.outputs.flutter == 'true'
+        env:
+          TRACKSTATE_GITHUB_APP_CLIENT_ID: ${{ vars.TRACKSTATE_GITHUB_APP_CLIENT_ID }}
+          TRACKSTATE_GITHUB_AUTH_PROXY_URL: ${{ vars.TRACKSTATE_GITHUB_AUTH_PROXY_URL }}
         run: |
           flutter build web --release \
             --base-href /trackstate/ \
             --dart-define TRACKSTATE_REPOSITORY=IstiN/trackstate-setup \
             --dart-define TRACKSTATE_SOURCE_REF=main \
             --dart-define TRACKSTATE_DATA_REF=main \
-            --dart-define TRACKSTATE_GITHUB_APP_CLIENT_ID="${{ vars.TRACKSTATE_GITHUB_APP_CLIENT_ID }}" \
-            --dart-define TRACKSTATE_GITHUB_AUTH_PROXY_URL="${{ vars.TRACKSTATE_GITHUB_AUTH_PROXY_URL }}"
+            --dart-define TRACKSTATE_GITHUB_APP_CLIENT_ID="$TRACKSTATE_GITHUB_APP_CLIENT_ID" \
+            --dart-define TRACKSTATE_GITHUB_AUTH_PROXY_URL="$TRACKSTATE_GITHUB_AUTH_PROXY_URL"
 
   accessibility-checks:
     name: Accessibility checks
@@ -179,6 +182,9 @@ jobs:
 
       - name: Build web app for accessibility scan
         if: steps.changes.outputs.accessibility == 'true'
+        env:
+          TRACKSTATE_GITHUB_APP_CLIENT_ID: ${{ vars.TRACKSTATE_GITHUB_APP_CLIENT_ID }}
+          TRACKSTATE_GITHUB_AUTH_PROXY_URL: ${{ vars.TRACKSTATE_GITHUB_AUTH_PROXY_URL }}
         run: |
           flutter build web --release \
             --base-href / \
@@ -187,8 +193,8 @@ jobs:
             --dart-define TRACKSTATE_REPOSITORY=IstiN/trackstate-setup \
             --dart-define TRACKSTATE_SOURCE_REF=main \
             --dart-define TRACKSTATE_DATA_REF=main \
-            --dart-define TRACKSTATE_GITHUB_APP_CLIENT_ID="${{ vars.TRACKSTATE_GITHUB_APP_CLIENT_ID }}" \
-            --dart-define TRACKSTATE_GITHUB_AUTH_PROXY_URL="${{ vars.TRACKSTATE_GITHUB_AUTH_PROXY_URL }}"
+            --dart-define TRACKSTATE_GITHUB_APP_CLIENT_ID="$TRACKSTATE_GITHUB_APP_CLIENT_ID" \
+            --dart-define TRACKSTATE_GITHUB_AUTH_PROXY_URL="$TRACKSTATE_GITHUB_AUTH_PROXY_URL"
 
       - name: Run axe-core accessibility checks
         id: axe_accessibility_scan
@@ -212,6 +218,9 @@ jobs:
 
       - name: Build web app for browser regressions
         if: steps.changes.outputs.accessibility == 'true'
+        env:
+          TRACKSTATE_GITHUB_APP_CLIENT_ID: ${{ vars.TRACKSTATE_GITHUB_APP_CLIENT_ID }}
+          TRACKSTATE_GITHUB_AUTH_PROXY_URL: ${{ vars.TRACKSTATE_GITHUB_AUTH_PROXY_URL }}
         run: |
           flutter build web --release \
             --base-href / \
@@ -219,8 +228,8 @@ jobs:
             --dart-define TRACKSTATE_REPOSITORY=IstiN/trackstate-setup \
             --dart-define TRACKSTATE_SOURCE_REF=main \
             --dart-define TRACKSTATE_DATA_REF=main \
-            --dart-define TRACKSTATE_GITHUB_APP_CLIENT_ID="${{ vars.TRACKSTATE_GITHUB_APP_CLIENT_ID }}" \
-            --dart-define TRACKSTATE_GITHUB_AUTH_PROXY_URL="${{ vars.TRACKSTATE_GITHUB_AUTH_PROXY_URL }}"
+            --dart-define TRACKSTATE_GITHUB_APP_CLIENT_ID="$TRACKSTATE_GITHUB_APP_CLIENT_ID" \
+            --dart-define TRACKSTATE_GITHUB_AUTH_PROXY_URL="$TRACKSTATE_GITHUB_AUTH_PROXY_URL"
 
       - name: Run browser regression checks
         if: steps.changes.outputs.accessibility == 'true'

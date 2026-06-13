@@ -51,14 +51,17 @@ jobs:
         run: flutter test
 
       - name: Build GitHub Pages web app
+        env:
+          TRACKSTATE_GITHUB_APP_CLIENT_ID: ${{ vars.TRACKSTATE_GITHUB_APP_CLIENT_ID }}
+          TRACKSTATE_GITHUB_AUTH_PROXY_URL: ${{ vars.TRACKSTATE_GITHUB_AUTH_PROXY_URL }}
         run: |
           flutter build web --release \
             --base-href /trackstate/ \
             --dart-define TRACKSTATE_REPOSITORY=IstiN/trackstate-setup \
             --dart-define TRACKSTATE_SOURCE_REF=main \
             --dart-define TRACKSTATE_DATA_REF=main \
-            --dart-define TRACKSTATE_GITHUB_APP_CLIENT_ID="${{ vars.TRACKSTATE_GITHUB_APP_CLIENT_ID }}" \
-            --dart-define TRACKSTATE_GITHUB_AUTH_PROXY_URL="${{ vars.TRACKSTATE_GITHUB_AUTH_PROXY_URL }}"
+            --dart-define TRACKSTATE_GITHUB_APP_CLIENT_ID="$TRACKSTATE_GITHUB_APP_CLIENT_ID" \
+            --dart-define TRACKSTATE_GITHUB_AUTH_PROXY_URL="$TRACKSTATE_GITHUB_AUTH_PROXY_URL"
 
       - name: Upload web build artifact
         uses: actions/upload-artifact@v4
