@@ -396,6 +396,8 @@ jobs:
           fi
 
           {
+            echo "<!-- The compiled artifacts table below is intentionally additive; it is appended even when the GitHub API generates release notes, so every release page lists the published assets. -->"
+            echo ""
             echo "## Compiled artifacts"
             echo ""
             echo "| Platform | Desktop | CLI |"

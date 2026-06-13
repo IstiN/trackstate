@@ -110,13 +110,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          heartbeat() {
-            while true; do
-              sleep 60
-              echo "::notice::GitHub release asset publishing is still running..."
-            done
-          }
-
           release_notes=""
 
           heartbeat() {
