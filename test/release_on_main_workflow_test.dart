@@ -225,6 +225,23 @@ void main() {
     test('only allows manual dispatches from the main branch', () {
       expect(workflow, contains('Guard manual dispatch branch'));
       expect(workflow, contains('refs/heads/main'));
+      expect(
+        workflow,
+        contains(
+          r"if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main'",
+        ),
+      );
+
+      final resolveVersionJob = workflow.substring(
+        workflow.indexOf('resolve-version:'),
+        workflow.indexOf('validate:'),
+      );
+      expect(
+        resolveVersionJob,
+        contains(
+          r"if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main'",
+        ),
+      );
 
       final guardStep = workflow.substring(
         workflow.indexOf('Guard manual dispatch branch'),

@@ -15,6 +15,7 @@ concurrency:
 
 jobs:
   resolve-version:
+    if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main'
     name: Resolve semantic version
     runs-on: ubuntu-latest
     timeout-minutes: 10
