@@ -302,9 +302,8 @@ void main() {
       expect(workflow, contains('Mach-O 64-bit executable arm64'));
       expect(workflow, contains('universal binary'));
       expect(workflow, contains('x86_64'));
-      expect(workflow, isNot(contains('read_file_mode() {')));
-      expect(workflow, isNot(contains('lipo -thin arm64')));
-      expect(workflow, isNot(contains('thin_app_bundle_to_arm64() {')));
+      expect(workflow, contains('lipo -thin arm64'));
+      expect(workflow, contains('thin_app_bundle_to_arm64() {'));
     });
 
     test('env-backs Flutter build metadata in the macOS build step', () {
@@ -375,7 +374,7 @@ void main() {
       expect(workflow, isNot(contains(r'trackstate-apple-${release_tag}.sha256')));
     });
 
-    test('requires the thinning helper and fails fast if it is missing', () {
+    test('provides an inline thinning fallback for historical tags', () {
       expect(
         workflow,
         contains('if [[ -f ./tool/thin_macos_app_bundle.sh ]]; then'),
@@ -384,13 +383,23 @@ void main() {
       expect(
         workflow,
         contains(
-          'tool/thin_macos_app_bundle.sh is required but missing on this ref.',
+          'Inline fallback for historical tags that predate tool/thin_macos_app_bundle.sh.',
         ),
       );
-      expect(workflow, contains('exit 1'));
-      expect(workflow, isNot(contains('read_file_mode() {')));
-      expect(workflow, isNot(contains('lipo -thin arm64')));
-      expect(workflow, isNot(contains('thin_app_bundle_to_arm64() {')));
+      expect(workflow, contains('read_file_mode() {'));
+      expect(workflow, contains("stat -f '%Lp'"));
+      expect(workflow, contains('preserve_file_mode() {'));
+      expect(workflow, contains('thin_macho_to_arm64() {'));
+      expect(workflow, contains('lipo -thin arm64'));
+      expect(workflow, contains('thin_app_bundle_to_arm64() {'));
+      expect(
+        workflow,
+        isNot(
+          contains(
+            'tool/thin_macos_app_bundle.sh is required but missing on this ref.',
+          ),
+        ),
+      );
     });
   });
 }

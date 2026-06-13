@@ -263,8 +263,42 @@ jobs:
           if [[ -f ./tool/thin_macos_app_bundle.sh ]]; then
             source ./tool/thin_macos_app_bundle.sh
           else
-            echo "::error::tool/thin_macos_app_bundle.sh is required but missing on this ref. Backport the helper before rebuilding this tag."
-            exit 1
+            # Inline fallback for historical tags that predate tool/thin_macos_app_bundle.sh.
+            # Keep this in sync with the helper script.
+            read_file_mode() {
+              local file_path="$1"
+              stat -f '%Lp' "$file_path"
+            }
+
+            preserve_file_mode() {
+              local source_path="$1"
+              local target_path="$2"
+              chmod "$(read_file_mode "$source_path")" "$target_path"
+            }
+
+            thin_macho_to_arm64() {
+              local binary_path="$1"
+              local thinned_path="${binary_path}.arm64"
+              local file_output=""
+
+              [[ -f "$binary_path" ]] || return
+              file_output="$(file "$binary_path")"
+              [[ "$file_output" == *"Mach-O"* ]] || return
+
+              if [[ "$file_output" == *"Mach-O universal binary"* ]]; then
+                lipo -thin arm64 "$binary_path" -output "$thinned_path"
+                preserve_file_mode "$binary_path" "$thinned_path"
+                mv "$thinned_path" "$binary_path"
+              fi
+            }
+
+            thin_app_bundle_to_arm64() {
+              local app_bundle_path="$1"
+              local bundle_file=""
+              while IFS= read -r -d '' bundle_file; do
+                thin_macho_to_arm64 "$bundle_file"
+              done < <(find "$app_bundle_path" -type f -print0)
+            }
           fi
 
           app_path="build/macos/Build/Products/Release/trackstate.app"
