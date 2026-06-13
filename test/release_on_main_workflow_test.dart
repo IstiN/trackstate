@@ -353,7 +353,6 @@ void main() {
     });
 
     test('only allows manual dispatches from the main branch', () {
-      expect(workflow, contains('Guard manual dispatch branch'));
       expect(workflow, contains('refs/heads/main'));
       expect(
         workflow,
@@ -361,6 +360,7 @@ void main() {
           r"if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main'",
         ),
       );
+      expect(workflow, isNot(contains('Guard manual dispatch branch')));
 
       final resolveVersionJob = workflow.substring(
         workflow.indexOf('resolve-version:'),
@@ -372,15 +372,7 @@ void main() {
           r"if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main'",
         ),
       );
-
-      final guardStep = workflow.substring(
-        workflow.indexOf('Guard manual dispatch branch'),
-        workflow.indexOf('Determine next semantic version'),
-      );
-      expect(guardStep, contains('env:'));
-      expect(guardStep, contains(r'REF: ${{ github.ref }}'));
-      expect(guardStep, contains(r'if [[ "$REF" != "refs/heads/main" ]]; then'));
-      expect(guardStep, contains(r'got $REF.'));
+      expect(resolveVersionJob, isNot(contains('Guard manual dispatch branch')));
     });
 
     test('checksum file lists assets without subdirectory prefixes', () {

@@ -34,16 +34,6 @@ jobs:
       - name: Fetch tags
         run: git fetch --force --tags origin
 
-      - name: Guard manual dispatch branch
-        shell: bash
-        env:
-          REF: ${{ github.ref }}
-        run: |
-          if [[ "$REF" != "refs/heads/main" ]]; then
-            echo "::error::Release on main workflow must run from the main branch; got $REF."
-            exit 1
-          fi
-
       - name: Determine next semantic version
         id: version
         shell: bash
