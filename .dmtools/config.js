@@ -294,13 +294,18 @@ module.exports = {
         pr_review: {
             customParams: {
                 autoStartRework: true,
-                autoStartReworkConfigFile: 'agents/pr_rework.json'
+                autoStartReworkConfigFile: 'agents/pr_rework.json',
+                // If the PR already has this many review threads/comments, allow
+                // an APPROVE verdict to stand even when suggestions remain, so the
+                // review/rework loop eventually terminates.
+                maxReviewThreadsBeforeForceApprove: 100
             }
         },
         pr_test_automation_review: {
             customParams: {
                 autoStartRework: true,
-                autoStartReworkConfigFile: 'agents/pr_test_automation_rework.json'
+                autoStartReworkConfigFile: 'agents/pr_test_automation_rework.json',
+                maxReviewThreadsBeforeForceApprove: 100
             }
         },
         pr_rework: {
