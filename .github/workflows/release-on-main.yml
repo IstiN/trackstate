@@ -209,13 +209,16 @@ jobs:
 
       - name: Package Linux desktop and CLI artifacts
         shell: bash
+        env:
+          DESKTOP_ARCHIVE: ${{ steps.metadata.outputs.desktop_archive }}
+          CLI_ARCHIVE: ${{ steps.metadata.outputs.cli_archive }}
         run: |
           set -euo pipefail
 
-          tar -czf "build/${{ steps.metadata.outputs.desktop_archive }}" \
+          tar -czf "build/$DESKTOP_ARCHIVE" \
             -C build/linux/x64/release/bundle .
 
-          tar -czf "build/${{ steps.metadata.outputs.cli_archive }}" \
+          tar -czf "build/$CLI_ARCHIVE" \
             -C build/release \
             trackstate
 
@@ -296,13 +299,16 @@ jobs:
 
       - name: Package Windows desktop and CLI artifacts
         shell: bash
+        env:
+          DESKTOP_ARCHIVE: ${{ steps.metadata.outputs.desktop_archive }}
+          CLI_ARCHIVE: ${{ steps.metadata.outputs.cli_archive }}
         run: |
           set -euo pipefail
 
           cd build/windows/x64/runner/Release
-          zip -r "${GITHUB_WORKSPACE}/build/${{ steps.metadata.outputs.desktop_archive }}" .
+          zip -r "${GITHUB_WORKSPACE}/build/$DESKTOP_ARCHIVE" .
 
-          tar -czf "${GITHUB_WORKSPACE}/build/${{ steps.metadata.outputs.cli_archive }}" \
+          tar -czf "${GITHUB_WORKSPACE}/build/$CLI_ARCHIVE" \
             -C "${GITHUB_WORKSPACE}/build/release" \
             trackstate.exe
 

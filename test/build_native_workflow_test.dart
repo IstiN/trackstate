@@ -111,6 +111,77 @@ void main() {
       expect(workflow, contains('::notice::GitHub release asset publishing is still running...'));
     });
 
+    test('env-backs macOS archive names in checksum step', () {
+      final checksumStep = workflow.substring(
+        workflow.indexOf('Generate SHA256 checksums'),
+        workflow.indexOf('Publish release assets'),
+      );
+      expect(checksumStep, contains('env:'));
+      expect(
+        checksumStep,
+        contains(r'DESKTOP_MACOS: ${{ needs.build-macos.outputs.desktop_archive }}'),
+      );
+      expect(
+        checksumStep,
+        contains(r'CLI_MACOS: ${{ needs.build-macos.outputs.cli_archive }}'),
+      );
+
+      final checksumRunBlock = checksumStep.substring(
+        checksumStep.indexOf('run: |'),
+      );
+      expect(checksumRunBlock, contains(r'"$DESKTOP_MACOS"'));
+      expect(checksumRunBlock, contains(r'"$CLI_MACOS"'));
+      expect(
+        checksumRunBlock,
+        isNot(
+          contains(
+            r'${{ needs.build-macos.outputs.desktop_archive }}',
+          ),
+        ),
+      );
+      expect(
+        checksumRunBlock,
+        isNot(
+          contains(
+            r'${{ needs.build-macos.outputs.cli_archive }}',
+          ),
+        ),
+      );
+    });
+
+    test('env-backs macOS archive names in release asset upload', () {
+      final publishStep = workflow.substring(
+        workflow.indexOf('Publish release assets'),
+      );
+      expect(publishStep, contains('env:'));
+      expect(
+        publishStep,
+        contains(r'DESKTOP_MACOS: ${{ needs.build-macos.outputs.desktop_archive }}'),
+      );
+      expect(
+        publishStep,
+        contains(r'CLI_MACOS: ${{ needs.build-macos.outputs.cli_archive }}'),
+      );
+      expect(publishStep, contains(r'"build/$DESKTOP_MACOS"'));
+      expect(publishStep, contains(r'"build/$CLI_MACOS"'));
+      expect(
+        publishStep,
+        isNot(
+          contains(
+            r'"build/${{ needs.build-macos.outputs.desktop_archive }}"',
+          ),
+        ),
+      );
+      expect(
+        publishStep,
+        isNot(
+          contains(
+            r'"build/${{ needs.build-macos.outputs.cli_archive }}"',
+          ),
+        ),
+      );
+    });
+
     test('does not inline macOS build details anymore', () {
       expect(workflow, isNot(contains('flutter build macos --release')));
       expect(workflow, isNot(contains('ditto -c -k --sequesterRsrc --keepParent')));

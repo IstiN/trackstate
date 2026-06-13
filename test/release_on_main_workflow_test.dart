@@ -188,6 +188,86 @@ void main() {
       );
     });
 
+    test('env-backs archive names in Linux and Windows packaging steps', () {
+      final linuxPackageStep = workflow.substring(
+        workflow.indexOf('Package Linux desktop and CLI artifacts'),
+        workflow.indexOf('Upload Linux workflow artifacts'),
+      );
+      expect(linuxPackageStep, contains('env:'));
+      expect(
+        linuxPackageStep,
+        contains(r'DESKTOP_ARCHIVE: ${{ steps.metadata.outputs.desktop_archive }}'),
+      );
+      expect(
+        linuxPackageStep,
+        contains(r'CLI_ARCHIVE: ${{ steps.metadata.outputs.cli_archive }}'),
+      );
+
+      final linuxRunBlock = linuxPackageStep.substring(
+        linuxPackageStep.indexOf('run: |'),
+      );
+      expect(linuxRunBlock, contains(r'"build/$DESKTOP_ARCHIVE"'));
+      expect(linuxRunBlock, contains(r'"build/$CLI_ARCHIVE"'));
+      expect(
+        linuxRunBlock,
+        isNot(
+          contains(
+            r'${{ steps.metadata.outputs.desktop_archive }}',
+          ),
+        ),
+      );
+      expect(
+        linuxRunBlock,
+        isNot(
+          contains(
+            r'${{ steps.metadata.outputs.cli_archive }}',
+          ),
+        ),
+      );
+
+      final windowsPackageStep = workflow.substring(
+        workflow.indexOf('Package Windows desktop and CLI artifacts'),
+        workflow.indexOf('Upload Windows workflow artifacts'),
+      );
+      expect(windowsPackageStep, contains('env:'));
+      expect(
+        windowsPackageStep,
+        contains(r'DESKTOP_ARCHIVE: ${{ steps.metadata.outputs.desktop_archive }}'),
+      );
+      expect(
+        windowsPackageStep,
+        contains(r'CLI_ARCHIVE: ${{ steps.metadata.outputs.cli_archive }}'),
+      );
+
+      final windowsRunBlock = windowsPackageStep.substring(
+        windowsPackageStep.indexOf('run: |'),
+      );
+      expect(
+        windowsRunBlock,
+        contains(r'zip -r "${GITHUB_WORKSPACE}/build/$DESKTOP_ARCHIVE"'),
+      );
+      expect(
+        windowsRunBlock,
+        contains(r'tar -czf "${GITHUB_WORKSPACE}/build/$CLI_ARCHIVE"'),
+      );
+      expect(
+        windowsRunBlock,
+        isNot(
+          contains(
+            r'${{ steps.metadata.outputs.desktop_archive }}',
+          ),
+        ),
+      );
+      expect(
+        windowsRunBlock,
+        isNot(
+          contains(
+            r'${{ steps.metadata.outputs.cli_archive }}',
+          ),
+        ),
+      );
+    });
+
     test('publishes a single unified GitHub release', () {
       expect(
         workflow,

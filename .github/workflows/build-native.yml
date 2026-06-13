@@ -115,13 +115,16 @@ jobs:
 
       - name: Generate SHA256 checksums
         shell: bash
+        env:
+          DESKTOP_MACOS: ${{ needs.build-macos.outputs.desktop_archive }}
+          CLI_MACOS: ${{ needs.build-macos.outputs.cli_archive }}
         run: |
           set -euo pipefail
 
           cd build
           sha256sum \
-            "${{ needs.build-macos.outputs.desktop_archive }}" \
-            "${{ needs.build-macos.outputs.cli_archive }}" \
+            "$DESKTOP_MACOS" \
+            "$CLI_MACOS" \
             > "trackstate-apple-${release_tag}.sha256"
 
       - name: Publish release assets
@@ -187,8 +190,8 @@ jobs:
           fi
 
           gh release upload "$release_tag" \
-            "build/${{ needs.build-macos.outputs.desktop_archive }}" \
-            "build/${{ needs.build-macos.outputs.cli_archive }}" \
+            "build/$DESKTOP_MACOS" \
+            "build/$CLI_MACOS" \
             "build/trackstate-apple-${release_tag}.sha256" \
             --clobber
 
