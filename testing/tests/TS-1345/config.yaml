@@ -1,0 +1,36 @@
+test_id: TS-1345
+type: ci
+framework: unittest
+platform: python
+dependencies:
+  - Python 3.12+
+  - PyYAML
+runtime_inputs:
+  workflow_path: .github/workflows/release-on-main.yml
+  required_jobs:
+    - publish-release
+  required_job_dependencies:
+    publish-release:
+      - resolve-version
+      - build-linux
+      - build-windows
+      - build-macos
+  required_steps_by_job:
+    publish-release:
+      - Download Linux artifacts
+      - Download Windows artifacts
+      - Download macOS artifacts
+      - Generate unified SHA256 checksums
+      - Publish release
+  required_markers_in_job:
+    publish-release:
+      - gh release create
+      - gh release upload
+      - gh release edit
+      - trackstate-${release_tag}.sha256
+      - --draft=false
+      - --prerelease=false
+      - "TrackState $release_tag"
+notes:
+  - Statically validates that the publish-release job aggregates all platform artifacts, generates a unified checksum file, and creates a non-draft, non-prerelease GitHub release.
+  - Does not publish an actual release.

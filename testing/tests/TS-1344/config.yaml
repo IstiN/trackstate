@@ -1,0 +1,46 @@
+test_id: TS-1344
+type: ci
+framework: unittest
+platform: python
+dependencies:
+  - Python 3.12+
+  - PyYAML
+runtime_inputs:
+  workflow_path: .github/workflows/release-on-main.yml
+  required_jobs:
+    - build-linux
+    - build-windows
+    - build-macos
+  required_steps_by_job:
+    build-linux:
+      - Build Linux desktop app
+      - Build Linux CLI
+      - Package Linux desktop and CLI artifacts
+      - Upload Linux workflow artifacts
+    build-windows:
+      - Build Windows desktop app
+      - Build Windows CLI
+      - Package Windows desktop and CLI artifacts
+      - Upload Windows workflow artifacts
+  required_outputs_by_job:
+    build-linux:
+      - desktop_archive
+      - cli_archive
+      - artifact_name
+    build-windows:
+      - desktop_archive
+      - cli_archive
+      - artifact_name
+  required_markers_in_job:
+    build-linux:
+      - TrackState-linux-x64-
+      - trackstate-cli-linux-x64-
+      - .tar.gz
+    build-windows:
+      - TrackState-windows-x64-
+      - trackstate-cli-windows-x64-
+      - .zip
+      - .tar.gz
+notes:
+  - Statically validates that Linux and Windows build jobs define the expected build/package/upload steps and artifact names.
+  - Does not perform actual compilation.
