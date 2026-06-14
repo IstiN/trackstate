@@ -2,7 +2,7 @@
   "name": "trackstate-accessibility",
   "private": true,
   "scripts": {
-    "test:a11y": "playwright test"
+    "test:a11y": "node --test testing/accessibility/ts969_wrapper_contract_failure.node.test.js"
   },
   "engines": {
     "node": "22"
