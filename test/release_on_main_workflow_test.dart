@@ -372,6 +372,20 @@ void main() {
       expect(publishStep, contains(r'echo "| Windows | $DESKTOP_WINDOWS | $CLI_WINDOWS |"'));
     });
 
+    test('release notes use bash and --fail for Linux macOS install commands', () {
+      expect(publishStep, contains(r'curl -fsSL'));
+      expect(publishStep, contains('| bash'));
+      expect(publishStep, isNot(contains('| sh')));
+    });
+
+    test('release notes use save-and-run for Windows PowerShell install command', () {
+      expect(publishStep, contains('irm https://github.com'));
+      expect(publishStep, contains('-OutFile install.ps1'));
+      expect(publishStep, contains(r'.\\install.ps1 -Version'));
+      // The old pipe-to-iex pattern must not appear.
+      expect(publishStep, isNot(contains('| iex')));
+    });
+
     test('release notes warn that desktop packages are unsigned and unnotarized', () {
       expect(publishStep, contains('unsigned and unnotarized'));
       expect(publishStep, contains('right-click the app'));
@@ -416,6 +430,8 @@ void main() {
       expect(publishJob, contains(r'scripts/install/$INSTALL_PS1'));
       expect(publishJob, contains(r'scripts/install/$INSTALL_CMD'));
       expect(publishJob, contains('chmod +x'));
+      expect(publishJob, contains('__REPO_PLACEHOLDER__'));
+      expect(publishJob, contains('sed -i'));
     });
 
     test('uploads install scripts as release assets', () {

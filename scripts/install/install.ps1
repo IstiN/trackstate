@@ -1,8 +1,11 @@
 # TrackState CLI installer for PowerShell.
 #
-# Usage:
-#   irm https://github.com/IstiN/trackstate/releases/latest/download/install.ps1 | iex
-#   irm https://github.com/IstiN/trackstate/releases/download/v1.2.3/install.ps1 | iex -Version v1.2.3
+# Usage (save then run — Invoke-Expression cannot execute a param block):
+#   irm https://github.com/__REPO_PLACEHOLDER__/releases/latest/download/install.ps1 -OutFile install.ps1
+#   .\install.ps1
+#
+#   irm https://github.com/__REPO_PLACEHOLDER__/releases/download/v1.2.3/install.ps1 -OutFile install.ps1
+#   .\install.ps1 -Version v1.2.3
 #
 # The script installs the TrackState CLI into a user-local directory and
 # appends that directory to the user-level PATH when it is not already present.
@@ -14,8 +17,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$Repo = "IstiN/trackstate"
-$InstallDir = Join-Path $env:LOCALAPPDATA "trackstate\bin"
+$Repo = "__REPO_PLACEHOLDER__"
 
 function Write-Info {
     param([string]$Message)
@@ -76,6 +78,7 @@ function Invoke-Download {
 
 $releaseTag = Resolve-ReleaseTag -RequestedVersion $Version
 $platform = Get-PlatformSuffix
+$InstallDir = Join-Path $env:LOCALAPPDATA "trackstate\bin"
 $archiveName = "trackstate-cli-$platform-$releaseTag.tar.gz"
 $checksumName = "trackstate-$releaseTag.sha256"
 $downloadBase = "https://github.com/$Repo/releases/download/$releaseTag"

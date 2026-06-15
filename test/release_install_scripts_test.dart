@@ -25,6 +25,34 @@ void main() {
       expect(script.existsSync(), isTrue);
     });
 
+    test('install.sh contains the repo placeholder', () {
+      final script = File('$repositoryRoot/scripts/install/install.sh');
+      final content = script.readAsStringSync();
+      expect(content, contains('__REPO_PLACEHOLDER__'));
+      expect(content, isNot(contains('IstiN/trackstate')));
+    });
+
+    test('install.ps1 contains the repo placeholder and deferred InstallDir', () {
+      final script = File('$repositoryRoot/scripts/install/install.ps1');
+      final content = script.readAsStringSync();
+      expect(content, contains('__REPO_PLACEHOLDER__'));
+      expect(content, isNot(contains('IstiN/trackstate')));
+      // $InstallDir must be initialized after Get-PlatformSuffix so non-Windows
+      // users see the platform error instead of a Join-Path null-path error.
+      final platformSuffixIndex = content.indexOf('Get-PlatformSuffix');
+      final installDirIndex = content.indexOf('\$InstallDir = Join-Path');
+      expect(installDirIndex, greaterThan(platformSuffixIndex));
+    });
+
+    test('install.cmd uses a less collision-prone temp filename and repo placeholder', () {
+      final script = File('$repositoryRoot/scripts/install/install.cmd');
+      final content = script.readAsStringSync();
+      expect(content, contains('%RANDOM%'));
+      expect(content, contains('%PPID%'));
+      expect(content, contains('%TS%'));
+      expect(content, contains('__REPO_PLACEHOLDER__'));
+    });
+
     test('install.sh passes bash syntax check', () async {
       final result = await Process.run(
         'bash',

@@ -42,6 +42,38 @@ dart run trackstate jira_execute_request --target local --method GET --request-p
 
 `jira_execute_request` returns raw Jira-compatible JSON on success for a documented allowlist of safe read paths (`/rest/api/2|3/search`, `/rest/api/2|3/issue/{key}`, and `/rest/api/2|3/issue/{key}/comment`). Unsupported or unsafe request shapes fail explicitly in the standard error envelope.
 
+## Install the compiled CLI
+
+Each release publishes install scripts and pre-built CLI binaries. Pick the command for your platform:
+
+### Linux / macOS
+
+```bash
+curl -fsSL https://github.com/IstiN/trackstate/releases/latest/download/install.sh | bash
+```
+
+Install a pinned version by passing the tag:
+
+```bash
+curl -fsSL https://github.com/IstiN/trackstate/releases/download/v1.2.3/install.sh | bash -s -- v1.2.3
+```
+
+### Windows (PowerShell)
+
+```powershell
+irm https://github.com/IstiN/trackstate/releases/latest/download/install.ps1 -OutFile install.ps1
+.\install.ps1
+```
+
+### Windows (Command Prompt)
+
+```cmd
+curl -fsSL https://github.com/IstiN/trackstate/releases/latest/download/install.cmd -o install.cmd
+install.cmd
+```
+
+The installer places the `trackstate` binary in a user-local directory and updates your PATH. No administrator privileges are required.
+
 ## GitHub artifacts
 
 `.github/workflows/unit-tests.yml` runs Flutter required checks on pull requests. `.github/workflows/flutter-ci.yml` builds the GitHub Pages web app, uploads the `trackstate-web` artifact, and deploys Pages from `main`.

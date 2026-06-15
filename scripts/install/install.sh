@@ -2,15 +2,15 @@
 # TrackState CLI installer for Linux and macOS.
 #
 # Usage:
-#   curl -sSL https://github.com/IstiN/trackstate/releases/latest/download/install.sh | sh
-#   curl -sSL https://github.com/IstiN/trackstate/releases/download/v1.2.3/install.sh | sh -s -- v1.2.3
+#   curl -fsSL https://github.com/__REPO_PLACEHOLDER__/releases/latest/download/install.sh | bash
+#   curl -fsSL https://github.com/__REPO_PLACEHOLDER__/releases/download/v1.2.3/install.sh | bash -s -- v1.2.3
 #
 # The script installs the TrackState CLI into a user-local directory and
 # appends that directory to the user's shell profile when it is not already
 # on PATH. No administrator privileges are required.
 set -euo pipefail
 
-REPO="IstiN/trackstate"
+REPO="__REPO_PLACEHOLDER__"
 INSTALL_DIR="${HOME}/.trackstate/bin"
 
 print_usage() {

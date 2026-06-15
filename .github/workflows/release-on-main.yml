@@ -372,6 +372,7 @@ jobs:
           INSTALL_SH: install.sh
           INSTALL_PS1: install.ps1
           INSTALL_CMD: install.cmd
+          GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
 
@@ -381,6 +382,9 @@ jobs:
           cp "scripts/install/$INSTALL_PS1" "$install_assets_dir/$INSTALL_PS1"
           cp "scripts/install/$INSTALL_CMD" "$install_assets_dir/$INSTALL_CMD"
           chmod +x "$install_assets_dir/$INSTALL_SH"
+          sed -i "s|__REPO_PLACEHOLDER__|$GITHUB_REPOSITORY|g" "$install_assets_dir/$INSTALL_SH"
+          sed -i "s|__REPO_PLACEHOLDER__|$GITHUB_REPOSITORY|g" "$install_assets_dir/$INSTALL_PS1"
+          sed -i "s|__REPO_PLACEHOLDER__|$GITHUB_REPOSITORY|g" "$install_assets_dir/$INSTALL_CMD"
 
       - name: Publish release
         shell: bash
@@ -432,25 +436,26 @@ jobs:
             echo "### Linux / macOS"
             echo ""
             echo "\`\`\`bash"
-            echo "curl -sSL https://github.com/${GITHUB_REPOSITORY}/releases/download/${release_tag}/install.sh | sh"
+            echo "curl -fsSL https://github.com/${GITHUB_REPOSITORY}/releases/download/${release_tag}/install.sh | bash"
             echo "\`\`\`"
             echo ""
             echo "Install a pinned version by passing the tag:"
             echo ""
             echo "\`\`\`bash"
-            echo "curl -sSL https://github.com/${GITHUB_REPOSITORY}/releases/download/${release_tag}/install.sh | sh -s -- ${release_tag}"
+            echo "curl -fsSL https://github.com/${GITHUB_REPOSITORY}/releases/download/${release_tag}/install.sh | bash -s -- ${release_tag}"
             echo "\`\`\`"
             echo ""
             echo "### Windows (PowerShell)"
             echo ""
             echo "\`\`\`powershell"
-            echo "irm https://github.com/${GITHUB_REPOSITORY}/releases/download/${release_tag}/install.ps1 | iex"
+            echo "irm https://github.com/${GITHUB_REPOSITORY}/releases/download/${release_tag}/install.ps1 -OutFile install.ps1"
+            echo ".\\install.ps1 -Version ${release_tag}"
             echo "\`\`\`"
             echo ""
             echo "### Windows (Command Prompt)"
             echo ""
             echo "\`\`\`cmd"
-            echo "curl -sSL https://github.com/${GITHUB_REPOSITORY}/releases/download/${release_tag}/install.cmd -o install.cmd"
+            echo "curl -fsSL https://github.com/${GITHUB_REPOSITORY}/releases/download/${release_tag}/install.cmd -o install.cmd"
             echo "install.cmd"
             echo "\`\`\`"
             echo ""
