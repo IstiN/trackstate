@@ -8,9 +8,9 @@ dependencies:
 runtime_inputs:
   repository: IstiN/trackstate
   default_branch: main
-  workflow_name: Apple Release Builds
-  workflow_file: build-native.yml
-  workflow_path: .github/workflows/build-native.yml
+  workflow_name: Build macOS release artifacts
+  workflow_file: build-macos-reusable.yml
+  workflow_path: .github/workflows/build-macos-reusable.yml
   verify_runner_job_name: Verify macOS runner availability
   build_job_name: Build macOS desktop and CLI artifacts
   setup_flutter_step_name: Set up Flutter
