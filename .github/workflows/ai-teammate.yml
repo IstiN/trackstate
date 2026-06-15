@@ -198,11 +198,13 @@ jobs:
       - name: Prepare agent config
         env:
           RAW_ENCODED_CONFIG: ${{ inputs.encoded_config }}
+          AI_TEAMMATE_CONFIG_FILE: ${{ inputs.config_file }}
         run: |
           node <<'NODE'
           const fs = require('fs');
 
           const raw = process.env.RAW_ENCODED_CONFIG || '';
+          const configFile = process.env.AI_TEAMMATE_CONFIG_FILE || '';
           let config = {};
 
           if (raw.trim()) {
@@ -226,9 +228,31 @@ jobs:
           }
 
           config.params = config.params || {};
-          const prompts = Array.isArray(config.params.cliPrompts)
-            ? config.params.cliPrompts.slice()
+
+          // Start from the agent JSON's own cliPrompts so manual triggers (no encoded_config)
+          // and minimal encoded payloads still get the full task instructions.
+          const basePrompts = [];
+          if (configFile) {
+            try {
+              const agentJson = JSON.parse(fs.readFileSync(configFile, 'utf8'));
+              if (agentJson && agentJson.params && Array.isArray(agentJson.params.cliPrompts)) {
+                basePrompts.push(...agentJson.params.cliPrompts);
+              }
+            } catch (error) {
+              console.warn(`Could not load agent config ${configFile} for cliPrompts merge: ${error.message || error}`);
+            }
+          }
+
+          // Apply any explicit cliPrompts from encoded_config on top of the agent JSON base.
+          const encodedPrompts = Array.isArray(config.params.cliPrompts)
+            ? config.params.cliPrompts
             : [];
+          const prompts = basePrompts.slice();
+          encodedPrompts.forEach((prompt) => {
+            if (!prompts.includes(prompt)) prompts.push(prompt);
+          });
+
+          // Always inject global tooling prompts last.
           ['./agents/prompts/bash_tools.md', './agents/prompts/codegraph_tools.md'].forEach((prompt) => {
             if (!prompts.includes(prompt)) prompts.push(prompt);
           });
