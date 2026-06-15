@@ -359,10 +359,11 @@ void main() {
       );
       expect(publishStep, contains('## Compiled artifacts'));
       expect(publishStep, contains('Verify downloads with'));
-      expect(
-        publishStep,
-        contains('Install commands and detailed asset descriptions will be added in a follow-up story.'),
-      );
+      expect(publishStep, contains('## Install the CLI'));
+      expect(publishStep, contains(r'echo "## Install the CLI"'));
+      expect(publishStep, contains('install.sh'));
+      expect(publishStep, contains('install.ps1'));
+      expect(publishStep, contains('install.cmd'));
       expect(publishStep, isNot(contains('<<EOF')));
       expect(publishStep, contains(r'echo "## Compiled artifacts"'));
       expect(publishStep, contains(r'echo "| Linux | $DESKTOP_LINUX | $CLI_LINUX |"'));
@@ -386,6 +387,29 @@ void main() {
       expect(publishStep, contains(r'"build/macos/$CLI_MACOS"'));
       expect(publishStep, contains(r'"build/windows/$DESKTOP_WINDOWS"'));
       expect(publishStep, contains(r'"build/windows/$CLI_WINDOWS"'));
+    });
+
+    test('prepares install script assets before publishing the release', () {
+      final publishJob = workflow.substring(
+        workflow.indexOf('publish-release:'),
+      );
+      expect(publishJob, contains('name: Prepare install script assets'));
+      expect(publishJob, contains(r'scripts/install/$INSTALL_SH'));
+      expect(publishJob, contains(r'scripts/install/$INSTALL_PS1'));
+      expect(publishJob, contains(r'scripts/install/$INSTALL_CMD'));
+      expect(publishJob, contains('chmod +x'));
+    });
+
+    test('uploads install scripts as release assets', () {
+      final publishStep = workflow.substring(
+        workflow.indexOf('Publish release'),
+      );
+      expect(publishStep, contains(r'INSTALL_SH: install.sh'));
+      expect(publishStep, contains(r'INSTALL_PS1: install.ps1'));
+      expect(publishStep, contains(r'INSTALL_CMD: install.cmd'));
+      expect(publishStep, contains(r'"build/install/$INSTALL_SH"'));
+      expect(publishStep, contains(r'"build/install/$INSTALL_PS1"'));
+      expect(publishStep, contains(r'"build/install/$INSTALL_CMD"'));
     });
 
     test('only allows manual dispatches from the main branch', () {

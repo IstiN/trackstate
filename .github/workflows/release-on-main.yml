@@ -366,6 +366,22 @@ jobs:
             | awk '{ sub(/^[^\/]+\//, "", $2); print $1 "  " $2 }' \
             > "trackstate-${release_tag}.sha256"
 
+      - name: Prepare install script assets
+        shell: bash
+        env:
+          INSTALL_SH: install.sh
+          INSTALL_PS1: install.ps1
+          INSTALL_CMD: install.cmd
+        run: |
+          set -euo pipefail
+
+          install_assets_dir="build/install"
+          mkdir -p "$install_assets_dir"
+          cp "scripts/install/$INSTALL_SH" "$install_assets_dir/$INSTALL_SH"
+          cp "scripts/install/$INSTALL_PS1" "$install_assets_dir/$INSTALL_PS1"
+          cp "scripts/install/$INSTALL_CMD" "$install_assets_dir/$INSTALL_CMD"
+          chmod +x "$install_assets_dir/$INSTALL_SH"
+
       - name: Publish release
         shell: bash
         env:
@@ -376,6 +392,9 @@ jobs:
           CLI_MACOS: ${{ needs.build-macos.outputs.cli_archive }}
           DESKTOP_WINDOWS: ${{ needs.build-windows.outputs.desktop_archive }}
           CLI_WINDOWS: ${{ needs.build-windows.outputs.cli_archive }}
+          INSTALL_SH: install.sh
+          INSTALL_PS1: install.ps1
+          INSTALL_CMD: install.cmd
         run: |
           set -euo pipefail
 
@@ -408,7 +427,32 @@ jobs:
             echo ""
             echo "Verify downloads with \`trackstate-${release_tag}.sha256\`."
             echo ""
-            echo "> Install commands and detailed asset descriptions will be added in a follow-up story."
+            echo "## Install the CLI"
+            echo ""
+            echo "### Linux / macOS"
+            echo ""
+            echo "\`\`\`bash"
+            echo "curl -sSL https://github.com/${GITHUB_REPOSITORY}/releases/download/${release_tag}/install.sh | sh"
+            echo "\`\`\`"
+            echo ""
+            echo "Install a pinned version by passing the tag:"
+            echo ""
+            echo "\`\`\`bash"
+            echo "curl -sSL https://github.com/${GITHUB_REPOSITORY}/releases/download/${release_tag}/install.sh | sh -s -- ${release_tag}"
+            echo "\`\`\`"
+            echo ""
+            echo "### Windows (PowerShell)"
+            echo ""
+            echo "\`\`\`powershell"
+            echo "irm https://github.com/${GITHUB_REPOSITORY}/releases/download/${release_tag}/install.ps1 | iex"
+            echo "\`\`\`"
+            echo ""
+            echo "### Windows (Command Prompt)"
+            echo ""
+            echo "\`\`\`cmd"
+            echo "curl -sSL https://github.com/${GITHUB_REPOSITORY}/releases/download/${release_tag}/install.cmd -o install.cmd"
+            echo "install.cmd"
+            echo "\`\`\`"
           } >> "$release_notes"
 
           if gh release view "$release_tag" >/dev/null 2>&1; then
@@ -428,6 +472,9 @@ jobs:
             "build/macos/$DESKTOP_MACOS" \
             "build/macos/$CLI_MACOS" \
             "build/trackstate-${release_tag}.sha256" \
+            "build/install/$INSTALL_SH" \
+            "build/install/$INSTALL_PS1" \
+            "build/install/$INSTALL_CMD" \
             --clobber
 
           gh release edit "$release_tag" \
