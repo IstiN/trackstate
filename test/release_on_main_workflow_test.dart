@@ -370,6 +370,35 @@ void main() {
       expect(publishStep, contains(r'echo "| Windows | $DESKTOP_WINDOWS | $CLI_WINDOWS |"'));
     });
 
+    test('release notes warn that desktop packages are unsigned and unnotarized', () {
+      final publishStep = workflow.substring(
+        workflow.indexOf('Publish release'),
+      );
+      expect(publishStep, contains('unsigned and unnotarized'));
+      expect(publishStep, contains('right-click the app'));
+      expect(publishStep, contains('choose Open'));
+      expect(publishStep, contains('More info'));
+      expect(publishStep, contains('Run anyway'));
+    });
+
+    test('release notes state the macOS desktop build requires Apple Silicon', () {
+      final publishStep = workflow.substring(
+        workflow.indexOf('Publish release'),
+      );
+      expect(publishStep, contains('Apple Silicon'));
+      expect(publishStep, contains('arm64'));
+    });
+
+    test('release notes explain desktop auth uses PAT and not GitHub App OAuth', () {
+      final publishStep = workflow.substring(
+        workflow.indexOf('Publish release'),
+      );
+      expect(publishStep, contains('fine-grained PAT'));
+      expect(publishStep, contains('gh auth token'));
+      expect(publishStep, contains('GitHub App OAuth'));
+      expect(publishStep, contains('web build only'));
+    });
+
     test('publishes release with env-backed asset names', () {
       final publishStep = workflow.substring(
         workflow.indexOf('Publish release'),
