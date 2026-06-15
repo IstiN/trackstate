@@ -394,6 +394,17 @@ void main() {
       expect(publishStep, contains('Run anyway'));
     });
 
+    test('release notes expose launch guidance with semantic headings', () {
+      expect(
+        publishStep,
+        contains('## Launching unsigned desktop packages'),
+      );
+      expect(publishStep, contains('### macOS'));
+      expect(publishStep, contains('### Windows'));
+      // Guidance must be structured as headings, not only a blockquote.
+      expect(publishStep, isNot(contains(r'echo "> **Security warning:**"')));
+    });
+
     test('release notes state the macOS desktop build requires Apple Silicon', () {
       expect(publishStep, contains('Apple Silicon'));
       expect(publishStep, contains('arm64'));
