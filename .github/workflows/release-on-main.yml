@@ -453,6 +453,12 @@ jobs:
             echo "curl -sSL https://github.com/${GITHUB_REPOSITORY}/releases/download/${release_tag}/install.cmd -o install.cmd"
             echo "install.cmd"
             echo "\`\`\`"
+            echo ""
+            echo "> **Desktop auth:** These desktop builds authenticate with a GitHub fine-grained PAT or a token from \`gh auth token\`. GitHub App OAuth is supported in the web build only."
+            echo ""
+            echo "> **macOS requirement:** The macOS desktop package is built for Apple Silicon (arm64) and requires an Apple Silicon Mac."
+            echo ""
+            echo "> **Security warning:** These desktop packages are unsigned and unnotarized. On first launch you may need to confirm the OS security warning: on macOS, right-click the app and choose Open; on Windows, click More info and then Run anyway."
           } >> "$release_notes"
 
           if gh release view "$release_tag" >/dev/null 2>&1; then

@@ -8,10 +8,14 @@ void main() {
 
   group('Main-branch release workflow contract', () {
     late String workflow;
+    late String publishStep;
 
     setUp(() {
       workflow = repositoryFile('.github/workflows/release-on-main.yml')
           .readAsStringSync();
+      publishStep = workflow.substring(
+        workflow.indexOf('Publish release'),
+      );
     });
 
     test('triggers on main pushes and manual dispatch', () {
@@ -354,9 +358,6 @@ void main() {
     });
 
     test('generates a release body scaffold for later enrichment', () {
-      final publishStep = workflow.substring(
-        workflow.indexOf('Publish release'),
-      );
       expect(publishStep, contains('## Compiled artifacts'));
       expect(publishStep, contains('Verify downloads with'));
       expect(publishStep, contains('## Install the CLI'));
@@ -371,10 +372,27 @@ void main() {
       expect(publishStep, contains(r'echo "| Windows | $DESKTOP_WINDOWS | $CLI_WINDOWS |"'));
     });
 
+    test('release notes warn that desktop packages are unsigned and unnotarized', () {
+      expect(publishStep, contains('unsigned and unnotarized'));
+      expect(publishStep, contains('right-click the app'));
+      expect(publishStep, contains('choose Open'));
+      expect(publishStep, contains('More info'));
+      expect(publishStep, contains('Run anyway'));
+    });
+
+    test('release notes state the macOS desktop build requires Apple Silicon', () {
+      expect(publishStep, contains('Apple Silicon'));
+      expect(publishStep, contains('arm64'));
+    });
+
+    test('release notes explain desktop auth uses PAT and not GitHub App OAuth', () {
+      expect(publishStep, contains('fine-grained PAT'));
+      expect(publishStep, contains('gh auth token'));
+      expect(publishStep, contains('GitHub App OAuth'));
+      expect(publishStep, contains('web build only'));
+    });
+
     test('publishes release with env-backed asset names', () {
-      final publishStep = workflow.substring(
-        workflow.indexOf('Publish release'),
-      );
       expect(publishStep, contains(r'DESKTOP_LINUX: ${{ needs.build-linux.outputs.desktop_archive }}'));
       expect(publishStep, contains(r'CLI_LINUX: ${{ needs.build-linux.outputs.cli_archive }}'));
       expect(publishStep, contains(r'DESKTOP_MACOS: ${{ needs.build-macos.outputs.desktop_archive }}'));
@@ -517,9 +535,6 @@ void main() {
     });
 
     test('cleans up temporary release notes file', () {
-      final publishStep = workflow.substring(
-        workflow.indexOf('Publish release'),
-      );
       expect(publishStep, contains(r'release_notes="$(mktemp)"'));
       expect(
         publishStep,
