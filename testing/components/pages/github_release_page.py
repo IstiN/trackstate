@@ -56,6 +56,7 @@ class GitHubReleasePage:
                 timeout_ms=timeout_seconds * 1_000,
             )
             self._session.wait_for_text("Assets", timeout_ms=timeout_seconds * 1_000)
+            self._ensure_assets_loaded(timeout_seconds=timeout_seconds)
             self._session.wait_for_function(
                 """
                 () => {
@@ -76,6 +77,51 @@ class GitHubReleasePage:
                 f"verification.\nURL: {url}\nVisible body text:\n{self._session.body_text()}",
             ) from error
         return url
+
+    def _ensure_assets_loaded(self, *, timeout_seconds: int) -> None:
+        """Force GitHub's lazy-loaded asset fragment to load eagerly.
+
+        GitHub renders release assets inside an ``<include-fragment loading="lazy">``.
+        In headless browser environments the fragment often stays in a "Loading" state
+        and never fetches its ``src``. Switching the fragment to ``loading="eager""
+        makes the browser resolve the asset list so accessibility checks can run
+        against real release artifacts.
+        """
+        self._session.evaluate(
+            """
+            () => {
+                const fragment = document.querySelector(
+                    'include-fragment[src*="/releases/expanded_assets/"]',
+                );
+                if (fragment && fragment.getAttribute('loading') === 'lazy') {
+                    fragment.removeAttribute('loading');
+                    fragment.setAttribute('loading', 'eager');
+                }
+            }
+            """,
+        )
+        self._session.wait_for_function(
+            """
+            () => {
+                const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+                const assetsSummary = Array.from(document.querySelectorAll('summary'))
+                  .find((node) => normalize(node.textContent).includes('Assets'));
+                if (!assetsSummary) {
+                    return false;
+                }
+                const details = assetsSummary.closest('details');
+                if (!details) {
+                    return false;
+                }
+                const hasLoadingError = /error while loading/i.test(details.textContent || '');
+                const assetLinks = details.querySelectorAll(
+                    'a[href*="/releases/download/"], a[href*="/archive/refs/tags/"]',
+                );
+                return !hasLoadingError && assetLinks.length > 0;
+            }
+            """,
+            timeout_ms=timeout_seconds * 1_000,
+        )
 
     def observe_accessibility(
         self,
