@@ -66,7 +66,7 @@ jobs:
           AI_TEAMMATE_CONFIG_FILE: ${{ inputs.config_file }}
           AI_TEAMMATE_CONCURRENCY_KEY: ${{ inputs.concurrency_key }}
           AI_TEAMMATE_DISPLAY_KEY: ${{ inputs.display_key || inputs.concurrency_key }}
-        run: bash agents/setup/cache.sh keys dmtools:v1.7.208 codegraph copilot:1.0.44 copilot-session kimi-session playwright kimi
+        run: bash agents/setup/cache.sh keys dmtools:v1.7.211 codegraph copilot:1.0.44 copilot-session kimi-session playwright kimi
 
       - name: Cache Playwright browsers
         uses: actions/cache@v4
@@ -167,7 +167,7 @@ jobs:
           AI_TEAMMATE_CONFIG_FILE: ${{ inputs.config_file }}
           AI_TEAMMATE_CONCURRENCY_KEY: ${{ inputs.concurrency_key }}
           AI_TEAMMATE_DISPLAY_KEY: ${{ inputs.display_key || inputs.concurrency_key }}
-        run: bash agents/setup/install.sh java:17 node:20 dmtools:v1.7.208 codegraph playwright kimi
+        run: bash agents/setup/install.sh java:17 node:20 dmtools:v1.7.211 codegraph playwright kimi
 
       - name: Install CodeGraph usage guard
         run: |
