@@ -1,0 +1,25 @@
+test_id: TS-1355
+type: ci
+framework: unittest
+platform: python
+dependencies:
+  - Python 3.12+
+  - PyYAML
+runtime_inputs:
+  workflow_path: .github/workflows/release-on-main.yml
+  publish_release_step_name: Publish release
+  unsigned_warning_markers:
+    - unsigned
+    - unnotarized
+  macos_guidance_markers:
+    - right-click
+    - Open
+  windows_guidance_markers:
+    - More info
+    - Run anyway
+  heading_pattern: "^#{2,3}\\s+"
+  heading_max_lines_before_guidance: 3
+notes:
+  - Statically validates that the publish-release job appends platform-specific launch guidance.
+  - Requires unsigned/unnotarized warning, macOS right-click/Open guidance, and Windows More info/Run anyway guidance.
+  - Requires each guidance block to be introduced by an H2 or H3 Markdown heading for screen-reader navigation.
