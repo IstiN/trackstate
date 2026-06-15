@@ -1,0 +1,25 @@
+test_id: TS-1355
+type: ci
+framework: unittest
+platform: python
+dependencies:
+  - Python 3.12+
+  - PyYAML
+runtime_inputs:
+  workflow_path: .github/workflows/release-on-main.yml
+  required_jobs:
+    - publish-release
+  required_steps_by_job:
+    publish-release:
+      - Publish release
+  required_markers_in_job:
+    publish-release:
+      - "> **Security warning:** These desktop packages are unsigned and unnotarized."
+      - "right-click the app and choose Open"
+      - "More info and then Run anyway"
+      - "## Install the CLI"
+      - "### Linux / macOS"
+      - "### Windows (PowerShell)"
+      - "### Windows (Command Prompt)"
+notes:
+  - Statically validates that the published release notes contain a security warning and platform-specific launch guidance for unsigned/unnotarized desktop packages, using semantic Markdown headings.

@@ -21,7 +21,10 @@ runtime_inputs:
       - "| macOS |"
       - "| Windows |"
       - trackstate-${release_tag}.sha256
-      - Install commands and detailed asset descriptions will be added in a follow-up story.
+      - "## Install the CLI"
+      - "### Linux / macOS"
+      - "### Windows (PowerShell)"
+      - "### Windows (Command Prompt)"
       - --title
       - TrackState $release_tag
 notes:
