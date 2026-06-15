@@ -21,9 +21,16 @@ runtime_inputs:
       - "| macOS |"
       - "| Windows |"
       - trackstate-${release_tag}.sha256
-      - Install commands and detailed asset descriptions will be added in a follow-up story.
+      - "## Install the CLI"
+      - "## Launching unsigned desktop packages"
+      - unsigned and unnotarized
+      - right-click
+      - Open
+      - More info
+      - Run anyway
       - --title
       - TrackState $release_tag
 notes:
   - Statically validates that the publish-release job requests GitHub-generated release notes and appends a structured compiled-artifacts scaffold.
+  - Verifies the scaffold now includes CLI install instructions and the platform-specific launch guidance for unsigned desktop packages.
   - Does not publish an actual release.

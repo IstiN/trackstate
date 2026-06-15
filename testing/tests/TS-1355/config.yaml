@@ -1,0 +1,23 @@
+test_id: TS-1355
+type: ci
+framework: unittest
+platform: python
+dependencies:
+  - Python 3.12+
+  - PyYAML
+runtime_inputs:
+  workflow_path: .github/workflows/release-on-main.yml
+  required_jobs:
+    - publish-release
+  required_markers_in_job:
+    publish-release:
+      - "## Launching unsigned desktop packages"
+      - unsigned and unnotarized
+      - right-click
+      - Open
+      - More info
+      - Run anyway
+notes:
+  - Statically validates that the publish-release job appends a dedicated, semantic-heading section warning that desktop packages are unsigned and unnotarized.
+  - Verifies the section provides macOS-specific instructions (right-click the app and choose Open) and Windows-specific instructions (More info -> Run anyway).
+  - Does not publish an actual release; it proves the release-notes template/workflow contains the required guidance so future releases will expose it.
