@@ -1,9 +1,20 @@
-# TS-1355 — Release Note Instructions
+# TS-1355 test automation
 
-Static validation that the `release-on-main.yml` workflow generates release notes containing:
+Verifies that the published GitHub release notes include the required manual
+bypass instructions for unsigned and unnotarized desktop packages, with
+platform-specific guidance presented under semantic Markdown headings.
 
-- A security warning that desktop packages are unsigned and unnotarized.
-- Platform-specific launch guidance for macOS (`right-click` → `Open`) and Windows (`More info` → `Run anyway`).
-- Semantic Markdown headings (`##`, `###`) for screen-reader navigation.
+## What is tested
 
-The test does not publish a release.
+1. The `publish-release` job appends a block to the release body.
+2. The block contains an unsigned/unnotarized security warning.
+3. macOS guidance (`right-click` / `Open`) is present.
+4. Windows guidance (`More info` / `Run anyway`) is present.
+5. Each platform guidance block is introduced by an H2 or H3 Markdown heading
+   so screen-reader users can navigate directly to the launch instructions.
+
+## Run this test
+
+```bash
+python -m unittest testing.tests.TS-1355.test_ts_1355
+```

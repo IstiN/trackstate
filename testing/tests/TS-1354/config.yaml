@@ -1,0 +1,32 @@
+test_id: TS-1354
+type: ci
+framework: unittest
+platform: python
+dependencies:
+  - Python 3.12+
+  - PyYAML
+runtime_inputs:
+  workflow_path: .github/workflows/release-on-main.yml
+  desktop_build_job_names:
+    - build-linux
+    - build-windows
+    - build-macos
+  web_build_step_name: Build GitHub Pages web app
+  oauth_dart_defines:
+    - TRACKSTATE_GITHUB_APP_CLIENT_ID
+    - TRACKSTATE_GITHUB_AUTH_PROXY_URL
+  auth_source_relative_path: lib/ui/features/tracker/views/trackstate_app_widgets_workspace.dart
+  localization_file_relative_path: lib/l10n/app_en.arb
+  conditional_flag: widget.viewModel.isGitHubAppAuthAvailable
+  github_app_button_label_key: continueWithGitHubApp
+  pat_input_label_key: fineGrainedToken
+  connect_button_label_key: connectToken
+  required_label_keys:
+    - fineGrainedToken
+    - fineGrainedTokenHelper
+    - connectToken
+    - continueWithGitHubApp
+notes:
+  - Statically validates that desktop release build jobs do not inject GitHub App OAuth dart-defines.
+  - Verifies the web build still injects those defines, proving the scope split.
+  - Inspects the hosted repository access dialog to confirm the GitHub App button is gated and PAT controls have visible labels.

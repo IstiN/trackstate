@@ -335,7 +335,7 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         "h4. What was tested",
         (
             "* Triggered the live {{Apple Release Builds}} workflow using a disposable "
-            "semantic tag whose disposable workflow branch leaves {{Set up Flutter}} on "
+            "semantic tag whose disposable workflow branch leaves {{Use runner Flutter SDK}} on "
             "{{3.35.3}} but injects an incompatible Flutter {{3.30.0}} version shim "
             "immediately before {{Verify runner toolchain}}."
         ),
@@ -397,7 +397,7 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         "## What was automated",
         (
             "- Triggered the live `Apple Release Builds` workflow using a disposable "
-            "semantic tag whose disposable workflow branch leaves `Set up Flutter` on "
+            "semantic tag whose disposable workflow branch leaves `Use runner Flutter SDK` on "
             "`3.35.3` but injects an incompatible Flutter `3.30.0` version shim "
             "immediately before `Verify runner toolchain`."
         ),
@@ -706,7 +706,7 @@ def _actual_result_summary(result: dict[str, object]) -> str:
     build_job = _as_text((result.get("build_job") or {}).get("conclusion"))
     if _is_precondition_failure(result):
         if _setup_failed_before_validation(result):
-            setup_name = _as_text((result.get("setup_flutter_step") or {}).get("name")) or "Set up Flutter"
+            setup_name = _as_text((result.get("setup_flutter_step") or {}).get("name")) or "Use runner Flutter SDK"
             return (
                 f"The disposable Apple release run at `{run_url}` failed in `{setup_name}` "
                 "before `Verify runner toolchain` executed. Build job conclusion was "
@@ -920,7 +920,7 @@ def _required_flutter_line(observation: AppleReleaseToolchainValidationObservati
 
 
 def _required_setup_step_name() -> str:
-    return "Set up Flutter"
+    return "Use runner Flutter SDK"
 
 
 def _job_summary_inline(

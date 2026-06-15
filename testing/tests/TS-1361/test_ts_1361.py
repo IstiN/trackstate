@@ -35,7 +35,6 @@ class PosixInstallScriptIdempotencyAndConflictTest(unittest.TestCase):
             binary_name="trackstate",
         )
         server = MockGitHubReleaseServer(assets, repo="test/repo")
-        server.__enter__()
         patched = tmpdir / "install.sh"
         patch_install_sh(INSTALL_SCRIPT, patched, server)
         return patched, assets, server
@@ -49,7 +48,7 @@ class PosixInstallScriptIdempotencyAndConflictTest(unittest.TestCase):
             profile = detect_profile(home_dir, shell_name="bash")
 
             patched, _assets, server = self._create_patched_script(tmpdir)
-            try:
+            with server:
                 base_env = {
                     "HOME": str(home_dir),
                     "SHELL": "/bin/bash",
@@ -103,12 +102,16 @@ class PosixInstallScriptIdempotencyAndConflictTest(unittest.TestCase):
                     f"Observed output:\n{third_output}",
                 )
                 self.assertIn(
-                    "/usr/local/bin",
+                    str(conflict_dir),
                     third_output,
                     "The error message should warn the user about the existing binary location.",
                 )
 
                 # Run with --force to allow the managed install to override the conflict
+                # NOTE: --force is passed as the positional version argument because the
+                # install script currently treats any positional argument as a version tag.
+                # Once the product contract defines an explicit --force option, this call
+                # should be updated to use the flag form.
                 force = run_install_sh(
                     patched,
                     version="--force",
@@ -125,8 +128,6 @@ class PosixInstallScriptIdempotencyAndConflictTest(unittest.TestCase):
                     (install_dir / "trackstate").exists(),
                     "The managed binary should be installed when --force is used.",
                 )
-            finally:
-                server.__exit__(None, None, None)
 
 
 if __name__ == "__main__":
