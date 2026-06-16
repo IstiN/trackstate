@@ -190,11 +190,14 @@ def patch_install_sh(
 def run_install_sh(
     script_path: Path,
     version: str | None = None,
+    flags: list[str] | None = None,
     env: dict[str, str] | None = None,
     cwd: Path | None = None,
     timeout: int = 60,
 ) -> subprocess.CompletedProcess[str]:
     command = ["bash", str(script_path)]
+    if flags:
+        command.extend(flags)
     if version is not None:
         command.append(version)
     merged_env = os.environ.copy()
