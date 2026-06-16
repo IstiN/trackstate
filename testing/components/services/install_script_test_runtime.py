@@ -173,6 +173,16 @@ def patch_install_sh(
         "https://github.com/${REPO}/releases/download/${RELEASE_TAG}/${ARCHIVE_NAME}",
         f"{server.base_url}/{server.repo}/releases/download/${{RELEASE_TAG}}/${{ARCHIVE_NAME}}",
     )
+    # Also patch the literal GitHub download base used after resolve_release_tag
+    patched = patched.replace(
+        'DOWNLOAD_BASE="https://github.com/${REPO}/releases/download/${RELEASE_TAG}"',
+        f'DOWNLOAD_BASE="{server.base_url}/{server.repo}/releases/download/${{RELEASE_TAG}}"',
+    )
+    # Also patch the fallback literal used when the variable substitution above is not present
+    patched = patched.replace(
+        "https://github.com/${REPO}/releases/download/${RELEASE_TAG}",
+        f"{server.base_url}/{server.repo}/releases/download/${{RELEASE_TAG}}",
+    )
     patched_path.write_text(patched, encoding="utf-8")
     patched_path.chmod(0o755)
 

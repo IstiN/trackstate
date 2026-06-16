@@ -56,7 +56,7 @@ class CompiledCliRegressionTest(unittest.TestCase):
         )
 
         # The TS-596 validator writes to the repo-relative output path; copy it to tmpdir
-        repo_output = REPO_ROOT / config.output_file_name
+        repo_output = Path(validation.observation.compiled_binary_path)
         if repo_output.exists():
             compiled_binary.write_bytes(repo_output.read_bytes())
             compiled_binary.chmod(0o755)
