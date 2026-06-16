@@ -67,6 +67,8 @@ void main() {
     expect(workflow, contains('git diff --name-only'));
     expect(workflow, contains('github.event.before'));
     expect(workflow, contains('github.sha'));
+    expect(workflow, contains('git merge-base'));
+    expect(workflow, contains('origin/HEAD'));
     expect(workflow, contains('.github/workflows/'));
     expect(workflow, contains('No workflow file changes'));
     expect(
