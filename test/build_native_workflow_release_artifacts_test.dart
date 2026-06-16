@@ -160,11 +160,11 @@ printf "ARM64_MACHO" > "$5"
 
 String _buildNativeWorkflow() {
   const workflowPathFromDefine = String.fromEnvironment(
-    'BUILD_NATIVE_WORKFLOW_PATH',
+    'BUILD_MACOS_REUSABLE_WORKFLOW_PATH',
   );
   final workflowPath = workflowPathFromDefine.isNotEmpty
       ? workflowPathFromDefine
-      : Platform.environment['BUILD_NATIVE_WORKFLOW_PATH'] ??
-            '.github/workflows/build-native.yml';
+      : Platform.environment['BUILD_MACOS_REUSABLE_WORKFLOW_PATH'] ??
+            '.github/workflows/build-macos-reusable.yml';
   return File(workflowPath).readAsStringSync();
 }

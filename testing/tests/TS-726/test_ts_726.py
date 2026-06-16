@@ -5,6 +5,7 @@ from dataclasses import asdict, replace
 import json
 import math
 import platform
+import re
 import sys
 import traceback
 from pathlib import Path
@@ -562,14 +563,19 @@ def _assert_sheet_accessibility(
         )
     relevant_sequence = _relevant_sheet_focus_sequence(sequence)
     relevant_labels = [step.after_label or "" for step in relevant_sequence]
+    observed_control_labels = [
+        *relevant_labels,
+        *(_tab_stop_label(tab_stop) for tab_stop in tab_stops),
+        *(item.label for item in surface.interactive_elements),
+    ]
     has_workspace_list_control = any(
-        _is_workspace_list_control_label(label) for label in relevant_labels
+        _is_workspace_list_control_label(label) for label in observed_control_labels
     )
     has_add_workspace_control = any(
-        _is_add_workspace_control_label(label) for label in relevant_labels
+        _is_add_workspace_control_label(label) for label in observed_control_labels
     )
     has_remove_control = any(
-        _is_remove_control_label(label) for label in relevant_labels
+        _is_remove_control_label(label) for label in observed_control_labels
     )
     if not has_workspace_list_control or not has_add_workspace_control or not has_remove_control:
         missing_groups: list[str] = []
@@ -642,13 +648,23 @@ def _assert_accessible_contrast(
     low_text_contrast = [
         text_control
         for text_control in surface.interactive_texts
-        if text_control.contrast_ratio is None
+        if not text_control.disabled
+        and (text_control.contrast_ratio is None
         or text_control.contrast_ratio < MIN_TEXT_CONTRAST
+        )
+        and not _has_passing_equivalent_text_control(
+            text_control,
+            controls=surface.interactive_texts,
+        )
     ]
     low_icon_contrast = [
         icon
         for icon in surface.interactive_icons
         if icon.contrast_ratio is None or icon.contrast_ratio < MIN_GRAPHIC_CONTRAST
+        if not _has_passing_equivalent_icon(
+            icon,
+            icons=surface.interactive_icons,
+        )
     ]
     if low_contrast:
         raise AssertionError(
@@ -712,6 +728,44 @@ def _enrich_interactive_text_contrast(
     return replace(surface, interactive_texts=observed_text_controls)
 
 
+def _has_passing_equivalent_text_control(
+    text_control: WorkspaceSwitcherInteractiveTextObservation,
+    *,
+    controls: tuple[WorkspaceSwitcherInteractiveTextObservation, ...],
+) -> bool:
+    for candidate in controls:
+        if candidate is text_control or candidate.disabled:
+            continue
+        if candidate.label != text_control.label:
+            continue
+        if candidate.visible_text != text_control.visible_text:
+            continue
+        if (
+            candidate.contrast_ratio is not None
+            and candidate.contrast_ratio >= MIN_TEXT_CONTRAST
+        ):
+            return True
+    return False
+
+
+def _has_passing_equivalent_icon(
+    icon: WorkspaceSwitcherIconObservation,
+    *,
+    icons: tuple[WorkspaceSwitcherIconObservation, ...],
+) -> bool:
+    for candidate in icons:
+        if candidate is icon:
+            continue
+        if candidate.label != icon.label:
+            continue
+        if (
+            candidate.contrast_ratio is not None
+            and candidate.contrast_ratio >= MIN_GRAPHIC_CONTRAST
+        ):
+            return True
+    return False
+
+
 def _observe_badge(
     *,
     image: RgbImage,
@@ -729,15 +783,30 @@ def _observe_badge(
     crop = image.crop(box)
     background = _dominant_color(crop)
     foreground = _sample_foreground(crop, background=background)
+    if foreground is None and badge.foreground_color is not None:
+        foreground = _rgb_from_hex(badge.foreground_color)
+    if foreground is None:
+        return replace(
+            badge,
+            background_color=rgb_to_hex(background).lower(),
+            contrast_ratio=None,
+        )
     return replace(
         badge,
-        foreground_color=(rgb_to_hex(foreground).lower() if foreground is not None else None),
+        foreground_color=rgb_to_hex(foreground).lower(),
         background_color=rgb_to_hex(background).lower(),
-        contrast_ratio=(
-            round(contrast_ratio(foreground, background), 2)
-            if foreground is not None
-            else None
-        ),
+        contrast_ratio=round(contrast_ratio(foreground, background), 2),
+    )
+
+
+def _rgb_from_hex(value: str) -> RgbColor | None:
+    normalized = value.strip()
+    if not re.fullmatch(r"#[0-9a-fA-F]{6}", normalized):
+        return None
+    return (
+        int(normalized[1:3], 16),
+        int(normalized[3:5], 16),
+        int(normalized[5:7], 16),
     )
 
 
@@ -963,6 +1032,8 @@ def _relevant_sheet_focus_sequence(
         group = _sheet_focus_group(label)
         if group is None:
             continue
+        if group == "saved-workspaces" and saw_add_group:
+            break
         relevant_steps.append(step)
         if group == "saved-workspaces":
             saw_workspace_group = True
@@ -1095,6 +1166,7 @@ def _interactive_text_summary(
             {
                 "label": text.label,
                 "visible_text": text.visible_text,
+                "disabled": text.disabled,
                 "foreground": text.foreground_color,
                 "background": text.background_color,
                 "contrast": text.contrast_ratio,

@@ -3023,7 +3023,7 @@ Nested release-backed attachment issue.
   );
 
   test(
-    'provider-backed repository migrates duplicate hosted LFS replacements to GitHub Releases metadata',
+    'provider-backed repository overwrites duplicate repository-path attachments even when the name matches LFS attributes',
     () async {
       final provider = _FakeReleaseAttachmentProvider(
         permission: const RepositoryPermission(
@@ -3087,8 +3087,6 @@ updated: 2026-05-12T20:31:06Z
 
 Hosted repository-path attachment issue.
 ''',
-          'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf':
-              '%PDF-1.4\nlegacy repository attachment\n',
           'DEMO/DEMO-1/DEMO-2/attachments.json': jsonEncode([
             {
               'id': 'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
@@ -3108,6 +3106,8 @@ Hosted repository-path attachment issue.
       final repository = ProviderBackedTrackStateRepository(provider: provider);
 
       final snapshot = await repository.loadSnapshot();
+      provider.files['DEMO/DEMO-1/DEMO-2/attachments/manual.pdf'] =
+          '%PDF-1.4\nlegacy repository attachment\n';
       await repository.connect(
         const RepositoryConnection(
           repository: 'IstiN/trackstate',
@@ -3126,23 +3126,28 @@ Hosted repository-path attachment issue.
         bytes: Uint8List.fromList(utf8.encode('replacement attachment')),
       );
 
-      expect(provider.lastAttachmentWriteRequest, isNull);
       expect(
-        provider.binaryFiles.containsKey(
-          'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
-        ),
-        isFalse,
+        provider.lastAttachmentWriteRequest?.path,
+        'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
+      );
+      expect(
+        provider.lastAttachmentWriteRequest?.expectedRevision,
+        'attachment-sha',
+      );
+      expect(provider.lastAttachmentWriteRequest?.allowLfsTrackedWrite, isTrue);
+      expect(
+        provider.binaryFiles['DEMO/DEMO-1/DEMO-2/attachments/manual.pdf'],
+        Uint8List.fromList(utf8.encode('replacement attachment')),
       );
       expect(updated.attachments, hasLength(1));
       expect(
         updated.attachments.single.storageBackend,
-        AttachmentStorageMode.githubReleases,
+        AttachmentStorageMode.repositoryPath,
       );
       expect(
-        updated.attachments.single.githubReleaseTag,
-        'trackstate-attachments-DEMO-2',
+        updated.attachments.single.repositoryPath,
+        updated.attachments.single.storagePath,
       );
-      expect(updated.attachments.single.githubReleaseAssetName, 'manual.pdf');
       final metadata =
           jsonDecode(provider.files['DEMO/DEMO-1/DEMO-2/attachments.json']!)
               as List<Object?>;
@@ -3155,10 +3160,9 @@ Hosted repository-path attachment issue.
           'author': 'demo-user',
           'createdAt': updated.attachments.single.createdAt,
           'storagePath': 'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
-          'revisionOrOid': '84',
-          'storageBackend': 'github-releases',
-          'githubReleaseTag': 'trackstate-attachments-DEMO-2',
-          'githubReleaseAssetName': 'manual.pdf',
+          'revisionOrOid': 'attachment-sha',
+          'storageBackend': 'repository-path',
+          'repositoryPath': 'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
         },
       ]);
     },
@@ -4612,6 +4616,7 @@ class _FakeReleaseAttachmentProvider
   final RepositoryPermission permission;
   final Map<String, String> files;
   final Map<String, Uint8List> binaryFiles = <String, Uint8List>{};
+  final Map<String, Uint8List> releaseAttachmentFiles = <String, Uint8List>{};
   final bool enforceExistingRevisionOnWrite;
   final Set<String> lfsTrackedPaths;
   final List<String> readTextFilePaths = <String>[];
@@ -4772,6 +4777,15 @@ class _FakeReleaseAttachmentProvider
   Future<RepositoryAttachmentWriteResult> writeAttachment(
     RepositoryAttachmentWriteRequest request,
   ) async {
+    if (enforceExistingRevisionOnWrite &&
+        (files.containsKey(request.path) ||
+            binaryFiles.containsKey(request.path)) &&
+        (request.expectedRevision?.isNotEmpty != true)) {
+      throw TrackStateProviderException(
+        'Cannot save ${request.path} because it changed in the current branch. '
+        'Expected revision for existing attachment was not provided.',
+      );
+    }
     lastAttachmentWriteRequest = request;
     binaryFiles[request.path] = Uint8List.fromList(request.bytes);
     return RepositoryAttachmentWriteResult(
@@ -4789,13 +4803,26 @@ class _FakeReleaseAttachmentProvider
   Future<RepositoryAttachment> readReleaseAttachment(
     RepositoryReleaseAttachmentReadRequest request,
   ) async {
-    throw UnimplementedError();
+    final key = '${request.releaseTag}/${request.assetName}';
+    final bytes = releaseAttachmentFiles[key];
+    if (bytes == null) {
+      throw TrackStateProviderException(
+        'Release attachment $key not found.',
+      );
+    }
+    return RepositoryAttachment(
+      path: request.assetName,
+      bytes: Uint8List.fromList(bytes),
+      revision: request.assetId ?? 'release-attachment-sha',
+    );
   }
 
   @override
   Future<RepositoryReleaseAttachmentWriteResult> writeReleaseAttachment(
     RepositoryReleaseAttachmentWriteRequest request,
   ) async {
+    releaseAttachmentFiles['${request.releaseTag}/${request.assetName}'] =
+        Uint8List.fromList(request.bytes);
     return RepositoryReleaseAttachmentWriteResult(
       releaseTag: request.releaseTag,
       assetName: request.assetName,

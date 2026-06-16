@@ -605,6 +605,12 @@ class IssueMutationService {
         frontmatter: frontmatter,
         body: document.body,
       );
+      final updatedIndexState = _issueIndexStateFromFrontmatter(
+        issue: issue,
+        frontmatter: frontmatter,
+        body: document.body,
+        project: snapshot.project,
+      );
       final blobPaths = await _blobPaths(provider, writeBranch);
       final indexPath = '${snapshot.project.key}/.trackstate/index/issues.json';
       final writeResult = await _applyChanges(
@@ -621,7 +627,7 @@ class IssueMutationService {
             path: indexPath,
             content:
                 '${jsonEncode(_repositoryIndexJson([for (final candidate in snapshot.issues)
-                  if (candidate.key == issue.key) _issueIndexStateFromFrontmatter(issue: issue, frontmatter: frontmatter, body: document.body, project: snapshot.project) else _IssueIndexState.fromIssue(candidate)]))}\n',
+                  if (candidate.key == issue.key) updatedIndexState else _IssueIndexState.fromIssue(candidate)]))}\n',
             expectedRevision: await _existingTextRevision(
               provider,
               path: indexPath,
@@ -639,7 +645,7 @@ class IssueMutationService {
       return IssueMutationResult.success(
         operation: operation,
         issueKey: issueKey,
-        value: refreshed,
+        value: _applyIssueIndexState(refreshed, updatedIndexState),
         revision: writeResult.revision,
       );
     } catch (error) {
@@ -1563,6 +1569,67 @@ TrackStateIssue _retargetIssueForHierarchyMove(
     storagePath: state.storagePath,
     rawMarkdown: rawMarkdown ?? issue.rawMarkdown,
   );
+}
+
+TrackStateIssue _applyIssueIndexState(
+  TrackStateIssue issue,
+  _IssueIndexState state,
+) {
+  return TrackStateIssue(
+    key: issue.key,
+    project: issue.project,
+    issueType: issue.issueType,
+    issueTypeId: state.issueTypeId,
+    status: _issueStatusFromId(state.statusId),
+    statusId: state.statusId,
+    priority: _issuePriorityFromId(state.priorityId),
+    priorityId: state.priorityId,
+    summary: state.summary,
+    description: issue.description,
+    assignee: state.assignee,
+    reporter: issue.reporter,
+    labels: state.labels,
+    components: issue.components,
+    fixVersionIds: issue.fixVersionIds,
+    watchers: issue.watchers,
+    customFields: issue.customFields,
+    parentKey: state.parentKey,
+    epicKey: state.epicKey,
+    parentPath: issue.parentPath,
+    epicPath: issue.epicPath,
+    progress: issue.progress,
+    updatedLabel: state.updatedLabel,
+    acceptanceCriteria: issue.acceptanceCriteria,
+    comments: issue.comments,
+    links: issue.links,
+    attachments: issue.attachments,
+    isArchived: state.isArchived,
+    hasDetailLoaded: issue.hasDetailLoaded,
+    hasCommentsLoaded: issue.hasCommentsLoaded,
+    hasAttachmentsLoaded: issue.hasAttachmentsLoaded,
+    resolutionId: state.resolutionId,
+    storagePath: state.storagePath,
+    rawMarkdown: issue.rawMarkdown,
+  );
+}
+
+IssueStatus _issueStatusFromId(String statusId) {
+  return switch (_canonicalConfigId(statusId)) {
+    'todo' || 'to-do' => IssueStatus.todo,
+    'in-progress' => IssueStatus.inProgress,
+    'in-review' => IssueStatus.inReview,
+    'done' => IssueStatus.done,
+    _ => IssueStatus.inProgress,
+  };
+}
+
+IssuePriority _issuePriorityFromId(String priorityId) {
+  return switch (_canonicalConfigId(priorityId)) {
+    'highest' => IssuePriority.highest,
+    'high' => IssuePriority.high,
+    'low' => IssuePriority.low,
+    _ => IssuePriority.medium,
+  };
 }
 
 RepositoryIndex _deriveRepositoryIndex(

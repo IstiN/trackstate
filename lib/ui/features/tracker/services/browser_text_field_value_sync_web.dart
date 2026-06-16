@@ -15,8 +15,11 @@ void syncBrowserTextFieldValue({
   required String value,
   required bool enabled,
   required bool readOnly,
+  String? errorText,
+  String? errorColor,
 }) {
   final escapedLabel = label.replaceAll(r'\', r'\\').replaceAll('"', r'\"');
+  final errorMessageId = _errorMessageIdFor(label);
   final selector = [
     'input[aria-label="$escapedLabel"][data-semantics-role="text-field"]',
     'textarea[aria-label="$escapedLabel"][data-semantics-role="text-field"]',
@@ -46,22 +49,24 @@ void syncBrowserTextFieldValue({
         value: value,
         enabled: enabled,
         readOnly: readOnly,
+        errorText: errorText,
+        errorMessageId: errorMessageId,
       );
     }
     return syncedAny;
   }
 
   if (applySync()) {
-    return;
+    _retrySync(applySync);
+  } else {
+    _retrySync(applySync);
   }
-  Timer.run(() {
-    if (applySync()) {
-      return;
-    }
-    Timer.run(() {
-      applySync();
-    });
-  });
+}
+
+void _retrySync(bool Function() applySync) {
+  Timer.run(applySync);
+  Timer(const Duration(milliseconds: 50), applySync);
+  Timer(const Duration(milliseconds: 150), applySync);
 }
 
 _BrowserTextFieldBinding _bindingForInput(web.HTMLInputElement element) =>
@@ -69,6 +74,15 @@ _BrowserTextFieldBinding _bindingForInput(web.HTMLInputElement element) =>
 
 _BrowserTextFieldBinding _bindingForTextarea(web.HTMLTextAreaElement element) =>
     _textareaBindings[element] ??= _BrowserTextFieldBinding.textarea(element);
+
+String _errorMessageIdFor(String label) {
+  final normalized = label
+      .toLowerCase()
+      .replaceAll(RegExp(r'[^a-z0-9]+'), '-')
+      .replaceAll(RegExp(r'^-+|-+$'), '');
+  final idSegment = normalized.isEmpty ? 'field' : normalized;
+  return 'trackstate-text-field-$idSegment-error';
+}
 
 class _BrowserTextFieldBinding {
   _BrowserTextFieldBinding.input(this.input) : textarea = null;
@@ -104,6 +118,8 @@ class _BrowserTextFieldBinding {
     required String value,
     required bool enabled,
     required bool readOnly,
+    required String? errorText,
+    required String errorMessageId,
   }) {
     if (_readValue() != value) {
       _writeValue(value);
@@ -117,6 +133,11 @@ class _BrowserTextFieldBinding {
       if (input.readOnly != readOnly) {
         input.readOnly = readOnly;
       }
+      _syncErrorState(
+        input,
+        errorText: errorText,
+        errorMessageId: errorMessageId,
+      );
       return;
     }
     final textarea = this.textarea;
@@ -128,6 +149,44 @@ class _BrowserTextFieldBinding {
       if (textarea.readOnly != readOnly) {
         textarea.readOnly = readOnly;
       }
+      _syncErrorState(
+        textarea,
+        errorText: errorText,
+        errorMessageId: errorMessageId,
+      );
+    }
+  }
+
+  void _syncErrorState(
+    web.HTMLElement element, {
+    required String? errorText,
+    required String errorMessageId,
+  }) {
+    final normalizedError = errorText?.trim() ?? '';
+    if (normalizedError.isEmpty) {
+      element.removeAttribute('aria-invalid');
+      element.removeAttribute('aria-errormessage');
+      web.document.getElementById(errorMessageId)?.remove();
+      return;
+    }
+    element.setAttribute('aria-invalid', 'true');
+    element.setAttribute('aria-errormessage', errorMessageId);
+    final existing = web.document.getElementById(errorMessageId);
+    final message = existing ?? (web.HTMLSpanElement()..id = errorMessageId);
+    message
+      ..textContent = normalizedError
+      ..setAttribute('role', 'alert')
+      ..setAttribute('aria-live', 'assertive');
+    message.setAttribute(
+      'style',
+      'position:absolute;left:-10000px;top:0;width:max-content;'
+          'min-width:1px;height:auto;min-height:1px;padding:1px;'
+          'color:#c25742;'
+          'background-color:rgb(0, 0, 0);pointer-events:none;',
+    );
+    final container = _nearestDialogElement(element);
+    if (container != null && message.parentElement != container) {
+      container.append(message);
     }
   }
 
@@ -171,3 +230,9 @@ class _BrowserTextFieldBinding {
     }
   }
 }
+
+web.Element? _nearestDialogElement(web.HTMLElement element) =>
+    element.closest(
+      'flt-semantics[role="group"][aria-label="Edit issue"], [role="dialog"]',
+    ) ??
+    element.parentElement;

@@ -421,6 +421,60 @@ void main() {
   );
 
   test(
+    'workspace sync service watchdog runs overdue hosted retries when the main timer is delayed',
+    () async {
+      final repository = _ThrowingWorkspaceSyncRepository(
+        error: const TrackStateProviderException(
+          'GitHub API request failed for /repos/IstiN/trackstate-setup/branches/main (401): {"message":"Bad credentials"}',
+        ),
+      );
+      final timers = _ManualTimerFactory();
+      final statuses = <WorkspaceSyncStatus>[];
+      var now = DateTime.utc(2026, 5, 14, 10, 0);
+      final service = WorkspaceSyncService(
+        repository: repository,
+        loadSnapshot: () async =>
+            await const DemoTrackStateRepository().loadSnapshot(),
+        onRefresh: (_) {},
+        onStatusChanged: statuses.add,
+        now: () => now,
+        timerFactory: timers.call,
+        retryWatchdogInterval: const Duration(seconds: 5),
+      );
+
+      try {
+        await service.checkNow(force: true);
+
+        expect(repository.callCount, 1);
+        expect(statuses.last.nextRetryAt, DateTime.utc(2026, 5, 14, 10, 1));
+        expect(timers.scheduledDurations.take(2), <Duration>[
+          const Duration(seconds: 5),
+          const Duration(minutes: 1),
+        ]);
+
+        now = DateTime.utc(2026, 5, 14, 10, 0, 5);
+        timers.fireAt(0);
+        await Future<void>.delayed(Duration.zero);
+
+        expect(repository.callCount, 1);
+        expect(timers.scheduledDurations.last, const Duration(seconds: 5));
+
+        now = DateTime.utc(2026, 5, 14, 10, 1);
+        timers.fireLastActiveWatchdog();
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+
+        expect(repository.callCount, 2);
+        expect(statuses.last.health, WorkspaceSyncHealth.unavailable);
+        expect(statuses.last.nextRetryAt, DateTime.utc(2026, 5, 14, 10, 3));
+      } finally {
+        service.dispose();
+        timers.dispose();
+      }
+    },
+  );
+
+  test(
     'workspace sync service does not reload the hosted snapshot for comment-only changes',
     () async {
       final baseline = await const DemoTrackStateRepository().loadSnapshot();
@@ -718,6 +772,7 @@ class _ThrowingWorkspaceSyncRepository implements WorkspaceSyncRepository {
   });
 
   final Object error;
+  int callCount = 0;
 
   @override
   bool get usesLocalPersistence => false;
@@ -726,6 +781,7 @@ class _ThrowingWorkspaceSyncRepository implements WorkspaceSyncRepository {
   Future<RepositorySyncCheck> checkSync({
     RepositorySyncState? previousState,
   }) async {
+    callCount += 1;
     throw error;
   }
 }
@@ -745,6 +801,58 @@ class _RecordedTimerFactory {
     for (final timer in _timers) {
       timer.cancel();
     }
+  }
+}
+
+class _ManualTimerFactory {
+  final List<_ManualTimer> _timers = <_ManualTimer>[];
+  final List<Duration> scheduledDurations = <Duration>[];
+
+  Timer call(Duration duration, void Function() callback) {
+    scheduledDurations.add(duration);
+    final timer = _ManualTimer(callback);
+    _timers.add(timer);
+    return timer;
+  }
+
+  void fireAt(int index) {
+    _timers[index].fire();
+  }
+
+  void fireLastActiveWatchdog() {
+    _timers.lastWhere((timer) => timer.isActive).fire();
+  }
+
+  void dispose() {
+    for (final timer in _timers) {
+      timer.cancel();
+    }
+  }
+}
+
+class _ManualTimer implements Timer {
+  _ManualTimer(this._callback);
+
+  final void Function() _callback;
+  bool _isActive = true;
+
+  @override
+  bool get isActive => _isActive;
+
+  @override
+  int get tick => _isActive ? 0 : 1;
+
+  @override
+  void cancel() {
+    _isActive = false;
+  }
+
+  void fire() {
+    if (!_isActive) {
+      return;
+    }
+    _isActive = false;
+    _callback();
   }
 }
 

@@ -25,3 +25,54 @@ A direct CodeGraph answer is a handful of calls; a grep/read exploration is doze
 At the start of a session, ask the user if they'd like to initialize CodeGraph:
 
 "I notice this project doesn't have CodeGraph initialized. Would you like me to run `codegraph init -i` to build a code knowledge graph?"
+
+---
+
+## 📦 Repomix Code Snapshots
+
+Use **repomix** to generate a full-repo overview or targeted code snapshots for investigation, onboarding, or feeding context to an LLM.
+
+- **Install** (one-time): `npm install -g repomix`
+- **Full project snapshot**:
+  ```bash
+  repomix .
+  ```
+  Output: `snapshots/repomix-output.xml`
+- **Specific files** (e.g., after a grep/codegraph search):
+  ```bash
+  echo 'src/some_file.dart' | repomix --stdin --compress --output snapshots/target.xml
+  ```
+- **Multiple files**:
+  ```bash
+  printf 'lib/a.dart\nlib/b.dart\n' | repomix --stdin --compress --output snapshots/target.xml
+  ```
+
+> **Tips**:
+> - `--compress` uses Tree-sitter to keep signatures and replace method bodies with `⋮----`, significantly reducing token count.
+> - Always use `--stdin` for specific file lists — multiple `--include` flags are unreliable.
+> - `snapshots/` is `.gitignore`d — never commit generated XML files.
+
+---
+
+## 🤖 Agent Prompt Snapshots
+
+The `agents/` directory is a Git submodule pointing to `IstiN/dmtools-agents`. The dmtools runtime feeds agents the flattened prompt snapshots under `agents/snapshots/` rather than the raw Markdown sources. **Any edit to an agent instruction `.md` file in `dmtools-agents` must be followed by regenerating the snapshots; otherwise the runtime will keep using the stale flattened version.**
+
+### Regenerate snapshots after changing agent prompts
+
+```bash
+cd agents
+node generate_agent_snapshots.js
+```
+
+Then commit the regenerated `snapshots/*.md` files inside `dmtools-agents`, merge the submodule PR, and bump the `agents` submodule in this repo.
+
+### Bump the agents submodule in trackstate
+
+```bash
+cd /Users/Uladzimir_Klyshevich/git/trackstate
+git submodule update --remote agents
+git add agents
+git commit -m "chore(agents): bump submodule to regenerated prompt snapshots"
+git push
+```

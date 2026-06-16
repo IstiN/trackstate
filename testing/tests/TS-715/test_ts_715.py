@@ -216,6 +216,7 @@ def main() -> None:
                 try:
                     first_failed_request = _wait_for_failed_request(
                         sync_observation,
+                        page=page,
                         timeout_seconds=FIRST_FAILED_REQUEST_TIMEOUT_SECONDS,
                     )
                     displayed_retry_window = _parse_displayed_retry_window(
@@ -223,6 +224,7 @@ def main() -> None:
                     )
                     second_failed_request = _wait_for_failed_request(
                         sync_observation,
+                        page=page,
                         previous_request=first_failed_request,
                         minimum_gap_seconds=MIN_DISTINCT_RETRY_GAP_SECONDS,
                         timeout_seconds=FOLLOW_UP_FAILED_REQUEST_TIMEOUT_SECONDS,
@@ -323,16 +325,24 @@ def main() -> None:
 def _wait_for_failed_request(
     observation: HostedSyncAuthFailureObservation,
     *,
+    page: LiveWorkspaceSyncPage,
     timeout_seconds: float,
     previous_request: HostedSyncAuthFailureRequest | None = None,
     minimum_gap_seconds: float = 0.0,
 ) -> HostedSyncAuthFailureRequest:
-    found, request = poll_until(
-        probe=lambda: _matching_failed_request(
+    def probe() -> HostedSyncAuthFailureRequest | None:
+        # Playwright's sync API dispatches route callbacks while Playwright calls
+        # are in progress. Keep observing the page so browser requests are pumped
+        # during this long wait instead of being recorded only after timeout.
+        page.observe()
+        return _matching_failed_request(
             tuple(observation.failed_sync_requests),
             previous_request=previous_request,
             minimum_gap_seconds=minimum_gap_seconds,
-        ),
+        )
+
+    found, request = poll_until(
+        probe=probe,
         is_satisfied=lambda item: item is not None,
         timeout_seconds=timeout_seconds,
         interval_seconds=2.0,

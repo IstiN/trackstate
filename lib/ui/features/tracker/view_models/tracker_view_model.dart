@@ -17,294 +17,8 @@ import '../../../../domain/models/trackstate_models.dart';
 import '../../../../domain/models/workspace_profile_models.dart';
 import '../services/attachment_download_launcher.dart';
 
-enum TrackerSection { dashboard, board, search, hierarchy, settings }
-
-enum ProjectSettingsTab {
-  statuses,
-  workflows,
-  issueTypes,
-  fields,
-  priorities,
-  components,
-  versions,
-  attachments,
-  locales,
-}
-
-enum RepositoryAccessState { localGit, connected, connectGitHub }
-
-enum HostedRepositoryAccessMode {
-  disconnected,
-  readOnly,
-  writable,
-  attachmentRestricted,
-}
-
-const Duration _startupAccessRestoreTimeout = Duration(seconds: 10);
-
-enum TrackerMessageTone { info, error }
-
-enum TrackerMessageKind {
-  dataLoadFailed,
-  searchFailed,
-  repositoryConfigFallback,
-  localGitTokensNotNeeded,
-  tokenEmpty,
-  githubConnectedDragCards,
-  githubConnectionFailed,
-  issueSaveFailed,
-  localGitMoveCommitted,
-  githubMoveCommitted,
-  movePendingGitHubPersistence,
-  moveFailed,
-  attachmentDownloadFailed,
-  localGitHubAppUnavailable,
-  githubAppLoginNotConfigured,
-  githubAuthorizationCodeReturned,
-  githubConnected,
-  storedGitHubTokenInvalid,
-  selectedIssueUnavailable,
-  workspaceSwitchFailed,
-  workspaceRestoreSkipped,
-  workspaceRestoreFailed,
-}
-
-enum IssueDeferredSection { detail, comments, attachments, history }
-
-class TrackerMessage {
-  const TrackerMessage._(
-    this.kind, {
-    required this.tone,
-    this.issueKey,
-    this.statusLabel,
-    this.branch,
-    this.login,
-    this.repository,
-    this.error,
-  });
-
-  final TrackerMessageKind kind;
-  final TrackerMessageTone tone;
-  final String? issueKey;
-  final String? statusLabel;
-  final String? branch;
-  final String? login;
-  final String? repository;
-  final String? error;
-
-  factory TrackerMessage.dataLoadFailed(Object error) => TrackerMessage._(
-    TrackerMessageKind.dataLoadFailed,
-    tone: TrackerMessageTone.error,
-    error: '$error',
-  );
-
-  factory TrackerMessage.searchFailed(Object error) => TrackerMessage._(
-    TrackerMessageKind.searchFailed,
-    tone: TrackerMessageTone.error,
-    error: '$error',
-  );
-
-  factory TrackerMessage.repositoryConfigFallback(Object error) =>
-      TrackerMessage._(
-        TrackerMessageKind.repositoryConfigFallback,
-        tone: TrackerMessageTone.error,
-        error: '$error',
-      );
-
-  factory TrackerMessage.localGitTokensNotNeeded() => const TrackerMessage._(
-    TrackerMessageKind.localGitTokensNotNeeded,
-    tone: TrackerMessageTone.info,
-  );
-
-  factory TrackerMessage.tokenEmpty() => const TrackerMessage._(
-    TrackerMessageKind.tokenEmpty,
-    tone: TrackerMessageTone.error,
-  );
-
-  factory TrackerMessage.githubConnectedDragCards({
-    required String login,
-    required String repository,
-  }) => TrackerMessage._(
-    TrackerMessageKind.githubConnectedDragCards,
-    tone: TrackerMessageTone.info,
-    login: login,
-    repository: repository,
-  );
-
-  factory TrackerMessage.githubConnectionFailed(Object error) =>
-      TrackerMessage._(
-        TrackerMessageKind.githubConnectionFailed,
-        tone: TrackerMessageTone.error,
-        error: '$error',
-      );
-
-  factory TrackerMessage.issueSaveFailed(Object error) => TrackerMessage._(
-    TrackerMessageKind.issueSaveFailed,
-    tone: TrackerMessageTone.error,
-    error: '$error',
-  );
-
-  factory TrackerMessage.localGitMoveCommitted({
-    required String issueKey,
-    required String statusLabel,
-    required String branch,
-  }) => TrackerMessage._(
-    TrackerMessageKind.localGitMoveCommitted,
-    tone: TrackerMessageTone.info,
-    issueKey: issueKey,
-    statusLabel: statusLabel,
-    branch: branch,
-  );
-
-  factory TrackerMessage.githubMoveCommitted({
-    required String issueKey,
-    required String statusLabel,
-  }) => TrackerMessage._(
-    TrackerMessageKind.githubMoveCommitted,
-    tone: TrackerMessageTone.info,
-    issueKey: issueKey,
-    statusLabel: statusLabel,
-  );
-
-  factory TrackerMessage.movePendingGitHubPersistence({
-    required String issueKey,
-  }) => TrackerMessage._(
-    TrackerMessageKind.movePendingGitHubPersistence,
-    tone: TrackerMessageTone.info,
-    issueKey: issueKey,
-  );
-
-  factory TrackerMessage.moveFailed(Object error) => TrackerMessage._(
-    TrackerMessageKind.moveFailed,
-    tone: TrackerMessageTone.error,
-    error: '$error',
-  );
-
-  factory TrackerMessage.attachmentDownloadFailed(Object error) =>
-      TrackerMessage._(
-        TrackerMessageKind.attachmentDownloadFailed,
-        tone: TrackerMessageTone.error,
-        error: '$error',
-      );
-
-  factory TrackerMessage.localGitHubAppUnavailable() => const TrackerMessage._(
-    TrackerMessageKind.localGitHubAppUnavailable,
-    tone: TrackerMessageTone.info,
-  );
-
-  factory TrackerMessage.githubAppLoginNotConfigured() =>
-      const TrackerMessage._(
-        TrackerMessageKind.githubAppLoginNotConfigured,
-        tone: TrackerMessageTone.error,
-      );
-
-  factory TrackerMessage.githubAuthorizationCodeReturned() =>
-      const TrackerMessage._(
-        TrackerMessageKind.githubAuthorizationCodeReturned,
-        tone: TrackerMessageTone.info,
-      );
-
-  factory TrackerMessage.githubConnected({
-    required String login,
-    required String repository,
-  }) => TrackerMessage._(
-    TrackerMessageKind.githubConnected,
-    tone: TrackerMessageTone.info,
-    login: login,
-    repository: repository,
-  );
-
-  factory TrackerMessage.storedGitHubTokenInvalid(Object error) =>
-      TrackerMessage._(
-        TrackerMessageKind.storedGitHubTokenInvalid,
-        tone: TrackerMessageTone.error,
-        error: '$error',
-      );
-
-  factory TrackerMessage.selectedIssueUnavailable({required String issueKey}) =>
-      TrackerMessage._(
-        TrackerMessageKind.selectedIssueUnavailable,
-        tone: TrackerMessageTone.info,
-        issueKey: issueKey,
-      );
-
-  factory TrackerMessage.workspaceSwitchFailed({
-    required String workspaceName,
-    required String reason,
-  }) => TrackerMessage._(
-    TrackerMessageKind.workspaceSwitchFailed,
-    tone: TrackerMessageTone.error,
-    repository: workspaceName,
-    error: reason,
-  );
-
-  factory TrackerMessage.workspaceRestoreSkipped({
-    required String workspaceName,
-    required String reason,
-  }) => TrackerMessage._(
-    TrackerMessageKind.workspaceRestoreSkipped,
-    tone: TrackerMessageTone.info,
-    repository: workspaceName,
-    error: reason,
-  );
-
-  factory TrackerMessage.workspaceRestoreFailed({
-    required String workspaceName,
-    required String reason,
-  }) => TrackerMessage._(
-    TrackerMessageKind.workspaceRestoreFailed,
-    tone: TrackerMessageTone.error,
-    repository: workspaceName,
-    error: reason,
-  );
-}
-
-class IssueEditRequest {
-  const IssueEditRequest({
-    required this.summary,
-    required this.description,
-    required this.priorityId,
-    required this.labels,
-    required this.components,
-    required this.fixVersionIds,
-    this.assignee,
-    this.parentKey,
-    this.epicKey,
-    this.transitionStatusId,
-    this.resolutionId,
-  });
-
-  final String summary;
-  final String description;
-  final String priorityId;
-  final String? assignee;
-  final List<String> labels;
-  final List<String> components;
-  final List<String> fixVersionIds;
-  final String? parentKey;
-  final String? epicKey;
-  final String? transitionStatusId;
-  final String? resolutionId;
-}
-
-const Object _unsetIssueEditValue = Object();
-
-class AttachmentUploadInspection {
-  const AttachmentUploadInspection({
-    required this.storagePath,
-    required this.resolvedName,
-    required this.isLfsTracked,
-    required this.requiresLocalGitUpload,
-    this.existingAttachment,
-  });
-
-  final String storagePath;
-  final String resolvedName;
-  final bool isLfsTracked;
-  final bool requiresLocalGitUpload;
-  final IssueAttachment? existingAttachment;
-}
-
+import 'tracker_view_model_models.dart';
+export 'tracker_view_model_models.dart';
 class TrackerViewModel extends ChangeNotifier {
   static const int _searchPageSize = 6;
 
@@ -408,8 +122,21 @@ class TrackerViewModel extends ChangeNotifier {
   bool get isSaving => _isSaving;
   TrackerLoadState loadStateForDomain(TrackerDataDomain domain) =>
       _snapshot?.readiness.domainState(domain) ?? TrackerLoadState.loading;
+
+  TrackStateIssue currentIssueFor(TrackStateIssue issue) =>
+      _snapshot?.issues.firstWhere(
+        (candidate) => candidate.key == issue.key,
+        orElse: () => issue,
+      ) ??
+      issue;
+
+  Future<TrackStateIssue> prepareIssueForEdit(TrackStateIssue issue) async {
+    await ensureIssueDetailLoaded(issue);
+    return currentIssueFor(issue);
+  }
+
   TrackerLoadState loadStateForSection(TrackerSection section) =>
-      _snapshot?.readiness.sectionState(_sectionKey(section)) ??
+      _snapshot?.readiness.sectionState(sectionKey(section)) ??
       TrackerLoadState.loading;
   bool isIssueHistoryLoading(String issueKey) =>
       _loadingIssueHistory.contains(issueKey);
@@ -532,7 +259,7 @@ class TrackerViewModel extends ChangeNotifier {
       : RepositoryAccessState.connected;
   bool get isGitHubAppAuthAvailable =>
       supportsGitHubAuth &&
-      (_githubAppClientId.isNotEmpty || _githubAuthProxyUrl.isNotEmpty);
+      (githubAppClientId.isNotEmpty || githubAuthProxyUrl.isNotEmpty);
   bool get canBrowseHostedRepositories =>
       supportsGitHubAuth &&
       isConnected &&
@@ -1459,14 +1186,14 @@ class TrackerViewModel extends ChangeNotifier {
     final issueByKey = {
       for (final candidate in snapshot.issues) candidate.key: candidate,
     };
-    final movedIssueStoragePath = _localIssueStoragePath(
+    final movedIssueStoragePath = localIssueStoragePath(
       issueKey: currentIssue.key,
       projectKey: currentIssue.project,
       issueTypeId: currentIssue.issueTypeId,
       parentIssue: parentKey == null ? null : issueByKey[parentKey],
       epicIssue: epicKey == null ? null : issueByKey[epicKey],
     );
-    final nextIssue = _copyIssueForLocalEdit(
+    final nextIssue = copyIssueForLocalEdit(
       currentIssue,
       summary: summary,
       description: description,
@@ -1488,15 +1215,15 @@ class TrackerViewModel extends ChangeNotifier {
           : resolutionId,
       storagePath: movedIssueStoragePath,
     );
-    final previousRoot = _issueRoot(currentIssue.storagePath);
-    final nextRoot = _issueRoot(movedIssueStoragePath);
+    final previousRoot = issueRoot(currentIssue.storagePath);
+    final nextRoot = issueRoot(movedIssueStoragePath);
     final descendantEpicKey = currentIssue.isEpic ? currentIssue.key : epicKey;
     final provisionalIssues = [
       for (final candidate in snapshot.issues)
         if (candidate.key == currentIssue.key)
           nextIssue
         else if (candidate.storagePath.startsWith('$previousRoot/'))
-          _copyIssueForLocalEdit(
+          copyIssueForLocalEdit(
             candidate,
             epicKey: descendantEpicKey,
             storagePath: candidate.storagePath.replaceFirst(
@@ -1513,7 +1240,7 @@ class TrackerViewModel extends ChangeNotifier {
     };
     final nextIssues = [
       for (final candidate in provisionalIssues)
-        _copyIssueForLocalEdit(
+        copyIssueForLocalEdit(
           candidate,
           parentPath: candidate.parentKey == null
               ? null
@@ -2020,10 +1747,10 @@ class TrackerViewModel extends ChangeNotifier {
     }
     final project = _snapshot?.project;
     if (project == null) return;
-    if (_githubAuthProxyUrl.isNotEmpty) {
-      final proxyUri = Uri.parse(_githubAuthProxyUrl).replace(
+    if (githubAuthProxyUrl.isNotEmpty) {
+      final proxyUri = Uri.parse(githubAuthProxyUrl).replace(
         queryParameters: {
-          ...Uri.parse(_githubAuthProxyUrl).queryParameters,
+          ...Uri.parse(githubAuthProxyUrl).queryParameters,
           'repository': project.repository,
           'redirect_uri': _currentUriProvider().removeFragment().toString(),
         },
@@ -2031,9 +1758,9 @@ class TrackerViewModel extends ChangeNotifier {
       await launchUrl(proxyUri, webOnlyWindowName: '_self');
       return;
     }
-    if (_githubAppClientId.isNotEmpty) {
+    if (githubAppClientId.isNotEmpty) {
       final authorizeUri = Uri.https('github.com', '/login/oauth/authorize', {
-        'client_id': _githubAppClientId,
+        'client_id': githubAppClientId,
         'redirect_uri': _currentUriProvider().removeFragment().toString(),
         'scope': 'repo',
         'state': project.repository,
@@ -2266,11 +1993,11 @@ class TrackerViewModel extends ChangeNotifier {
       },
     );
     try {
-      await handledConnectionFuture.timeout(_startupAccessRestoreTimeout);
+      await handledConnectionFuture.timeout(startupAccessRestoreTimeout);
       return true;
     } on TimeoutException {
       startupAuthProbeDiagnostics.recordTimeoutFallback(
-        timeout: _startupAccessRestoreTimeout,
+        timeout: startupAccessRestoreTimeout,
       );
       _startupTimeoutFallbackAwaitingShellReady = true;
       _publishStartupShellReadyDiagnosticIfNeeded();
@@ -2308,6 +2035,9 @@ class TrackerViewModel extends ChangeNotifier {
       return;
     }
     if (loadingSet.contains(issue.key)) {
+      while (!_disposed && loadingSet.contains(issue.key)) {
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      }
       return;
     }
     loadingSet.add(issue.key);
@@ -2388,7 +2118,7 @@ class TrackerViewModel extends ChangeNotifier {
       _startupHostedAccessModeOverride =
           HostedRepositoryAccessMode.disconnected;
       startupAuthProbeDiagnostics.recordFallbackShellReady(
-        timeout: _startupAccessRestoreTimeout,
+        timeout: startupAccessRestoreTimeout,
       );
     }
     notifyListeners();
@@ -2434,7 +2164,7 @@ class TrackerViewModel extends ChangeNotifier {
       _section = TrackerSection.settings;
     }
     startupAuthProbeDiagnostics.recordFallbackShellReady(
-      timeout: _startupAccessRestoreTimeout,
+      timeout: startupAccessRestoreTimeout,
     );
     _publishStartupShellReadyDiagnosticIfNeeded();
     if (!_disposed) {
@@ -2676,21 +2406,36 @@ class TrackerViewModel extends ChangeNotifier {
   }
 
   void _applyTargetedIssueRefresh(TrackStateIssue issue) {
+    final normalizedIssue = _normalizeIssueForSnapshot(issue);
     final repository = _repository;
     if (repository is ProviderBackedTrackStateRepository) {
       final cachedSnapshot = repository.cachedSnapshot;
       if (cachedSnapshot != null &&
           cachedSnapshot.issues.any(
-            (candidate) => candidate.key == issue.key,
+            (candidate) => candidate.key == normalizedIssue.key,
           )) {
         _snapshot = cachedSnapshot;
-        _updateWorkspaceSyncBaseline();
-        _selectIssueFromSnapshot(issue);
+        _mergeIssueIntoSnapshot(normalizedIssue);
+        _selectIssueFromSnapshot(normalizedIssue);
         return;
       }
     }
-    _mergeIssueIntoSnapshot(issue);
-    _selectIssueFromSnapshot(issue);
+    _mergeIssueIntoSnapshot(normalizedIssue);
+    _selectIssueFromSnapshot(normalizedIssue);
+  }
+
+  TrackStateIssue _normalizeIssueForSnapshot(TrackStateIssue issue) {
+    try {
+      return copyIssueForLocalEdit(
+        issue,
+        status: _issueStatusFromConfigId(issue.statusId),
+        statusId: issue.statusId,
+        priorityId: issue.priorityId,
+        resolutionId: issue.resolutionId,
+      );
+    } on Object {
+      return issue;
+    }
   }
 
   void _selectIssueFromSnapshot(TrackStateIssue issue) {
@@ -3144,130 +2889,4 @@ class TrackerViewModel extends ChangeNotifier {
       }
     }
   }
-}
-
-TrackerSectionKey _sectionKey(TrackerSection section) => switch (section) {
-  TrackerSection.dashboard => TrackerSectionKey.dashboard,
-  TrackerSection.board => TrackerSectionKey.board,
-  TrackerSection.search => TrackerSectionKey.search,
-  TrackerSection.hierarchy => TrackerSectionKey.hierarchy,
-  TrackerSection.settings => TrackerSectionKey.settings,
-};
-
-enum ThemePreference { light, dark }
-
-const _githubAppClientId = String.fromEnvironment(
-  'TRACKSTATE_GITHUB_APP_CLIENT_ID',
-);
-const _githubAuthProxyUrl = String.fromEnvironment(
-  'TRACKSTATE_GITHUB_AUTH_PROXY_URL',
-);
-
-TrackStateIssue _copyIssueForLocalEdit(
-  TrackStateIssue issue, {
-  String? summary,
-  String? description,
-  String? priorityId,
-  String? assignee,
-  List<String>? labels,
-  List<String>? components,
-  List<String>? fixVersionIds,
-  IssueStatus? status,
-  String? statusId,
-  String? storagePath,
-  Object? parentKey = _unsetIssueEditValue,
-  Object? epicKey = _unsetIssueEditValue,
-  Object? parentPath = _unsetIssueEditValue,
-  Object? epicPath = _unsetIssueEditValue,
-  Object? resolutionId = _unsetIssueEditValue,
-}) {
-  final nextPriorityId = priorityId ?? issue.priorityId;
-  return TrackStateIssue(
-    key: issue.key,
-    project: issue.project,
-    issueType: issue.issueType,
-    issueTypeId: issue.issueTypeId,
-    status: status ?? issue.status,
-    statusId: statusId ?? issue.statusId,
-    priority: switch (_canonicalIssuePriorityId(nextPriorityId)) {
-      'highest' => IssuePriority.highest,
-      'high' => IssuePriority.high,
-      'low' => IssuePriority.low,
-      _ => IssuePriority.medium,
-    },
-    priorityId: nextPriorityId,
-    summary: summary ?? issue.summary,
-    description: description ?? issue.description,
-    assignee: assignee ?? issue.assignee,
-    reporter: issue.reporter,
-    labels: labels ?? issue.labels,
-    components: components ?? issue.components,
-    fixVersionIds: fixVersionIds ?? issue.fixVersionIds,
-    watchers: issue.watchers,
-    customFields: issue.customFields,
-    parentKey: identical(parentKey, _unsetIssueEditValue)
-        ? issue.parentKey
-        : parentKey as String?,
-    epicKey: identical(epicKey, _unsetIssueEditValue)
-        ? issue.epicKey
-        : epicKey as String?,
-    parentPath: identical(parentPath, _unsetIssueEditValue)
-        ? issue.parentPath
-        : parentPath as String?,
-    epicPath: identical(epicPath, _unsetIssueEditValue)
-        ? issue.epicPath
-        : epicPath as String?,
-    progress: issue.progress,
-    updatedLabel: 'just now',
-    acceptanceCriteria: issue.acceptanceCriteria,
-    comments: issue.comments,
-    links: issue.links,
-    attachments: issue.attachments,
-    isArchived: issue.isArchived,
-    resolutionId: identical(resolutionId, _unsetIssueEditValue)
-        ? issue.resolutionId
-        : resolutionId as String?,
-    storagePath: storagePath ?? issue.storagePath,
-    rawMarkdown: issue.rawMarkdown,
-  );
-}
-
-String _localIssueStoragePath({
-  required String issueKey,
-  required String projectKey,
-  required String issueTypeId,
-  required TrackStateIssue? parentIssue,
-  required TrackStateIssue? epicIssue,
-}) {
-  if (_canonicalIssueTypeId(issueTypeId) == 'epic') {
-    return '$projectKey/$issueKey/main.md';
-  }
-  if (parentIssue != null) {
-    return '${_issueRoot(parentIssue.storagePath)}/$issueKey/main.md';
-  }
-  if (epicIssue != null) {
-    return '${_issueRoot(epicIssue.storagePath)}/$issueKey/main.md';
-  }
-  return '$projectKey/$issueKey/main.md';
-}
-
-String _issueRoot(String storagePath) =>
-    storagePath.substring(0, storagePath.lastIndexOf('/'));
-
-String _canonicalIssueTypeId(String? value) {
-  final normalized = (value ?? '').trim().toLowerCase();
-  return normalized
-      .replaceAll('&', 'and')
-      .replaceAll(RegExp(r'[^a-z0-9]+'), '-')
-      .replaceAll(RegExp(r'-+'), '-')
-      .replaceAll(RegExp(r'^-|-$'), '');
-}
-
-String _canonicalIssuePriorityId(String? value) {
-  final normalized = (value ?? '').trim().toLowerCase();
-  return normalized
-      .replaceAll('&', 'and')
-      .replaceAll(RegExp(r'[^a-z0-9]+'), '-')
-      .replaceAll(RegExp(r'-+'), '-')
-      .replaceAll(RegExp(r'^-|-$'), '');
 }

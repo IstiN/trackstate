@@ -906,6 +906,9 @@ void syncBrowserWorkspaceSwitcherRowTabIndices({
       continue;
     }
     final element = node as web.HTMLElement;
+    if (element.getAttribute(_browserFocusIdAttribute) != null) {
+      continue;
+    }
     final identifier =
         element.getAttribute(_browserFocusRowIdAttribute) ??
         element.getAttribute('flt-semantics-identifier');

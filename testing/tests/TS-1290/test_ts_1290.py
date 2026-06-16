@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import http.client
 import json
 import platform
 import sys
@@ -31,6 +32,7 @@ TICKET_KEY = "TS-1290"
 ISSUE_PATH = "DEMO/DEMO-1/DEMO-2"
 ATTACHMENT_NAME = "design_doc.pdf"
 ATTACHMENT_PATH_SUFFIX = f"attachments/{ATTACHMENT_NAME}"
+MANIFEST_PATH = f"{ISSUE_PATH}/attachments.json"
 INITIAL_ATTACHMENT_TEXT = "TS-1290 original attachment baseline.\n"
 REPLACEMENT_ATTACHMENT_TEXT = (
     "TS-1290 replacement attachment content.\n"
@@ -63,6 +65,7 @@ def main() -> None:
     _assert_preconditions(issue_fixture)
     attachment_path = f"{issue_fixture.path}/{ATTACHMENT_PATH_SUFFIX}"
     original_attachment = _fetch_repo_file_if_exists(service, attachment_path)
+    original_manifest = _fetch_repo_file_if_exists(service, MANIFEST_PATH)
     seeded_attachment_text = (
         original_attachment.content if original_attachment is not None else INITIAL_ATTACHMENT_TEXT
     )
@@ -380,16 +383,31 @@ def main() -> None:
                         observed=dialog_text,
                     )
 
+                    tracker_page.session.start_network_recording(
+                        name="github_api",
+                        url_fragment="api.github.com",
+                    )
                     page.confirm_replace_attachment()
                     page.wait_for_replace_attachment_dialog_to_close(timeout_ms=60_000)
                     matched, repo_text_after_confirm = poll_until(
-                        probe=lambda: service.fetch_repo_text(attachment_path),
+                        probe=lambda: _fetch_repo_text_for_poll(
+                            service,
+                            attachment_path,
+                        ),
                         is_satisfied=lambda text: text == REPLACEMENT_ATTACHMENT_TEXT,
                         timeout_seconds=90,
                         interval_seconds=3,
                     )
                     result["repo_text_after_confirm"] = repo_text_after_confirm
                     if not matched:
+                        network_log = tracker_page.session.read_network_log(
+                            name="github_api",
+                        )
+                        result["github_api_network_log"] = network_log
+                        (OUTPUTS_DIR / "ts1290_network_log.json").write_text(
+                            json.dumps(network_log, indent=2),
+                            encoding="utf-8",
+                        )
                         raise AssertionError(
                             "Step 5 failed: confirming the replacement did not persist the new "
                             "attachment content within the timeout.\n"
@@ -461,6 +479,26 @@ def main() -> None:
                 scenario_error = error
                 result["error"] = f"{type(error).__name__}: {error}"
                 result["traceback"] = traceback.format_exc()
+        if original_manifest is not None:
+            try:
+                current_manifest = _fetch_repo_file_if_exists(service, MANIFEST_PATH)
+                if current_manifest is None or current_manifest.content != original_manifest.content:
+                    service.write_repo_text(
+                        MANIFEST_PATH,
+                        content=original_manifest.content,
+                        message=f"{TICKET_KEY}: restore original attachments manifest",
+                    )
+            except Exception as error:  # pragma: no cover - cleanup failure is rare
+                if cleanup_error is None:
+                    cleanup_error = error
+                    result["cleanup"] = {
+                        "status": "failed",
+                        "error": f"{type(error).__name__}: {error}",
+                    }
+                    if scenario_error is None:
+                        scenario_error = error
+                        result["error"] = f"{type(error).__name__}: {error}"
+                        result["traceback"] = traceback.format_exc()
 
     if scenario_error is not None:
         if cleanup_error is not None and cleanup_error is not scenario_error:
@@ -604,6 +642,19 @@ def _fetch_repo_text_observation(
     if repo_file is None:
         return False, f"<missing repository attachment at {path}>"
     return True, repo_file.content
+
+
+def _fetch_repo_text_for_poll(
+    service: LiveSetupRepositoryService,
+    path: str,
+) -> str:
+    try:
+        return service.fetch_repo_text(
+            path,
+            prefer_git_fallback=False,
+        )
+    except (http.client.RemoteDisconnected, urllib.error.URLError) as error:
+        return f"<transient GitHub read failure: {type(error).__name__}: {error}>"
 
 
 def _attachment_upload_controls_failure_observation(

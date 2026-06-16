@@ -16,6 +16,9 @@ if str(REPO_ROOT) not in sys.path:
 from testing.components.pages.github_actions_page import (  # noqa: E402
     GitHubActionsPageObservation,
 )
+from testing.components.services.github_actions_preflight_gate_probe import (  # noqa: E402
+    GitHubActionsPreflightGatePreconditionError,
+)
 from testing.core.config.github_actions_preflight_gate_config import (  # noqa: E402
     GitHubActionsPreflightGateConfig,
 )
@@ -172,6 +175,23 @@ def main() -> None:
                 f"Observed job conclusion: `{_job_conclusion(observation.preflight_job)}`."
             ),
         )
+    except GitHubActionsPreflightGatePreconditionError as error:
+        _merge_probe_error_context(result, error)
+        result.setdefault("error", f"{type(error).__name__}: {error}")
+        result.setdefault("traceback", traceback.format_exc())
+        result["precondition_failure"] = True
+        result["product_failure"] = False
+        if not result.get("steps"):
+            _record_step(
+                result,
+                1,
+                "blocked",
+                REQUEST_STEPS[0],
+                str(error),
+            )
+        _write_blocked_outputs(result)
+        print("TS-1319 blocked")
+        return
     except Exception as error:
         _merge_probe_error_context(result, error)
         if (
@@ -349,10 +369,30 @@ def _write_failure_outputs(result: dict[str, Any]) -> None:
     RESPONSE_PATH.write_text(_response(result, passed=False), encoding="utf-8")
 
 
+def _write_blocked_outputs(result: dict[str, Any]) -> None:
+    BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
+    RESULT_PATH.write_text(
+        json.dumps(_test_automation_result_payload(result), indent=2) + "\n",
+        encoding="utf-8",
+    )
+    JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=False), encoding="utf-8")
+    PR_BODY_PATH.write_text(_markdown_summary(result, passed=False), encoding="utf-8")
+    RESPONSE_PATH.write_text(_response(result, passed=False), encoding="utf-8")
+
+
 def _test_automation_result_payload(result: dict[str, Any]) -> dict[str, Any]:
     error = str(result.get("error", "AssertionError: test failed"))
     if not error.startswith(("AssertionError:", "RuntimeError:", "ValueError:", "TypeError:")):
         error = f"AssertionError: {error}"
+    if result.get("precondition_failure") is True:
+        return {
+            "status": "blocked",
+            "passed": 0,
+            "failed": 0,
+            "skipped": 1,
+            "summary": "0 passed, 0 failed, 1 blocked",
+            "error": error,
+        }
     return {
         "status": "failed",
         "passed": 0,
@@ -364,10 +404,11 @@ def _test_automation_result_payload(result: dict[str, Any]) -> dict[str, Any]:
 
 
 def _jira_comment(result: dict[str, Any], *, passed: bool) -> str:
+    status = _status_text(result, passed=passed)
     lines = [
         "h3. Test Automation Result",
         "",
-        f"*Status:* {'PASSED' if passed else 'FAILED'}",
+        f"*Status:* {status}",
         f"*Test Case:* {TICKET_KEY} - {TEST_CASE_TITLE}",
         "",
         "h4. What was automated",
@@ -388,7 +429,11 @@ def _jira_comment(result: dict[str, Any], *, passed: bool) -> str:
         (
             "* Matched the expected result."
             if passed
-            else f"* Did not match the expected result. {_failed_step_summary(result)}"
+            else (
+                f"* Blocked before full verification. {_failed_step_summary(result)}"
+                if result.get("precondition_failure") is True
+                else f"* Did not match the expected result. {_failed_step_summary(result)}"
+            )
         ),
         f"* Environment: repository {{{{{result.get('repository', '')}}}}}, branch {{{{{result.get('default_branch', '')}}}}}, browser {{Chromium (Playwright)}}, OS {{{{{result.get('os', '')}}}}}.",
         "",
@@ -417,10 +462,11 @@ def _jira_comment(result: dict[str, Any], *, passed: bool) -> str:
 
 
 def _markdown_summary(result: dict[str, Any], *, passed: bool) -> str:
+    status = _status_text(result, passed=passed)
     lines = [
         "## Test Automation Result",
         "",
-        f"**Status:** {'PASSED' if passed else 'FAILED'}",
+        f"**Status:** {status}",
         f"**Test Case:** {TICKET_KEY} - {TEST_CASE_TITLE}",
         "",
         "## What was automated",
@@ -432,7 +478,11 @@ def _markdown_summary(result: dict[str, Any], *, passed: bool) -> str:
         (
             "- Matched the expected result."
             if passed
-            else f"- Did not match the expected result. {_failed_step_summary(result)}"
+            else (
+                f"- Blocked before full verification. {_failed_step_summary(result)}"
+                if result.get("precondition_failure") is True
+                else f"- Did not match the expected result. {_failed_step_summary(result)}"
+            )
         ),
         f"- Environment: repository `{result.get('repository', '')}`, branch `{result.get('default_branch', '')}`, browser `Chromium (Playwright)`, OS `{result.get('os', '')}`.",
         "",
@@ -461,17 +511,22 @@ def _markdown_summary(result: dict[str, Any], *, passed: bool) -> str:
 
 
 def _response(result: dict[str, Any], *, passed: bool) -> str:
+    status = _status_text(result, passed=passed)
     lines = [
         "## Test Automation Result",
         "",
-        f"**Status:** {'PASSED' if passed else 'FAILED'}",
+        f"**Status:** {status}",
         f"**Test Case:** {TICKET_KEY} - {TEST_CASE_TITLE}",
         "",
         "## Outcome",
         (
             "- The live Apple Release Builds workflow failed after about five minutes and did not hang."
             if passed
-            else "- The live workflow did not meet the five-minute timeout expectation."
+            else (
+                "- Blocked: the required no-runner timeout precondition could not be reproduced."
+                if result.get("precondition_failure") is True
+                else "- The live workflow did not meet the five-minute timeout expectation."
+            )
         ),
         "",
         "## Step results",
@@ -560,10 +615,22 @@ def _actual_result(result: dict[str, Any]) -> str:
 
 
 def _failed_step_summary(result: dict[str, Any]) -> str:
+    if result.get("precondition_failure") is True:
+        for step in reversed(result.get("steps", [])):
+            if step.get("status") == "blocked":
+                return str(step.get("observed", ""))
     for step in reversed(result.get("steps", [])):
         if step.get("status") == "failed":
             return str(step.get("observed", ""))
     return "The live workflow did not match the expected five-minute timeout behavior."
+
+
+def _status_text(result: dict[str, Any], *, passed: bool) -> str:
+    if passed:
+        return "PASSED"
+    if result.get("precondition_failure") is True:
+        return "BLOCKED"
+    return "FAILED"
 
 
 def _step_lines(result: dict[str, Any], *, jira: bool) -> list[str]:
