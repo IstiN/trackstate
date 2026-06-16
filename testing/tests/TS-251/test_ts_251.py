@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import re
 import unittest
 
 from testing.core.config.actionlint_workflow_gate_config import (
@@ -132,6 +133,43 @@ class ActionlintWorkflowGateTest(unittest.TestCase):
             f"Observed jobs: {observation.observed_job_names}\n"
             f"Observed steps: {observation.observed_step_names}\n"
             f"Observed step conclusion: {observation.actionlint_step_conclusion}",
+        )
+        self.assertIsNotNone(
+            observation.actionlint_log_excerpt,
+            "Human-style verification failed: the actionlint run did not expose any "
+            "failed log output that a contributor could use to understand the "
+            "workflow problem.\n"
+            f"Run URL: {observation.actionlint_run_url}\n"
+            f"Observed jobs: {observation.observed_job_names}",
+        )
+        assert observation.actionlint_log_excerpt is not None
+        log_excerpt = observation.actionlint_log_excerpt
+        lower_log_excerpt = log_excerpt.lower()
+        target_file_name = Path(self.config.target_workflow_path).name.lower()
+        self.assertTrue(
+            (
+                self.config.target_workflow_path.lower() in lower_log_excerpt
+                or target_file_name in lower_log_excerpt
+            )
+            and re.search(
+                r"(syntax|trigger|yaml|parse|invalid|unexpected|schema|error)",
+                log_excerpt,
+                flags=re.IGNORECASE,
+            ),
+            "Human-style verification failed: the visible actionlint failure did not "
+            "identify the broken workflow syntax or trigger configuration.\n"
+            f"Run URL: {observation.actionlint_run_url}\n"
+            f"Target workflow: {self.config.target_workflow_path}\n"
+            f"Observed log excerpt:\n{observation.actionlint_log_excerpt}",
+        )
+        self.assertNotIn(
+            "unable to resolve action",
+            lower_log_excerpt,
+            "Human-style verification failed: the actionlint workflow failed during "
+            "its own setup instead of reporting the invalid workflow syntax or "
+            "trigger error.\n"
+            f"Run URL: {observation.actionlint_run_url}\n"
+            f"Observed log excerpt:\n{observation.actionlint_log_excerpt}",
         )
 
     def _write_result_if_requested(self, payload: dict[str, object]) -> None:
