@@ -10,6 +10,7 @@ TrackState-specific queues, labels, and recovery priorities.
    - `sm_bug_creation_triggered`
    - repeated bug creation on the same ticket
    - tickets that stay in `Failed` after no-op decisions
+   - `Failed` tickets with only Done linked bugs and no non-Done bug
 
 2. **PR review/rework churn**
    - open PRs that are clean but not merging
@@ -35,6 +36,27 @@ TrackState-specific queues, labels, and recovery priorities.
   way that lets SM re-trigger the same loop.
 - Escalate any repeated failure loop to a shared rule change after the first
   safe recovery.
+
+## Repeated TC/Bug loop rule
+
+```mermaid
+flowchart TD
+  TC[Failed Test Case] --> OpenBug{Linked non-Done Bug?}
+  OpenBug -->|Yes| Wait[Bug To Fix / monitor active bug]
+  OpenBug -->|No| DoneHistory{Only Done bugs or prior\nalready-fixed comments?}
+  DoneHistory -->|Yes| Create[Create a new bug or harden bug-creation prompt]
+  DoneHistory -->|No| Create
+  Create --> Evidence{Latest comment says\nreview approved / valid product evidence?}
+  Evidence -->|Yes| ProductBug[Do not skip; treat as product bug evidence]
+  Evidence -->|No| TestIssue{Explicit test-code or infra issue?}
+  TestIssue -->|Yes| Rework[Test automation rework path]
+  TestIssue -->|No| ProductBug
+```
+
+If the same TC returns to `Failed` after a Done bug, do not let bug creation
+suppress it as "already fixed". Done bugs are historical attempts; the next
+action must be either a new/linkable non-Done bug with prior attempts listed, or
+a specific test-code rework reason.
 
 ## Output expectations
 

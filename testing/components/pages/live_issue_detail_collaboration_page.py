@@ -73,6 +73,7 @@ class LiveIssueDetailCollaborationPage:
     _active_tab_button_selector = 'flt-semantics[role="button"][aria-current="true"]'
     _connect_button_selector = 'flt-semantics[role="button"][aria-label*="Connect GitHub"]'
     _connected_button_selector = 'flt-semantics[aria-label="Connected"]'
+    _connect_button_label = "Connect GitHub"
     _token_input_selector = 'input[aria-label="Fine-grained token"]'
     _choose_attachment_button_selector = (
         'flt-semantics[aria-label*="Choose attachment"] flt-semantics[flt-tappable], '
@@ -108,8 +109,8 @@ class LiveIssueDetailCollaborationPage:
         user_login: str,
     ) -> None:
         connected_banners = TrackStateTrackerPage.connected_banner_variants(
-            user_login=user_login,
             repository=repository,
+            user_login=user_login,
         )
         if not self._is_connected(user_login=user_login, repository=repository):
             try:
@@ -125,15 +126,22 @@ class LiveIssueDetailCollaborationPage:
             raise AssertionError(
                 "Step 1 failed: the hosted session did not expose either the connected "
                 "state or the Connect GitHub action needed to prove the authentication "
-                "precondition for TS-389.\n"
+                "precondition for TS-396.\n"
                 f"Observed body text:\n{self.current_body_text()}",
             )
+        if self._is_connected(user_login=user_login, repository=repository):
+            return
 
-        self._tracker_page.connect_with_token(
-            token=token,
-            repository=repository,
-            user_login=user_login,
-        )
+        try:
+            self._tracker_page.connect_with_token(
+                token=token,
+                repository=repository,
+                user_login=user_login,
+            )
+        except AssertionError:
+            if self._is_connected(user_login=user_login, repository=repository):
+                return
+            raise
 
     def open_jql_search(self) -> None:
         self._session.click(self._button_selector, has_text="JQL Search", timeout_ms=30_000)
@@ -1052,6 +1060,17 @@ class LiveIssueDetailCollaborationPage:
     def active_element(self) -> FocusedElementObservation:
         return self._session.active_element()
 
+    def wait_for_active_element_change(
+        self,
+        previous: FocusedElementObservation,
+        *,
+        timeout_ms: int = 2_000,
+    ) -> FocusedElementObservation:
+        return self._session.wait_for_active_element_change(
+            previous.outer_html,
+            timeout_ms=timeout_ms,
+        )
+
     def press_key(self, key: str) -> None:
         self._session.press_key(key, timeout_ms=30_000)
 
@@ -1063,10 +1082,24 @@ class LiveIssueDetailCollaborationPage:
         )
 
     def upload_attachment(self) -> None:
-        self._session.click(
-            self._upload_attachment_button_selector,
-            timeout_ms=30_000,
-        )
+        if self._session.count(self._upload_attachment_button_selector) == 0:
+            self._session.click(
+                self._visible_button_selector,
+                has_text="Upload attachment",
+                timeout_ms=30_000,
+            )
+            return
+        try:
+            self._session.click(
+                self._upload_attachment_button_selector,
+                timeout_ms=30_000,
+            )
+        except WebAppTimeoutError:
+            self._session.click(
+                self._visible_button_selector,
+                has_text="Upload attachment",
+                timeout_ms=30_000,
+            )
 
     def attachment_download_button_count(self, attachment_name: str) -> int:
         payload = self._session.evaluate(
@@ -1167,6 +1200,10 @@ class LiveIssueDetailCollaborationPage:
                 "Connected as " in body_text
                 and not any(marker in body_text for marker in self._disconnected_markers)
             )
+            or (
+                "Hosted, Connected" in body_text
+                and not any(marker in body_text for marker in self._disconnected_markers)
+            )
         )
 
     def _connect_button_count(self) -> int:
@@ -1185,8 +1222,10 @@ class LiveIssueDetailCollaborationPage:
         )
 
     def download_attachment(self, attachment_name: str) -> str:
-        return self._session.wait_for_download_after_click(
-            self._download_button_selector(attachment_name),
+        selector = self._download_button_selector(attachment_name)
+        self._session.focus(selector, timeout_ms=30_000)
+        return self._session.save_download_after_keypress(
+            "Enter",
             timeout_ms=60_000,
         )
 
@@ -1388,6 +1427,64 @@ class LiveIssueDetailCollaborationPage:
         timeout_ms: int = 30_000,
     ) -> None:
         self._session.wait_for_text_absence("Replace attachment?", timeout_ms=timeout_ms)
+
+    def wait_for_attachment_upload_completion(
+        self,
+        attachment_name: str,
+        *,
+        expected_size_label: str,
+        timeout_ms: int = 120_000,
+    ) -> str:
+        try:
+            payload = self._session.wait_for_function(
+                """
+                ({ attachmentName, downloadLabel, expectedSizeLabel }) => {
+                  const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+                  const bodyText = document.body?.innerText ?? '';
+                  const normalizedBody = normalize(bodyText);
+                  if (
+                    normalizedBody.includes('Replace attachment?')
+                    || normalizedBody.includes(`Selected attachment: ${attachmentName}`)
+                  ) {
+                    return null;
+                  }
+                  const hasDownloadAction = Array.from(
+                    document.querySelectorAll('flt-semantics[aria-label]')
+                  ).some((element) => {
+                    const label = element.getAttribute('aria-label') ?? '';
+                    const rect = element.getBoundingClientRect();
+                    const style = window.getComputedStyle(element);
+                    return label === downloadLabel
+                      && rect.width > 0
+                      && rect.height > 0
+                      && style.visibility !== 'hidden'
+                      && style.display !== 'none';
+                  });
+                  if (!hasDownloadAction) {
+                    return null;
+                  }
+                  return normalizedBody.includes(attachmentName)
+                    && normalizedBody.includes(expectedSizeLabel)
+                    ? bodyText
+                    : null;
+                }
+                """,
+                arg={
+                    "attachmentName": attachment_name,
+                    "downloadLabel": self._download_button_label(attachment_name),
+                    "expectedSizeLabel": expected_size_label,
+                },
+                timeout_ms=timeout_ms,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                "Step 6 failed: the hosted attachment replacement did not finish "
+                "updating the visible attachment row before verification.\n"
+                f"Expected attachment: {attachment_name}\n"
+                f"Expected size label: {expected_size_label}\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+        return str(payload)
 
     def attachment_row_text(self, attachment_name: str, *, timeout_ms: int = 30_000) -> str:
         download_label = self._download_button_label(attachment_name)

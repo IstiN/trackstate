@@ -25,6 +25,8 @@ abstract interface class ManualUnavailableWorkspaceReauthComponent {
 
   Future<void> waitForLocalRestored(String workspaceName);
 
+  Future<void> openSection(String label);
+
   Future<void> openIssue(String key, String summary);
 
   Future<void> expectIssueDetailText(String key, String text);

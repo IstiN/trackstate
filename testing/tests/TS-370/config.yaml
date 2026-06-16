@@ -1,8 +1,8 @@
 test_id: TS-370
 type: web
-framework: flutter_test
-platform: widget
+framework: playwright
+platform: chromium
 dependencies: []
 notes:
-  - Uses the hosted reactive repository fixture so the production widget tree drives the disconnected and read-only repository-access banner states without mocking the UI itself.
-  - Verifies the global banner state across dashboard, board, JQL search, hierarchy, and issue-detail flows, then confirms the recovery CTA opens the canonical reconnect surface.
+  - Opens the deployed hosted TrackState app in an unauthenticated browser session and verifies the persistent repository-access banner across Dashboard, Board, JQL Search, Hierarchy, and issue detail.
+  - Connects through the visible PAT dialog while patching the live repository permissions response to read-only, then verifies the banner switches to read-only and the recovery CTA opens the canonical settings/auth surface.

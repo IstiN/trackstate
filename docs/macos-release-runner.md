@@ -41,7 +41,7 @@ otherwise non-compliant.
 
 The release workflow fails in two explicit places:
 
-1. **Ubuntu preflight:** queries the repository runner inventory and fails immediately when no online runner matches `[self-hosted, macOS, trackstate-release, ARM64]`
+1. **Ubuntu preflight:** queries the repository runner inventory when the token can read it and fails immediately when no online runner matches `[self-hosted, macOS, trackstate-release, ARM64]`; if the token cannot read runner inventory, the workflow warns and lets the macOS job's `runs-on` labels perform the real scheduling check
 2. **macOS readiness script:** runs `tool/check_macos_release_runner.sh` on the selected runner and fails if the host is not Apple Silicon macOS or if any required toolchain version is missing or out of contract
 
 This keeps the existing Ubuntu CI path unchanged while making Apple release infrastructure failures obvious for tagged releases.

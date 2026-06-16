@@ -341,7 +341,7 @@ String _normalizeTarget(WorkspaceProfileTargetType targetType, String target) {
   }
   return switch (targetType) {
     WorkspaceProfileTargetType.hosted => trimmed.toLowerCase(),
-    WorkspaceProfileTargetType.local => _normalizeLocalPath(trimmed),
+    WorkspaceProfileTargetType.local => normalizeLocalPath(trimmed),
   };
 }
 
@@ -355,7 +355,7 @@ String? _normalizeDisplayName(String? value) {
   return trimmed;
 }
 
-String _normalizeLocalPath(String path) {
+String normalizeLocalPath(String path) {
   var normalized = path.replaceAll('\\', '/').trim();
   while (normalized.length > 1 && normalized.endsWith('/')) {
     normalized = normalized.substring(0, normalized.length - 1);

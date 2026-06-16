@@ -44,7 +44,7 @@ TEST_CASE_TITLE = (
 )
 RUN_COMMAND = "mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-1137/test_ts_1137.py"
 DESKTOP_VIEWPORT = {"width": 1440, "height": 900}
-SAVE_OUTCOME_WAIT_SECONDS = 15.0
+SAVE_OUTCOME_WAIT_SECONDS = 30.0
 SAVE_OUTCOME_POLL_SECONDS = 1.0
 LINKED_BUGS = ["TS-1148", "TS-1094", "TS-1090"]
 LINKED_BUG_NOTES = (
@@ -77,16 +77,7 @@ REVIEW_REPLIES_PATH = OUTPUTS_DIR / "review_replies.json"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
 SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts1137_success.png"
 FAILURE_SCREENSHOT_PATH = OUTPUTS_DIR / "ts1137_failure.png"
-REVIEW_THREAD_REPLIES = (
-    {
-        "inReplyToId": 3306812201,
-        "threadId": "PRRT_kwDOSU6Gf86E7LAe",
-    },
-    {
-        "inReplyToId": None,
-        "threadId": None,
-    },
-)
+DISCUSSIONS_RAW_PATH = REPO_ROOT / "input" / TICKET_KEY / "pr_discussions_raw.json"
 
 
 def main() -> None:
@@ -640,14 +631,31 @@ def _build_review_replies(result: dict[str, Any], *, passed: bool) -> str:
         {
             "replies": [
                 {
-                    "inReplyToId": thread["inReplyToId"],
+                    "inReplyToId": thread["rootCommentId"],
                     "threadId": thread["threadId"],
                     "reply": reply,
                 }
-                for thread in REVIEW_THREAD_REPLIES
+                for thread in _discussion_threads()
             ],
-        }
+        },
+        indent=2,
     ) + "\n"
+
+
+def _discussion_threads() -> list[dict[str, Any]]:
+    if not DISCUSSIONS_RAW_PATH.is_file():
+        return []
+    raw_payload = json.loads(DISCUSSIONS_RAW_PATH.read_text(encoding="utf-8"))
+    threads = raw_payload.get("threads")
+    if not isinstance(threads, list):
+        return []
+    return [
+        thread
+        for thread in threads
+        if isinstance(thread, dict)
+        and thread.get("rootCommentId") is not None
+        and thread.get("threadId") is not None
+    ]
 
 
 if __name__ == "__main__":

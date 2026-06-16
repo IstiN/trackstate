@@ -1,10 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
-import 'package:trackstate/data/providers/github/github_auth_probe_stub.dart';
+import 'package:trackstate/data/providers/github/github_auth_probe.dart';
 import 'package:trackstate/data/providers/github/github_trackstate_provider.dart';
 import 'package:trackstate/data/providers/trackstate_provider.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
@@ -52,6 +53,57 @@ void main() {
         ),
       );
 
+      expect(await provider.resolveWriteBranch(), 'main');
+    },
+  );
+
+  test(
+    'GitHub provider falls back to dataRef when both sourceRef and session branch are commit SHAs (stale write ref)',
+    () async {
+      const staleSha = '59c6bb158aadd5b519207735181ee530eba4fc80';
+      final provider = GitHubTrackStateProvider(
+        client: MockClient((request) async {
+          switch (request.url.path) {
+            case '/repos/owner/current':
+              return http.Response(
+                jsonEncode({
+                  'full_name': 'owner/current',
+                  'permissions': <String, Object?>{
+                    'pull': true,
+                    'push': true,
+                    'admin': false,
+                  },
+                }),
+                200,
+              );
+            case '/user':
+              return http.Response(
+                jsonEncode({
+                  'login': 'workspace-tester',
+                  'name': 'Workspace Tester',
+                }),
+                200,
+              );
+          }
+          throw StateError('Unexpected request: ${request.url}');
+        }),
+        repositoryName: 'owner/current',
+        dataRef: 'main',
+        sourceRef: staleSha,
+      );
+
+      // Unauthenticated: configuredBranch is empty, sourceRef is a SHA → dataRef
+      expect(await provider.resolveWriteBranch(), 'main');
+
+      await provider.authenticate(
+        const RepositoryConnection(
+          repository: 'owner/current',
+          branch: staleSha,
+          token: 'token',
+        ),
+      );
+
+      // Authenticated with SHA branch: sourceRef is also a SHA → dataRef
       expect(await provider.resolveWriteBranch(), 'main');
     },
   );
@@ -327,6 +379,97 @@ void main() {
   );
 
   test(
+    'GitHub provider cache-busts hosted tree and content reads when hosted sync caching is disabled',
+    () async {
+      Uri? treeRequestUri;
+      Uri? contentsRequestUri;
+      final provider = GitHubTrackStateProvider(
+        client: MockClient((request) async {
+          switch (request.url.path) {
+            case '/repos/owner/current':
+              return http.Response(
+                jsonEncode({
+                  'full_name': 'owner/current',
+                  'permissions': <String, Object?>{
+                    'pull': true,
+                    'push': true,
+                    'admin': false,
+                  },
+                }),
+                200,
+              );
+            case '/user':
+              return http.Response(
+                jsonEncode({
+                  'login': 'workspace-tester',
+                  'name': 'Workspace Tester',
+                }),
+                200,
+              );
+            case '/repos/owner/current/git/trees/main':
+              treeRequestUri = request.url;
+              return http.Response(
+                jsonEncode({
+                  'tree': [
+                    <String, Object?>{
+                      'path': 'DEMO/config/fields.json',
+                      'type': 'blob',
+                      'sha': 'tree-fields-sha',
+                    },
+                  ],
+                }),
+                200,
+              );
+            case '/repos/owner/current/contents/DEMO/config/fields.json':
+              contentsRequestUri = request.url;
+              return http.Response(
+                jsonEncode({
+                  'content': base64Encode(
+                    utf8.encode(
+                      '[{"id":"summary","name":"Summary","type":"string","required":true}]',
+                    ),
+                  ),
+                  'sha': 'content-fields-sha',
+                }),
+                200,
+              );
+          }
+          throw StateError('Unexpected request: ${request.url}');
+        }),
+        repositoryName: 'owner/current',
+        dataRef: 'main',
+        sourceRef: 'main',
+        disableHostedSyncRequestCaching: true,
+        hostedSyncCacheBustTokenFactory: () => 'fixed-cache-bust-token',
+      );
+
+      await provider.authenticate(
+        const RepositoryConnection(
+          repository: 'owner/current',
+          branch: 'main',
+          token: 'token',
+        ),
+      );
+
+      await provider.listTree(ref: 'main');
+      await provider.readTextFile('DEMO/config/fields.json', ref: 'main');
+
+      expect(treeRequestUri, isNotNull);
+      expect(treeRequestUri!.queryParameters, containsPair('recursive', '1'));
+      expect(
+        treeRequestUri!.queryParameters['_trackstate_refresh'],
+        'fixed-cache-bust-token',
+      );
+      expect(contentsRequestUri, isNotNull);
+      expect(contentsRequestUri!.queryParameters['ref'], 'main');
+      expect(
+        contentsRequestUri!.queryParameters['_trackstate_refresh'],
+        'fixed-cache-bust-token',
+      );
+    },
+  );
+
+  test(
     'GitHub provider preserves explicit load_snapshot_delta=0 as a public bypass directive',
     () async {
       final provider = await _createAuthenticatedProvider(
@@ -557,6 +700,188 @@ void main() {
 
       expect(result.revision, 'new-commit');
       expect(contentsRequestCount, 1);
+    },
+  );
+
+  test(
+    'GitHub provider writeTextFile retries on 409 conflict with refreshed revision',
+    () async {
+      var putRequestCount = 0;
+      final client = MockClient((request) async {
+        if (request.method == 'PUT') {
+          putRequestCount++;
+          if (putRequestCount == 1) {
+            return http.Response(
+              jsonEncode({
+                'message': 'Conflict',
+                'documentation_url': 'https://docs.github.com',
+              }),
+              409,
+            );
+          }
+          return http.Response(
+            jsonEncode({
+              'content': {'sha': 'new-sha'},
+            }),
+            200,
+          );
+        }
+        if (request.method == 'GET' &&
+            request.url.path == '/repos/owner/current/contents/test.txt') {
+          return http.Response(
+            jsonEncode({
+              'content': base64Encode(utf8.encode('refreshed content')),
+              'sha': 'refreshed-sha',
+            }),
+            200,
+          );
+        }
+        switch (request.url.path) {
+          case '/repos/owner/current':
+            return http.Response(
+              jsonEncode({
+                'full_name': 'owner/current',
+                'permissions': <String, Object?>{
+                  'pull': true,
+                  'push': true,
+                  'admin': false,
+                },
+              }),
+              200,
+            );
+          case '/user':
+            return http.Response(
+              jsonEncode({
+                'login': 'workspace-tester',
+                'name': 'Workspace Tester',
+              }),
+              200,
+            );
+        }
+        throw StateError('Unexpected request: ${request.url}');
+      });
+
+      final provider = GitHubTrackStateProvider(
+        client: client,
+        repositoryName: 'owner/current',
+        dataRef: 'main',
+        sourceRef: 'main',
+      );
+      await provider.authenticate(
+        const RepositoryConnection(
+          repository: 'owner/current',
+          branch: 'main',
+          token: 'token',
+        ),
+      );
+
+      final result = await provider.writeTextFile(
+        const RepositoryWriteRequest(
+          path: 'test.txt',
+          content: 'new content',
+          message: 'Update test.txt',
+          branch: 'main',
+          expectedRevision: 'stale-sha',
+        ),
+      );
+      expect(putRequestCount, 2);
+      expect(result.revision, 'new-sha');
+    },
+  );
+
+  test(
+    'GitHub provider writeAttachment retries on 409 conflict with refreshed revision',
+    () async {
+      var putRequestCount = 0;
+      final client = MockClient((request) async {
+        if (request.method == 'PUT') {
+          putRequestCount++;
+          if (putRequestCount == 1) {
+            return http.Response(
+              jsonEncode({
+                'message': 'Conflict',
+                'documentation_url': 'https://docs.github.com',
+              }),
+              409,
+            );
+          }
+          return http.Response(
+            jsonEncode({
+              'content': {'sha': 'new-attachment-sha'},
+            }),
+            200,
+          );
+        }
+        if (request.method == 'GET' &&
+            request.url.path == '/repos/owner/current/contents/test.bin') {
+          return http.Response(
+            jsonEncode({
+              'content': base64Encode([1, 2, 3]),
+              'sha': 'refreshed-bin-sha',
+            }),
+            200,
+          );
+        }
+        if (request.method == 'GET' &&
+            request.url.path == '/repos/owner/current/contents/.gitattributes') {
+          return http.Response(
+            jsonEncode({
+              'content': base64Encode(utf8.encode('* text=auto')),
+              'sha': 'gitattributes-sha',
+            }),
+            200,
+          );
+        }
+        switch (request.url.path) {
+          case '/repos/owner/current':
+            return http.Response(
+              jsonEncode({
+                'full_name': 'owner/current',
+                'permissions': <String, Object?>{
+                  'pull': true,
+                  'push': true,
+                  'admin': false,
+                },
+              }),
+              200,
+            );
+          case '/user':
+            return http.Response(
+              jsonEncode({
+                'login': 'workspace-tester',
+                'name': 'Workspace Tester',
+              }),
+              200,
+            );
+        }
+        throw StateError('Unexpected request: ${request.url}');
+      });
+
+      final provider = GitHubTrackStateProvider(
+        client: client,
+        repositoryName: 'owner/current',
+        dataRef: 'main',
+        sourceRef: 'main',
+      );
+      await provider.authenticate(
+        const RepositoryConnection(
+          repository: 'owner/current',
+          branch: 'main',
+          token: 'token',
+        ),
+      );
+
+      final result = await provider.writeAttachment(
+        RepositoryAttachmentWriteRequest(
+          path: 'test.bin',
+          bytes: Uint8List.fromList([4, 5, 6]),
+          message: 'Update test.bin',
+          branch: 'main',
+          expectedRevision: 'stale-bin-sha',
+        ),
+      );
+      expect(putRequestCount, 2);
+      expect(result.revision, 'new-attachment-sha');
     },
   );
 }

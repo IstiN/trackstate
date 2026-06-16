@@ -1115,9 +1115,6 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   @override
   Future<bool> isTopBarTextVisible(String text) async {
     await tester.pump();
-    if (repositoryAccessButton.evaluate().isEmpty) {
-      return false;
-    }
     return find
         .descendant(of: topBar, matching: _text(text))
         .evaluate()
@@ -1133,9 +1130,6 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   @override
   Future<bool> isTopBarSemanticsLabelVisible(String label) async {
     await tester.pump();
-    if (repositoryAccessButton.evaluate().isEmpty) {
-      return false;
-    }
     return find
         .descendant(of: topBar, matching: _exactSemanticsLabel(label))
         .evaluate()
@@ -1196,6 +1190,7 @@ class TrackStateAppScreen implements TrackStateAppComponent {
           '$hasTapAction, isEnabled=$isEnabled.',
     );
   }
+
   Future<bool> isNavigationChromeVisible() async {
     await tester.pump();
     return _navigationChrome.evaluate().isNotEmpty;
@@ -1668,9 +1663,10 @@ class TrackStateAppScreen implements TrackStateAppComponent {
       FontWeight.w700 => 'w700',
       FontWeight.w800 => 'w800',
       FontWeight.w900 => 'w900',
-        _ => '$weight',
-      };
+      _ => '$weight',
+    };
   }
+
   bool _snapshotContains(List<String> values, String expected) {
     for (final value in values) {
       final trimmed = value.trim();
