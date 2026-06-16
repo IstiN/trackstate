@@ -70,6 +70,14 @@ done
 
 REQUESTED_VERSION="${REQUESTED_VERSION:-latest}"
 
+case "$REQUESTED_VERSION" in
+  latest|v[0-9]*)
+    ;;
+  *)
+    error "Invalid version format: $REQUESTED_VERSION. Expected 'latest' or a tag like 'v1.2.3'."
+    ;;
+esac
+
 check_existing_trackstate() {
   local existing
   existing="$(type -P trackstate || true)"
