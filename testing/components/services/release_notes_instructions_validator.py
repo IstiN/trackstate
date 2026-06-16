@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from yaml import SafeLoader
 
 from testing.core.config.release_notes_instructions_config import (
     ReleaseNotesInstructionsConfig,
@@ -15,16 +14,7 @@ from testing.core.interfaces.release_notes_instructions_validator import (
     ReleaseNotesInstructionsObservation,
     ReleaseNotesInstructionsValidator,
 )
-
-
-class _WorkflowSafeLoader(SafeLoader):
-    pass
-
-
-_WorkflowSafeLoader.yaml_implicit_resolvers = {
-    key: [(tag, regexp) for tag, regexp in resolvers if tag != "tag:yaml.org,2002:bool"]
-    for key, resolvers in SafeLoader.yaml_implicit_resolvers.items()
-}
+from testing.core.utils.yaml_loader import WorkflowSafeLoader
 
 
 class LocalReleaseNotesInstructionsValidator(ReleaseNotesInstructionsValidator):
@@ -58,7 +48,7 @@ class LocalReleaseNotesInstructionsValidator(ReleaseNotesInstructionsValidator):
         try:
             parsed = yaml.load(
                 config.workflow_path.read_text(encoding="utf-8"),
-                Loader=_WorkflowSafeLoader,
+                Loader=WorkflowSafeLoader,
             ) or {}
         except yaml.YAMLError as exc:
             failures.append(f"Failed to parse workflow YAML: {exc}")
