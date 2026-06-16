@@ -29,9 +29,12 @@ class TrackStateLocalAuthSourceRegressionTest(unittest.TestCase):
     def test_local_target_ignores_ambient_github_tokens(self) -> None:
         # Simulate an environment where a GitHub CLI token is available.
         # The CLI must not report "gh" as the auth source for a local target.
+        # TRACKSTATE_TOKEN is explicitly cleared so the test strictly exercises
+        # only ambient GitHub-token behavior, not explicit token precedence.
         ambient_github_tokens = {
             "GH_TOKEN": "ghp_trackstate_regression_dummy_token",
             "GITHUB_TOKEN": "ghp_trackstate_regression_dummy_token",
+            "TRACKSTATE_TOKEN": "",
         }
 
         with patch.dict(os.environ, ambient_github_tokens, clear=False):

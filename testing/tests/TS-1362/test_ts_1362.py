@@ -35,7 +35,7 @@ class CompiledCliRegressionTest(unittest.TestCase):
     def _compile_binary(self, tmpdir: Path) -> Path:
         compiled_binary = tmpdir / "trackstate_cli"
         config = TrackStateCliStandaloneCompileConfig.from_file(
-            REPO_ROOT / "testing" / "tests" / "TS-596" / "config.yaml"
+            REPO_ROOT / "testing" / "tests" / "TS-1362" / "config.yaml"
         )
         validator = TrackStateCliStandaloneCompileValidator(
             probe=create_trackstate_cli_standalone_compile_probe(REPO_ROOT)
@@ -70,11 +70,17 @@ class CompiledCliRegressionTest(unittest.TestCase):
         binary: Path,
         env: dict[str, str] | None = None,
         source_entrypoint: Path | None = None,
+        target: str = "local",
+        path: str | None = None,
     ) -> tuple[int, str]:
         command = [str(binary)]
         if source_entrypoint is not None:
             command.append(str(source_entrypoint))
-        command.extend(["session", "--target", "local", "--path", ".", "--output", "json"])
+        command.extend(["session", "--target", target, "--output", "json"])
+        if target == "local":
+            command.extend(["--path", path or "."])
+        else:
+            command.extend(["--repository", "IstiN/trackstate"])
         merged_env = os.environ.copy()
         if env:
             merged_env.update(env)
@@ -88,15 +94,91 @@ class CompiledCliRegressionTest(unittest.TestCase):
         )
         return result.returncode, result.stdout
 
+    def _seed_local_repository(self, repository_path: Path) -> None:
+        repository_path.mkdir(parents=True, exist_ok=True)
+        self._write_file(
+            repository_path / ".gitattributes",
+            "*.png filter=lfs diff=lfs merge=lfs -text\n",
+        )
+        self._write_file(
+            repository_path / "DEMO/project.json",
+            '{"key":"DEMO","name":"Local Demo"}\n',
+        )
+        self._write_file(
+            repository_path / "DEMO/config/statuses.json",
+            '[{"id":"todo","name":"To Do"},{"id":"done","name":"Done"}]\n',
+        )
+        self._write_file(
+            repository_path / "DEMO/config/issue-types.json",
+            '[{"id":"story","name":"Story"}]\n',
+        )
+        self._write_file(
+            repository_path / "DEMO/config/fields.json",
+            '[{"id":"summary","name":"Summary","type":"string","required":true}]\n',
+        )
+        self._write_file(
+            repository_path / "DEMO/DEMO-1/main.md",
+            """---
+key: DEMO-1
+project: DEMO
+issueType: story
+status: todo
+summary: "TS-1362 local session fixture"
+assignee: ts1362-user
+reporter: ts1362-user
+updated: 2026-05-10T00:00:00Z
+---
+
+# Description
+
+Local repository used to verify the compiled CLI JSON envelope.
+""",
+        )
+        self._git(repository_path, "init", "-b", "main")
+        self._git(
+            repository_path, "config", "--local", "user.name", "TS-1362 Tester"
+        )
+        self._git(
+            repository_path, "config", "--local", "user.email", "ts1362@example.com"
+        )
+        self._git(repository_path, "add", ".")
+        self._git(
+            repository_path, "commit", "-m", "Seed TS-1362 local session fixture"
+        )
+
+    @staticmethod
+    def _write_file(path: Path, content: str) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+
+    @staticmethod
+    def _git(repository_path: Path, *args: str) -> None:
+        completed = subprocess.run(
+            ("git", "-C", str(repository_path), *args),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if completed.returncode != 0:
+            raise AssertionError(
+                f"git {' '.join(args)} failed for {repository_path}.\n"
+                f"stdout:\n{completed.stdout}\n"
+                f"stderr:\n{completed.stderr}"
+            )
+
     def test_compiled_cli_matches_dart_entrypoint_output(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir_str:
             tmpdir = Path(tmpdir_str)
             compiled_binary = self._compile_binary(tmpdir)
 
+            repo_dir = tmpdir / "repo"
+            self._seed_local_repository(repo_dir)
+
             dart_exit, dart_stdout = self._run_cli(
                 Path("dart"),
                 env={"TRACKSTATE_TOKEN": ""},
                 source_entrypoint=SOURCE_ENTRYPOINT,
+                path=str(repo_dir),
             )
             self.assertEqual(
                 dart_exit,
@@ -107,6 +189,7 @@ class CompiledCliRegressionTest(unittest.TestCase):
             compiled_exit, compiled_stdout = self._run_cli(
                 compiled_binary,
                 env={"TRACKSTATE_TOKEN": ""},
+                path=str(repo_dir),
             )
             self.assertEqual(
                 compiled_exit,
@@ -127,6 +210,9 @@ class CompiledCliRegressionTest(unittest.TestCase):
             tmpdir = Path(tmpdir_str)
             compiled_binary = self._compile_binary(tmpdir)
 
+            repo_dir = tmpdir / "repo"
+            self._seed_local_repository(repo_dir)
+
             # Simulate an environment where hosted tokens are present. Local-target
             # sessions must remain neutral and report authSource "none" regardless.
             env = {
@@ -135,28 +221,67 @@ class CompiledCliRegressionTest(unittest.TestCase):
                 "GH_TOKEN": "ghp_trackstate_regression_dummy_token",
             }
 
-            _, dart_stdout = self._run_cli(Path("dart"), env=env, source_entrypoint=SOURCE_ENTRYPOINT)
-            _, compiled_stdout = self._run_cli(compiled_binary, env=env)
+            _, dart_stdout = self._run_cli(
+                Path("dart"), env=env, source_entrypoint=SOURCE_ENTRYPOINT, path=str(repo_dir)
+            )
+            _, compiled_stdout = self._run_cli(
+                compiled_binary, env=env, path=str(repo_dir)
+            )
 
-            dart_data = json.loads(dart_stdout).get("data", {})
-            compiled_data = json.loads(compiled_stdout).get("data", {})
+            dart_data = json.loads(dart_stdout)
+            compiled_data = json.loads(compiled_stdout)
 
             self.assertEqual(
-                dart_data.get("authSource"),
+                dart_data.get("data", {}).get("authSource"),
                 "none",
                 "Dart VM entrypoint should report a neutral local auth source even when "
                 "hosted tokens are present in the environment.",
             )
             self.assertEqual(
-                compiled_data.get("authSource"),
+                compiled_data.get("data", {}).get("authSource"),
                 "none",
                 "Compiled binary should report a neutral local auth source even when "
                 "hosted tokens are present in the environment.",
             )
             self.assertEqual(
-                dart_data.get("authSource"),
-                compiled_data.get("authSource"),
+                dart_data.get("data", {}).get("authSource"),
+                compiled_data.get("data", {}).get("authSource"),
                 "Local authSource handling differs between Dart VM and compiled binary.",
+            )
+
+    def test_compiled_cli_preserves_hosted_auth_failure_parity(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir_str:
+            tmpdir = Path(tmpdir_str)
+            compiled_binary = self._compile_binary(tmpdir)
+
+            env = {"TRACKSTATE_TOKEN": "fake-token-for-regression-test"}
+
+            _, dart_stdout = self._run_cli(
+                Path("dart"), env=env, source_entrypoint=SOURCE_ENTRYPOINT, target="hosted"
+            )
+            _, compiled_stdout = self._run_cli(
+                compiled_binary, env=env, target="hosted"
+            )
+
+            dart_data = json.loads(dart_stdout)
+            compiled_data = json.loads(compiled_stdout)
+
+            # Both should fail with AUTHENTICATION_FAILED because the fake token is invalid.
+            # The key parity check is that both entrypoints produce the same error shape.
+            self.assertEqual(
+                dart_data.get("error", {}).get("code"),
+                "AUTHENTICATION_FAILED",
+                "Dart VM entrypoint should fail with AUTHENTICATION_FAILED when TRACKSTATE_TOKEN is invalid.",
+            )
+            self.assertEqual(
+                compiled_data.get("error", {}).get("code"),
+                "AUTHENTICATION_FAILED",
+                "Compiled binary should fail with AUTHENTICATION_FAILED when TRACKSTATE_TOKEN is invalid.",
+            )
+            self.assertEqual(
+                dart_data.get("error", {}).get("code"),
+                compiled_data.get("error", {}).get("code"),
+                "Authentication error code differs between Dart VM and compiled binary.",
             )
 
 
