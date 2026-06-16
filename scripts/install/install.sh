@@ -99,7 +99,7 @@ resolve_release_tag() {
 
   local release_json
   release_json="$(curl -sSL --fail "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null)" ||
-    error "Unable to resolve the latest release from the GitHub API."
+    error "Unable to resolve the latest release from the GitHub API. To bypass this step, provide a pinned version (e.g., v1.2.3) or use a pinned install URL: https://github.com/${REPO}/releases/download/<VERSION>/install.sh"
 
   local tag
   tag="$(printf '%s' "$release_json" | sed -n 's/.*"tag_name": "\([^"]*\)".*/\1/p' | head -n 1)"
