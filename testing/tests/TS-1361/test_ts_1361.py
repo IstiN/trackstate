@@ -114,7 +114,7 @@ class PosixInstallScriptIdempotencyAndConflictTest(unittest.TestCase):
                 # succeed only once the product adds conflict detection and a --force flag.
                 force = run_install_sh(
                     patched,
-                    version="--force",
+                    flags=["--force"],
                     timeout=60,
                     env=env_with_conflict,
                 )
