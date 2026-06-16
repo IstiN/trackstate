@@ -337,3 +337,41 @@ def run_install_ps1(
         env=merged_env,
         timeout=timeout,
     )
+
+
+def run_patched_install_ps1(
+    install_script: Path,
+    tmpdir: Path,
+    assets: MockReleaseAssets,
+    version: str | None = None,
+    flags: list[str] | None = None,
+    path_prefix: str | None = None,
+    timeout: int = 60,
+    repo: str = "test/repo",
+) -> tuple[Path, Path, Path, subprocess.CompletedProcess[str]]:
+    """Patch install.ps1 and execute it in an isolated environment.
+
+    Returns the mocked LocalAppData directory, the install directory, the
+    path-store file, and the completed process.
+    """
+    local_app_data = tmpdir / "localappdata"
+    local_app_data.mkdir(exist_ok=True)
+    install_dir = local_app_data / "trackstate" / "bin"
+    path_store = tmpdir / "user_path.txt"
+    temp_dir = tmpdir / "temp"
+    temp_dir.mkdir(exist_ok=True)
+
+    with MockGitHubReleaseServer(assets, repo=repo) as server:
+        patched = tmpdir / "install.ps1"
+        patch_install_ps1(install_script, patched, server, local_app_data, path_store)
+
+        base_path = os.environ.get("PATH", "")
+        env_path = base_path if path_prefix is None else f"{path_prefix}{os.pathsep}{base_path}"
+        env = {
+            "LOCALAPPDATA": str(local_app_data),
+            "TEMP": str(temp_dir),
+            "PATH": env_path,
+        }
+        result = run_install_ps1(patched, version=version, flags=flags, timeout=timeout, env=env)
+
+    return local_app_data, install_dir, path_store, result
