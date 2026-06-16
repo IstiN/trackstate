@@ -170,7 +170,7 @@ DOWNLOAD_BASE="https://github.com/${REPO}/releases/download/${RELEASE_TAG}"
 # platform-specific checksum file. Linux and Windows assets share the unified
 # release checksum.
 case "$PLATFORM" in
-  macos-arm64)
+  macos-*)
     CHECKSUM_NAME="trackstate-apple-${RELEASE_TAG}.sha256"
     ;;
   *)

@@ -560,9 +560,3 @@ jobs:
             "build/macos/$CLI_MACOS" \
             "build/macos/trackstate-apple-${release_tag}.sha256" \
             --clobber
-
-          gh release edit "$release_tag" \
-            --title "TrackState $release_tag" \
-            --target "$release_target_commit" \
-            --draft=false \
-            --prerelease=false

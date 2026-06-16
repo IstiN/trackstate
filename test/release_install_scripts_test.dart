@@ -103,7 +103,7 @@ void main() {
       expect(checksumCaseStart, greaterThan(-1));
       final checksumCaseBlock = content.substring(checksumCaseStart);
       expect(checksumCaseBlock, contains(r'case "$PLATFORM" in'));
-      expect(checksumCaseBlock, contains('macos-arm64)'));
+      expect(checksumCaseBlock, contains('macos-*)'));
       expect(
         checksumCaseBlock,
         contains(r'CHECKSUM_NAME="trackstate-apple-${RELEASE_TAG}.sha256"'),
@@ -112,7 +112,7 @@ void main() {
         checksumCaseBlock,
         contains(r'CHECKSUM_NAME="trackstate-${RELEASE_TAG}.sha256"'),
       );
-      final macosBranchIndex = checksumCaseBlock.indexOf('macos-arm64)');
+      final macosBranchIndex = checksumCaseBlock.indexOf('macos-*)');
       final defaultBranchIndex = checksumCaseBlock.indexOf('*)');
       expect(defaultBranchIndex, greaterThan(macosBranchIndex));
     });

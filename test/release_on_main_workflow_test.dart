@@ -8,13 +8,18 @@ void main() {
 
   group('Main-branch release workflow contract', () {
     late String workflow;
-    late String publishStep;
+    late String publishReleaseJob;
+    late String publishMacosJob;
 
     setUp(() {
       workflow = repositoryFile('.github/workflows/release-on-main.yml')
           .readAsStringSync();
-      publishStep = workflow.substring(
-        workflow.indexOf('Publish release'),
+      publishReleaseJob = workflow.substring(
+        workflow.indexOf('publish-release:'),
+        workflow.indexOf('publish-macos-release:'),
+      );
+      publishMacosJob = workflow.substring(
+        workflow.indexOf('publish-macos-release:'),
       );
     });
 
@@ -391,85 +396,94 @@ void main() {
     });
 
     test('generates a release body scaffold for later enrichment', () {
-      expect(publishStep, contains('## Compiled artifacts'));
-      expect(publishStep, contains('Verify downloads with'));
-      expect(publishStep, contains('## Install the CLI'));
-      expect(publishStep, contains(r'echo "## Install the CLI"'));
-      expect(publishStep, contains('install.sh'));
-      expect(publishStep, contains('install.ps1'));
-      expect(publishStep, contains('install.cmd'));
-      expect(publishStep, isNot(contains('<<EOF')));
-      expect(publishStep, contains(r'echo "## Compiled artifacts"'));
-      expect(publishStep, contains(r'echo "| Linux | $DESKTOP_LINUX | $CLI_LINUX |"'));
-      expect(publishStep, contains(r'echo "| Windows | $DESKTOP_WINDOWS | $CLI_WINDOWS |"'));
+      expect(publishReleaseJob, contains('## Compiled artifacts'));
+      expect(publishReleaseJob, contains('Verify downloads with'));
+      expect(publishReleaseJob, contains('## Install the CLI'));
+      expect(publishReleaseJob, contains(r'echo "## Install the CLI"'));
+      expect(publishReleaseJob, contains('install.sh'));
+      expect(publishReleaseJob, contains('install.ps1'));
+      expect(publishReleaseJob, contains('install.cmd'));
+      expect(publishReleaseJob, isNot(contains('<<EOF')));
+      expect(publishReleaseJob, contains(r'echo "## Compiled artifacts"'));
+      expect(publishReleaseJob, contains(r'echo "| Linux | $DESKTOP_LINUX | $CLI_LINUX |"'));
+      expect(publishReleaseJob, contains(r'echo "| Windows | $DESKTOP_WINDOWS | $CLI_WINDOWS |"'));
       expect(
-        publishStep,
+        publishReleaseJob,
         contains('macOS assets are published by a separate job'),
       );
       expect(
-        publishStep,
+        publishReleaseJob,
         isNot(contains(r'echo "| macOS | $DESKTOP_MACOS | $CLI_MACOS |"')),
       );
     });
 
     test('release notes use bash and --fail for Linux macOS install commands', () {
-      expect(publishStep, contains(r'curl -fsSL'));
-      expect(publishStep, contains('| bash'));
-      expect(publishStep, isNot(contains('| sh')));
+      expect(publishReleaseJob, contains(r'curl -fsSL'));
+      expect(publishReleaseJob, contains('| bash'));
+      expect(publishReleaseJob, isNot(contains('| sh')));
     });
 
     test('release notes use save-and-run for Windows PowerShell install command', () {
-      expect(publishStep, contains('irm https://github.com'));
-      expect(publishStep, contains('-OutFile install.ps1'));
-      expect(publishStep, contains(r'.\\install.ps1 -Version'));
+      expect(publishReleaseJob, contains('irm https://github.com'));
+      expect(publishReleaseJob, contains('-OutFile install.ps1'));
+      expect(publishReleaseJob, contains(r'.\\install.ps1 -Version'));
       // The old pipe-to-iex pattern must not appear.
-      expect(publishStep, isNot(contains('| iex')));
+      expect(publishReleaseJob, isNot(contains('| iex')));
     });
 
     test('release notes warn that desktop packages are unsigned and unnotarized', () {
-      expect(publishStep, contains('unsigned and unnotarized'));
-      expect(publishStep, contains('right-click the app'));
-      expect(publishStep, contains('choose Open'));
-      expect(publishStep, contains('More info'));
-      expect(publishStep, contains('Run anyway'));
+      expect(publishReleaseJob, contains('unsigned and unnotarized'));
+      expect(publishReleaseJob, contains('right-click the app'));
+      expect(publishReleaseJob, contains('choose Open'));
+      expect(publishReleaseJob, contains('More info'));
+      expect(publishReleaseJob, contains('Run anyway'));
     });
 
     test('release notes expose launch guidance with semantic headings', () {
       expect(
-        publishStep,
+        publishReleaseJob,
         contains('## Launching unsigned desktop packages'),
       );
-      expect(publishStep, contains('### macOS'));
-      expect(publishStep, contains('### Windows'));
+      expect(publishReleaseJob, contains('### macOS'));
+      expect(publishReleaseJob, contains('### Windows'));
       // Guidance must be structured as headings, not only a blockquote.
-      expect(publishStep, isNot(contains(r'echo "> **Security warning:**"')));
+      expect(publishReleaseJob, isNot(contains(r'echo "> **Security warning:**"')));
     });
 
     test('release notes state the macOS desktop build requires Apple Silicon', () {
-      expect(publishStep, contains('Apple Silicon'));
-      expect(publishStep, contains('arm64'));
+      expect(publishReleaseJob, contains('Apple Silicon'));
+      expect(publishReleaseJob, contains('arm64'));
     });
 
     test('release notes explain desktop auth uses PAT and not GitHub App OAuth', () {
-      expect(publishStep, contains('fine-grained PAT'));
-      expect(publishStep, contains('gh auth token'));
-      expect(publishStep, contains('GitHub App OAuth'));
-      expect(publishStep, contains('web build only'));
+      expect(publishReleaseJob, contains('fine-grained PAT'));
+      expect(publishReleaseJob, contains('gh auth token'));
+      expect(publishReleaseJob, contains('GitHub App OAuth'));
+      expect(publishReleaseJob, contains('web build only'));
     });
 
     test('publishes release with env-backed asset names', () {
-      expect(publishStep, contains(r'DESKTOP_LINUX: ${{ needs.build-linux.outputs.desktop_archive }}'));
-      expect(publishStep, contains(r'CLI_LINUX: ${{ needs.build-linux.outputs.cli_archive }}'));
-      expect(publishStep, contains(r'DESKTOP_MACOS: ${{ needs.build-macos.outputs.desktop_archive }}'));
-      expect(publishStep, contains(r'CLI_MACOS: ${{ needs.build-macos.outputs.cli_archive }}'));
-      expect(publishStep, contains(r'DESKTOP_WINDOWS: ${{ needs.build-windows.outputs.desktop_archive }}'));
-      expect(publishStep, contains(r'CLI_WINDOWS: ${{ needs.build-windows.outputs.cli_archive }}'));
-      expect(publishStep, contains(r'"build/linux/$DESKTOP_LINUX"'));
-      expect(publishStep, contains(r'"build/linux/$CLI_LINUX"'));
-      expect(publishStep, contains(r'"build/macos/$DESKTOP_MACOS"'));
-      expect(publishStep, contains(r'"build/macos/$CLI_MACOS"'));
-      expect(publishStep, contains(r'"build/windows/$DESKTOP_WINDOWS"'));
-      expect(publishStep, contains(r'"build/windows/$CLI_WINDOWS"'));
+      expect(publishReleaseJob, contains(r'DESKTOP_LINUX: ${{ needs.build-linux.outputs.desktop_archive }}'));
+      expect(publishReleaseJob, contains(r'CLI_LINUX: ${{ needs.build-linux.outputs.cli_archive }}'));
+      expect(publishReleaseJob, contains(r'DESKTOP_WINDOWS: ${{ needs.build-windows.outputs.desktop_archive }}'));
+      expect(publishReleaseJob, contains(r'CLI_WINDOWS: ${{ needs.build-windows.outputs.cli_archive }}'));
+      expect(publishReleaseJob, contains(r'"build/linux/$DESKTOP_LINUX"'));
+      expect(publishReleaseJob, contains(r'"build/linux/$CLI_LINUX"'));
+      expect(publishReleaseJob, contains(r'"build/windows/$DESKTOP_WINDOWS"'));
+      expect(publishReleaseJob, contains(r'"build/windows/$CLI_WINDOWS"'));
+      expect(
+        publishReleaseJob,
+        isNot(contains(r'"build/macos/$DESKTOP_MACOS"')),
+      );
+      expect(
+        publishReleaseJob,
+        isNot(contains(r'"build/macos/$CLI_MACOS"')),
+      );
+
+      expect(publishMacosJob, contains(r'DESKTOP_MACOS: ${{ needs.build-macos.outputs.desktop_archive }}'));
+      expect(publishMacosJob, contains(r'CLI_MACOS: ${{ needs.build-macos.outputs.cli_archive }}'));
+      expect(publishMacosJob, contains(r'"build/macos/$DESKTOP_MACOS"'));
+      expect(publishMacosJob, contains(r'"build/macos/$CLI_MACOS"'));
     });
 
     test('prepares install script assets before publishing the release', () {
@@ -627,9 +641,9 @@ void main() {
     });
 
     test('cleans up temporary release notes file', () {
-      expect(publishStep, contains(r'release_notes="$(mktemp)"'));
+      expect(publishReleaseJob, contains(r'release_notes="$(mktemp)"'));
       expect(
-        publishStep,
+        publishReleaseJob,
         contains("trap 'rm -f \"\$release_notes\"' EXIT"),
       );
     });
