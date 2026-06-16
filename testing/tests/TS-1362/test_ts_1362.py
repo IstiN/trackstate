@@ -350,6 +350,7 @@ Seed issue for compiled CLI regression parity.
             capture_output=True,
             text=True,
             check=False,
+            timeout=120,
         )
         return _CommandResult(
             command=executed_command,
@@ -374,6 +375,7 @@ Seed issue for compiled CLI regression parity.
             capture_output=True,
             text=True,
             check=False,
+            timeout=120,
         )
         return _CommandResult(
             command=executed_command,
