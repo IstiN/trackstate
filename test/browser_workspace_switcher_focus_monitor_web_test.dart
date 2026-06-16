@@ -26,6 +26,83 @@ void main() {
     });
 
     test(
+      'row tab-index sync preserves saved workspace action bridge controls',
+      () {
+        final panel = _appendPanel(host);
+        final activeRowId = browserWorkspaceSwitcherRowSemanticsIdentifier(
+          'active',
+        );
+        final inactiveRowId = browserWorkspaceSwitcherRowSemanticsIdentifier(
+          'inactive',
+        );
+        final activeRow = _appendButton(
+          panel,
+          label: 'Hosted active workspace, Hosted, Connected',
+          rowId: activeRowId,
+          panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+          left: 0,
+          top: 0,
+          width: 320,
+          height: 48,
+          selectedRow: true,
+        );
+        final inactiveRow = _appendButton(
+          panel,
+          label: 'Hosted inactive workspace, Hosted, Connected',
+          rowId: inactiveRowId,
+          panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+          left: 0,
+          top: 64,
+          width: 320,
+          height: 48,
+        );
+        final openAction = _appendButton(
+          panel,
+          label: 'Open: Hosted inactive workspace',
+          focusId: 'trackstate-workspace-switcher-open-inactive',
+          rowId: inactiveRowId,
+          panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+          left: 0,
+          top: 120,
+          width: 160,
+          height: 40,
+        );
+        final deleteAction = _appendButton(
+          panel,
+          label: 'Delete: Hosted inactive workspace',
+          focusId: 'trackstate-workspace-switcher-delete-inactive',
+          rowId: inactiveRowId,
+          panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+          left: 176,
+          top: 120,
+          width: 160,
+          height: 40,
+        );
+
+        syncBrowserWorkspaceSwitcherRowTabIndices(
+          activeWorkspaceId: 'active',
+        );
+
+        expect(activeRow.tabIndex, 0);
+        expect(inactiveRow.tabIndex, -1);
+        expect(
+          openAction.tabIndex,
+          0,
+          reason:
+              'Open actions carry their own browser focus id and must remain '
+              'keyboard reachable even when their row summary is not selected.',
+        );
+        expect(
+          deleteAction.tabIndex,
+          0,
+          reason:
+              'Delete actions carry their own browser focus id and must remain '
+              'keyboard reachable even when their row summary is not selected.',
+        );
+      },
+    );
+
+    test(
       'Shift+Tab from the selected row wraps to an overlapping input inside the workspace switcher',
       () {
         final panel = _appendPanel(host);
@@ -342,11 +419,7 @@ void main() {
         row.focus();
         final event = web.KeyboardEvent(
           'keydown',
-          web.KeyboardEventInit(
-            key: 'Escape',
-            bubbles: true,
-            cancelable: true,
-          ),
+          web.KeyboardEventInit(key: 'Escape', bubbles: true, cancelable: true),
         );
         row.dispatchEvent(event);
 
@@ -1019,6 +1092,94 @@ void main() {
           reason:
               'Forward tab from the last saved-workspace row action should '
               'advance to the footer before the workspace switcher wraps.',
+        );
+      },
+    );
+
+    test(
+      'Tab from a browser-focus workspace action skips the duplicate semantics-overlay copy with the same shared identifier',
+      () {
+        final panel = _appendPanel(host);
+        _appendButton(
+          host,
+          label:
+              'Workspace switcher: Hosted main workspace, Hosted, Needs sign-in',
+          focusId: browserDesktopWorkspaceSwitcherTriggerSemanticsIdentifier,
+          panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+          left: 24,
+          top: 24,
+          width: 240,
+          height: 40,
+        );
+        final row = _appendSemanticsNode(
+          panel,
+          left: 0,
+          top: 96,
+          width: 376,
+          height: 40,
+          semanticsIdentifier: browserWorkspaceSwitcherRowSemanticsIdentifier(
+            'demo',
+          ),
+        );
+        final openButton = _appendButton(
+          row,
+          label: 'Open: Hosted demo workspace',
+          focusId: 'trackstate-workspace-switcher-open-demo',
+          panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+          rowId: browserWorkspaceSwitcherRowSemanticsIdentifier('demo'),
+          left: 0,
+          top: 0,
+          width: 180,
+          height: 40,
+        );
+        _appendSemanticsNode(
+          row,
+          left: 0,
+          top: 0,
+          width: 180,
+          height: 40,
+          semanticsIdentifier: 'trackstate-workspace-switcher-open-demo',
+          role: 'button',
+          label: 'Open: Hosted demo workspace',
+          tabIndex: 0,
+        );
+        final deleteButton = _appendButton(
+          row,
+          label: 'Delete: Hosted demo workspace',
+          focusId: 'trackstate-workspace-switcher-delete-demo',
+          panelId: browserWorkspaceSwitcherSemanticsIdentifier,
+          rowId: browserWorkspaceSwitcherRowSemanticsIdentifier('demo'),
+          left: 196,
+          top: 0,
+          width: 180,
+          height: 40,
+        );
+
+        final subscription =
+            createBrowserWorkspaceSwitcherFocusMonitorSubscription(
+              onBrowserTab: () {},
+              onBrowserFocusOutside: () {},
+              onBrowserBoundaryKey: (_) {},
+            );
+        addTearDown(subscription.cancel);
+
+        openButton.focus();
+        expect(web.document.activeElement, same(openButton));
+
+        final event = web.KeyboardEvent(
+          'keydown',
+          web.KeyboardEventInit(key: 'Tab', bubbles: true, cancelable: true),
+        );
+        web.window.dispatchEvent(event);
+
+        expect(event.defaultPrevented, isTrue);
+        expect(
+          web.document.activeElement,
+          same(deleteButton),
+          reason:
+              'The browser-focus bridge button and semantics-overlay copy share '
+              'one logical workspace action, so Tab should advance directly to '
+              'the next distinct control.',
         );
       },
     );

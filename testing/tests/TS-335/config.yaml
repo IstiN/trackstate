@@ -1,8 +1,8 @@
 test_id: TS-335
-type: ui
-framework: flutter_test
-platform: widget
+type: web
+framework: playwright
+platform: chrome
 dependencies: []
 notes:
-  - Verifies that opening Create issue on a 390x844 viewport renders the form as a true full-screen mobile surface.
-  - Confirms the rendered surface starts at the viewport origin with no side or bottom inset regression.
+  - Verifies the deployed hosted Create issue flow at a real 390x844 browser viewport.
+  - Confirms the Create issue dialog fills the viewport from origin (0,0) with no side or bottom inset.

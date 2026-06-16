@@ -448,6 +448,7 @@ class WorkspaceSwitcherInteractiveTextObservation:
     label: str
     visible_text: str
     role: str | None
+    disabled: bool
     foreground_color: str | None
     background_color: str | None
     contrast_ratio: float | None
@@ -486,6 +487,69 @@ def _merge_surface_payload_items(
     return merged
 
 
+def _surface_payload_item_label(item: dict[str, object]) -> str:
+    for key in ("label", "accessibleLabel", "visibleText"):
+        value = str(item.get(key, "")).strip()
+        if value:
+            return value
+    return ""
+
+
+def _surface_payload_bounds_match(
+    left: dict[str, object],
+    right: dict[str, object],
+) -> bool:
+    return (
+        abs(float(left.get("x", 0.0)) - float(right.get("x", 0.0))) < 1
+        and abs(float(left.get("y", 0.0)) - float(right.get("y", 0.0))) < 1
+        and abs(float(left.get("width", 0.0)) - float(right.get("width", 0.0))) < 1
+        and abs(float(left.get("height", 0.0)) - float(right.get("height", 0.0))) < 1
+    )
+
+
+def _resolve_missing_interactive_labels(
+    *,
+    primary_items: list[dict[str, object]],
+    merged_items: list[dict[str, object]],
+    semantics_nodes: list[dict[str, object]],
+) -> tuple[str, ...]:
+    missing: list[str] = []
+    for index, item in enumerate(primary_items):
+        if _surface_payload_item_label(item):
+            continue
+        if _surface_payload_has_labeled_overlap(
+            item=item,
+            merged_items=merged_items,
+            semantics_nodes=semantics_nodes,
+        ):
+            continue
+        tag_name = str(item.get("tagName", "")).strip() or "<unknown>"
+        role = str(item.get("role", "")).strip() or "<none>"
+        missing.append(f"{tag_name}[{index}] role={role}")
+    return tuple(missing)
+
+
+def _surface_payload_has_labeled_overlap(
+    *,
+    item: dict[str, object],
+    merged_items: list[dict[str, object]],
+    semantics_nodes: list[dict[str, object]],
+) -> bool:
+    for candidate in merged_items:
+        if candidate is item:
+            continue
+        if not _surface_payload_item_label(candidate):
+            continue
+        if _surface_payload_bounds_match(item, candidate):
+            return True
+    for candidate in semantics_nodes:
+        if not _surface_payload_item_label(candidate):
+            continue
+        if _surface_payload_bounds_match(item, candidate):
+            return True
+    return False
+
+
 def _surface_payload_items_match(
     left: dict[str, object],
     right: dict[str, object],
@@ -502,12 +566,7 @@ def _surface_payload_items_match(
     right_role = str(right.get("role", "")).strip()
     if left_role != right_role:
         return False
-    return (
-        abs(float(left.get("x", 0.0)) - float(right.get("x", 0.0))) < 1
-        and abs(float(left.get("y", 0.0)) - float(right.get("y", 0.0))) < 1
-        and abs(float(left.get("width", 0.0)) - float(right.get("width", 0.0))) < 1
-        and abs(float(left.get("height", 0.0)) - float(right.get("height", 0.0))) < 1
-    )
+    return _surface_payload_bounds_match(left, right)
 
 
 @dataclass(frozen=True)
@@ -5147,6 +5206,12 @@ class LiveWorkspaceSwitcherPage:
                 );
               const visibleTextFor = (element) =>
                 normalize(element.innerText || element.textContent || '');
+              const isDisabled = (element) => {
+                const ariaDisabled = normalize(element.getAttribute?.('aria-disabled')).toLowerCase();
+                return ariaDisabled === 'true'
+                  || element.hasAttribute?.('disabled')
+                  || element.disabled === true;
+              };
               const rectPayload = (element) => {
                 const rect = element.getBoundingClientRect();
                 return {
@@ -5176,7 +5241,6 @@ class LiveWorkspaceSwitcherPage:
                   || text.includes('Add workspace')
                   || isWorkspaceRow(text)
                   || text.includes('Hosted Local')
-                  || (text.includes('Repository') && text.includes('Branch'))
                 );
               const visibleDialogs = Array.from(
                 document.querySelectorAll('flt-semantics[role="dialog"],[role="dialog"]'),
@@ -5204,20 +5268,38 @@ class LiveWorkspaceSwitcherPage:
                     || isWorkspaceSwitcherSurfaceText(candidate.text)
                   )
                   .sort((left, right) => left.area - right.area);
+                const matchingAncestors = [];
                 for (const headingCandidate of headings) {
                   let current = headingCandidate.element;
                   while (current && current !== document.body) {
                     const text = normalize(current.innerText || current.textContent || '');
                     if (isWorkspaceSwitcherSurfaceText(text)) {
-                      switcher = current;
-                      break;
+                      const rect = current.getBoundingClientRect();
+                      matchingAncestors.push({
+                        element: current,
+                        area: rect.width * rect.height,
+                        width: rect.width,
+                        height: rect.height,
+                        text,
+                      });
                     }
                     current = current.parentElement;
                   }
-                  if (switcher) {
-                    break;
-                  }
                 }
+                matchingAncestors.sort((left, right) => left.area - right.area);
+                switcher = matchingAncestors.find((candidate) =>
+                  candidate.text.startsWith('Workspace switcher')
+                  && candidate.text.includes('Saved workspaces')
+                  && candidate.text.includes('Add workspace')
+                )?.element ?? matchingAncestors.find((candidate) =>
+                  candidate.text.includes('Workspace switcher')
+                  && (
+                    candidate.text.includes('Saved workspaces')
+                    || candidate.text.includes('Add workspace')
+                  )
+                  && candidate.width < window.innerWidth * 0.92
+                  && candidate.height < window.innerHeight * 0.95
+                )?.element ?? matchingAncestors[0]?.element ?? null;
               }
               if (!switcher) {
                 return null;
@@ -5341,6 +5423,7 @@ class LiveWorkspaceSwitcherPage:
                     label,
                     visibleText,
                     role: element.getAttribute('role'),
+                    disabled: isDisabled(element),
                     foregroundColor,
                     backgroundColor,
                     contrastRatio: contrastRatio(foregroundColor, backgroundColor),
@@ -5364,6 +5447,7 @@ class LiveWorkspaceSwitcherPage:
                     label,
                     visibleText: label,
                     role: element.getAttribute('role'),
+                    disabled: isDisabled(element),
                     foregroundColor,
                     backgroundColor,
                     contrastRatio: contrastRatio(foregroundColor, backgroundColor),
@@ -5401,6 +5485,7 @@ class LiveWorkspaceSwitcherPage:
                     label,
                     visibleText,
                     role: element.getAttribute('role'),
+                    disabled: isDisabled(element),
                     foregroundColor,
                     backgroundColor,
                     contrastRatio: contrastRatio(foregroundColor, backgroundColor),
@@ -5448,11 +5533,12 @@ class LiveWorkspaceSwitcherPage:
                 const { element, label } = candidate;
                 const backgroundColor = resolveBackgroundColor(element, dialogBackground);
                 const style = window.getComputedStyle(element);
+                const foregroundColor = resolveForegroundColor(element) ?? toHex(style.color);
                 return {
                   label,
-                  foregroundColor: toHex(style.color),
+                  foregroundColor,
                   backgroundColor,
-                  contrastRatio: contrastRatio(style.color, backgroundColor),
+                  contrastRatio: contrastRatio(foregroundColor, backgroundColor),
                   ...rectPayload(element),
                 };
               });
@@ -5559,6 +5645,12 @@ class LiveWorkspaceSwitcherPage:
             list(payload.get("interactiveTexts", [])),
             list(payload.get("panelScopedControlTexts", [])),
         )
+        semantics_nodes_payload = list(payload.get("semanticsNodes", []))
+        missing_interactive_labels = _resolve_missing_interactive_labels(
+            primary_items=list(payload.get("interactiveElements", [])),
+            merged_items=interactive_elements_payload,
+            semantics_nodes=semantics_nodes_payload,
+        )
         return WorkspaceSwitcherSurfaceObservation(
             body_text=str(payload.get("bodyText", "")),
             dialog_visible=bool(payload.get("dialogVisible")),
@@ -5587,11 +5679,9 @@ class LiveWorkspaceSwitcherPage:
                     width=float(item.get("width", 0.0)),
                     height=float(item.get("height", 0.0)),
                 )
-                for item in payload.get("semanticsNodes", [])
+                for item in semantics_nodes_payload
             ),
-            missing_interactive_labels=tuple(
-                str(item) for item in payload.get("missingInteractiveLabels", [])
-            ),
+            missing_interactive_labels=missing_interactive_labels,
             missing_semantics_labels=tuple(
                 str(item) for item in payload.get("missingSemanticsLabels", [])
             ),
@@ -5650,6 +5740,7 @@ class LiveWorkspaceSwitcherPage:
                     label=str(item.get("label", "")),
                     visible_text=str(item.get("visibleText", "")),
                     role=str(item.get("role")) if item.get("role") is not None else None,
+                    disabled=bool(item.get("disabled")),
                     foreground_color=(
                         str(item.get("foregroundColor"))
                         if item.get("foregroundColor") is not None
@@ -5681,6 +5772,13 @@ class LiveWorkspaceSwitcherPage:
     ) -> WorkspaceSwitcherObservation:
         self._click_trigger(timeout_ms=timeout_ms)
         return self.observe_open_switcher(timeout_ms=timeout_ms)
+
+    def observe_saved_workspace_rows(
+        self,
+        *,
+        timeout_ms: int = 60_000,
+    ) -> tuple[WorkspaceSwitcherSavedWorkspaceRowObservation, ...]:
+        return self._accessible_saved_workspace_rows(timeout_ms=timeout_ms)
 
     def switch_to_workspace(
         self,
@@ -8944,7 +9042,6 @@ class LiveWorkspaceSwitcherPage:
                       || text.includes('Add workspace')
                       || isWorkspaceRow(text)
                       || text.includes('Hosted Local')
-                      || (text.includes('Repository') && text.includes('Branch'))
                     );
                   const visibleDialogs = Array.from(
                     document.querySelectorAll('flt-semantics[role="dialog"],[role="dialog"]'),

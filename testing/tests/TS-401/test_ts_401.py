@@ -5,6 +5,7 @@ import os
 import re
 import sys
 import traceback
+from datetime import datetime, timezone
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -45,7 +46,15 @@ KNOWN_PRIORITY_LABELS = (
     "High",
     "Low",
 )
-PREFERRED_ISSUE_KEYS = ("DEMO-3994", "DEMO-3995", "DEMO-3996", "DEMO-3997", "DEMO-5")
+PREFERRED_ISSUE_KEYS = (
+    "DEMO-3993",
+    "DEMO-3992",
+    "DEMO-3994",
+    "DEMO-3995",
+    "DEMO-3996",
+    "DEMO-3997",
+    "DEMO-5",
+)
 NON_EPIC_ISSUE_TYPES = {"story", "task", "bug", "sub-task", "subtask"}
 MAX_SETUP_TRANSITIONS = 3
 
@@ -75,9 +84,18 @@ def main() -> None:
     }
 
     try:
+        pre_reset_fixture = _reset_live_issue_fixture_for_fresh_edit(
+            service=service,
+            visible_issue_keys=PREFERRED_ISSUE_KEYS,
+        )
+        result["pre_reset_issue_key"] = pre_reset_fixture.key
+        result["pre_reset_issue_path"] = pre_reset_fixture.path
+
         with create_live_tracker_app_with_stored_token(
             config,
             token=token,
+            viewport_width=2200,
+            viewport_height=1100,
         ) as tracker_page:
             page = LiveMultiViewRefreshPage(tracker_page)
             try:
@@ -121,17 +139,82 @@ def main() -> None:
                     }
                     for issue in visible_board_issues
                 ]
-                issue_fixture = _select_issue_fixture(
-                    service=service,
-                    visible_issue_keys=tuple(issue.key for issue in visible_board_issues),
-                )
+                try:
+                    issue_fixture = _select_issue_fixture(
+                        service=service,
+                        visible_issue_keys=tuple(issue.key for issue in visible_board_issues),
+                    )
+                except AssertionError as exhausted_error:
+                    result["initial_fixture_selection_error"] = str(exhausted_error)
+                    reset_fixture = _reset_live_issue_fixture_for_fresh_edit(
+                        service=service,
+                        visible_issue_keys=tuple(issue.key for issue in visible_board_issues),
+                    )
+                    result["reset_issue_key"] = reset_fixture.key
+                    result["reset_issue_path"] = reset_fixture.path
+
+                    runtime = tracker_page.open()
+                    result["runtime_state_after_fixture_reset"] = runtime.kind
+                    result["runtime_body_text_after_fixture_reset"] = runtime.body_text
+                    if runtime.kind != "ready":
+                        raise AssertionError(
+                            "Step 1 failed: the deployed app did not reload after TS-401 "
+                            "reset its live fixture.\n"
+                            f"Observed body text:\n{runtime.body_text}",
+                        )
+                    page.ensure_connected(
+                        token=token,
+                        repository=service.repository,
+                        user_login=user.login,
+                    )
+                    page.dismiss_connection_banner()
+                    visible_board_issues = page.visible_board_issues()
+                    result["visible_board_issues_after_fixture_reset"] = [
+                        {
+                            "key": issue.key,
+                            "summary": issue.summary,
+                            "label": issue.label,
+                        }
+                        for issue in visible_board_issues
+                    ]
+                    issue_fixture = _select_issue_fixture(
+                        service=service,
+                        visible_issue_keys=tuple(issue.key for issue in visible_board_issues),
+                    )
                 result["issue_key"] = issue_fixture.key
                 result["issue_summary"] = issue_fixture.summary
 
-                dialog_text = page.open_edit_dialog_for_issue(
-                    issue_key=issue_fixture.key,
-                    issue_summary=issue_fixture.summary,
-                )
+                try:
+                    dialog_text = page.open_edit_dialog_from_board_card(
+                        issue_key=issue_fixture.key,
+                        issue_summary=issue_fixture.summary,
+                    )
+                except Exception as board_open_error:
+                    result["board_card_edit_open_error"] = (
+                        f"{type(board_open_error).__name__}: {board_open_error}"
+                    )
+                    try:
+                        page.close_edit_dialog()
+                    except Exception as close_error:
+                        result["board_card_edit_close_error"] = (
+                            f"{type(close_error).__name__}: {close_error}"
+                        )
+                    search_page = LiveJqlSearchPage(tracker_page)
+                    fallback_search = search_page.search(query=issue_fixture.key)
+                    result["board_card_edit_fallback_search"] = {
+                        "query": fallback_search.query,
+                        "visible_query": fallback_search.visible_query,
+                        "count_summary": fallback_search.count_summary,
+                        "issue_result_labels": list(fallback_search.issue_labels),
+                        "body_text": fallback_search.body_text,
+                    }
+                    page.open_issue_from_current_section(
+                        issue_key=issue_fixture.key,
+                        issue_summary=issue_fixture.summary,
+                    )
+                    dialog_text = page.open_edit_dialog_from_current_issue_detail(
+                        issue_key=issue_fixture.key,
+                    )
                 result["edit_dialog_text"] = dialog_text
                 initial_status_control = page.status_control()
                 initial_priority_control = page.priority_control()
@@ -172,7 +255,9 @@ def main() -> None:
                 current_status = initial_status
                 current_priority = initial_priority
 
-                available_status_transitions = page.available_status_transitions()
+                available_status_transitions = _workflow_transitions(
+                    page.available_status_transitions(),
+                )
                 result["available_status_transitions_before_edit"] = list(
                     available_status_transitions,
                 )
@@ -186,12 +271,11 @@ def main() -> None:
                 )
                 if setup_transitions:
                     current_status = setup_transitions[-1]["to_status"]
-                    dialog_text = page.open_edit_dialog_for_issue(
-                        issue_key=issue_fixture.key,
-                        issue_summary=issue_fixture.summary,
-                    )
+                    dialog_text = page.current_body_text()
                     result["edit_dialog_text_after_setup"] = dialog_text
-                    available_status_transitions = page.available_status_transitions()
+                    available_status_transitions = _workflow_transitions(
+                        page.available_status_transitions(),
+                    )
                     result["available_status_transitions_after_setup"] = list(
                         available_status_transitions,
                     )
@@ -238,6 +322,36 @@ def main() -> None:
                 )
 
                 post_save_failures: list[str] = []
+
+                search_page = LiveJqlSearchPage(tracker_page)
+                post_save_search_observation = search_page.search(query=issue_fixture.key)
+                result["post_save_jql_search_observation"] = {
+                    "query": post_save_search_observation.query,
+                    "visible_query": post_save_search_observation.visible_query,
+                    "count_summary": post_save_search_observation.count_summary,
+                    "issue_result_labels": list(post_save_search_observation.issue_labels),
+                    "body_text": post_save_search_observation.body_text,
+                }
+                if (
+                    post_save_search_observation.count_summary != "1 issue"
+                    or (
+                        f"Open {issue_fixture.key} "
+                        f"{_normalized_issue_summary(issue_fixture.summary)}"
+                    )
+                    not in post_save_search_observation.issue_labels
+                ):
+                    raise AssertionError(
+                        "Step 7 precondition failed: JQL Search did not visibly refresh down "
+                        f"to the edited {issue_fixture.key} issue after saving.\n"
+                        f"Observed count summary: {post_save_search_observation.count_summary}\n"
+                        "Observed result labels: "
+                        f"{list(post_save_search_observation.issue_labels)}\n"
+                        f"Observed JQL Search text:\n{post_save_search_observation.body_text}",
+                    )
+                page.open_issue_from_current_section(
+                    issue_key=issue_fixture.key,
+                    issue_summary=issue_fixture.summary,
+                )
 
                 try:
                     detail_projection_text = page.wait_for_issue_detail_state(
@@ -328,7 +442,6 @@ def main() -> None:
                     )
 
                 try:
-                    search_page = LiveJqlSearchPage(tracker_page)
                     search_observation = search_page.search(query=issue_fixture.key)
                     result["jql_search_observation"] = {
                         "query": search_observation.query,
@@ -433,6 +546,7 @@ def _select_issue_fixture(
         and fixture.status.lower() != "done"
         and fixture.priority.lower() != "highest"
         and fixture.key in visible_issue_key_set
+        and (fixture.path.count("/") > 1 or fixture.key == "DEMO-5")
     ]
     for issue_key in PREFERRED_ISSUE_KEYS:
         preferred = next((fixture for fixture in candidates if fixture.key == issue_key), None)
@@ -445,6 +559,74 @@ def _select_issue_fixture(
         "issue that still requires a fresh Highest/Done edit for TS-401.\n"
         f"Visible Board issue keys: {sorted(visible_issue_key_set)}",
     )
+
+
+def _reset_live_issue_fixture_for_fresh_edit(
+    *,
+    service: LiveSetupRepositoryService,
+    visible_issue_keys: tuple[str, ...],
+) -> LiveHostedIssueFixture:
+    visible_issue_key_set = set(visible_issue_keys)
+    fixtures = [
+        service.fetch_issue_fixture(path)
+        for path in service.list_issue_paths("DEMO")
+    ]
+    reset_candidates = [
+        fixture
+        for fixture in fixtures
+        if fixture.issue_type.lower() in NON_EPIC_ISSUE_TYPES
+        and fixture.key in visible_issue_key_set
+        and (fixture.path.count("/") > 1 or fixture.key == "DEMO-5")
+    ]
+    target = None
+    for issue_key in PREFERRED_ISSUE_KEYS:
+        target = next((fixture for fixture in reset_candidates if fixture.key == issue_key), None)
+        if target is not None:
+            break
+    if target is None and reset_candidates:
+        target = reset_candidates[0]
+    if target is None:
+        raise AssertionError(
+            "Precondition failed: TS-401 could not find a visible non-epic issue to reset "
+            "for a fresh live edit scenario.\n"
+            f"Visible Board issue keys: {sorted(visible_issue_key_set)}",
+        )
+
+    main_path = f"{target.path}/main.md"
+    main_markdown = service.fetch_repo_text(main_path)
+    reset_markdown = _replace_front_matter_value(
+        _replace_front_matter_value(
+            _replace_front_matter_value(
+                _replace_front_matter_value(
+                    main_markdown,
+                    key="status",
+                    value="in-review",
+                ),
+                key="priority",
+                value="medium",
+            ),
+            key="resolution",
+            value="null",
+        ),
+        key="updated",
+        value=json.dumps(datetime.now(timezone.utc).isoformat(timespec="milliseconds")),
+    )
+    service.write_repo_text(
+        main_path,
+        content=reset_markdown,
+        message=f"TS-401 reset {target.key} live edit fixture",
+    )
+    return service.fetch_issue_fixture(target.path)
+
+
+def _replace_front_matter_value(markdown: str, *, key: str, value: str) -> str:
+    pattern = re.compile(rf"^({re.escape(key)}:\s*).*$", flags=re.MULTILINE)
+    updated, count = pattern.subn(rf"\g<1>{value}", markdown, count=1)
+    if count == 0:
+        raise AssertionError(
+            f"Precondition failed: TS-401 could not reset front matter field {key!r}.",
+        )
+    return updated
 
 
 def _stage_issue_until_done_is_available(
@@ -516,9 +698,14 @@ def _stage_issue_until_done_is_available(
             issue_summary=issue_fixture.summary,
         )
         result["latest_setup_dialog_text"] = dialog_text
-        transitions = page.available_status_transitions()
+        transitions = _workflow_transitions(page.available_status_transitions())
 
     return setup_transitions
+
+
+def _workflow_transitions(options: tuple[str, ...]) -> tuple[str, ...]:
+    known = set(KNOWN_STATUS_LABELS)
+    return tuple(option for option in options if option in known)
 
 
 def _normalized_issue_summary(issue_summary: str) -> str:

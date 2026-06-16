@@ -23,8 +23,6 @@ class PythonHostedTrackStateSessionCliFramework(HostedTrackStateSessionCliProbe)
         branch: str = "main",
         provider: str = "github",
     ) -> CliCommandResult:
-        command = self._resolve_command()
-
         token = (
             os.environ.get("TRACKSTATE_TOKEN")
             or os.environ.get("GH_TOKEN")
@@ -36,19 +34,19 @@ class PythonHostedTrackStateSessionCliFramework(HostedTrackStateSessionCliProbe)
         if token:
             env.setdefault("TRACKSTATE_TOKEN", token)
 
+        command_suffix = (
+            "session",
+            "--target",
+            "hosted",
+            "--provider",
+            provider,
+            "--repository",
+            repository,
+            "--branch",
+            branch,
+        )
         completed = subprocess.run(
-            command
-            + (
-                "session",
-                "--target",
-                "hosted",
-                "--provider",
-                provider,
-                "--repository",
-                repository,
-                "--branch",
-                branch,
-            ),
+            self._resolve_command() + command_suffix,
             cwd=self._repository_root,
             env=env,
             capture_output=True,
@@ -77,5 +75,5 @@ class PythonHostedTrackStateSessionCliFramework(HostedTrackStateSessionCliProbe)
 
         raise AssertionError(
             "Precondition failed: TS-409 requires the installed `trackstate` CLI "
-            "to be available on PATH for the hosted session parity check."
+            "on PATH so Step 5 validates the packaged `trackstate session` surface."
         )

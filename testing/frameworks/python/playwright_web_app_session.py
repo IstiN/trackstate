@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import AbstractContextManager
 from datetime import datetime, timezone
 import json
+import tempfile
 from typing import Any, Sequence
 
 try:
@@ -34,6 +35,12 @@ from testing.core.interfaces.web_app_session import (
     WebAppSession,
     WebAppTimeoutError,
 )
+
+_CHROMIUM_FOREGROUND_TIMING_ARGS = [
+    "--disable-background-timer-throttling",
+    "--disable-renderer-backgrounding",
+    "--disable-backgrounding-occluded-windows",
+]
 
 
 class PlaywrightWebAppSession(WebAppSession):
@@ -567,6 +574,29 @@ class PlaywrightWebAppSession(WebAppSession):
             ) from error
         return download.suggested_filename
 
+    def save_download_after_keypress(
+        self,
+        key: str,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> str:
+        try:
+            with self._page.expect_download(timeout=timeout_ms) as download_info:
+                self._page.keyboard.press(key)
+            download = download_info.value
+            destination = tempfile.NamedTemporaryFile(
+                prefix="trackstate-download-",
+                suffix=f"-{download.suggested_filename}",
+                delete=False,
+            )
+            destination.close()
+            download.save_as(destination.name)
+            return destination.name
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                f'Timed out waiting for a saved download after pressing "{key}".',
+            ) from error
+
     def wait_for_download_after_click(
         self,
         selector: str,
@@ -586,6 +616,33 @@ class PlaywrightWebAppSession(WebAppSession):
                 f'Timed out waiting for a download after clicking selector "{selector}".',
             ) from error
         return download.suggested_filename
+
+    def save_download_after_click(
+        self,
+        selector: str,
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> str:
+        try:
+            locator = self._locator(selector, has_text=has_text, index=index)
+            locator.wait_for(state="visible", timeout=timeout_ms)
+            with self._page.expect_download(timeout=timeout_ms) as download_info:
+                locator.click(timeout=timeout_ms)
+            download = download_info.value
+            destination = tempfile.NamedTemporaryFile(
+                prefix="trackstate-download-",
+                suffix=f"-{download.suggested_filename}",
+                delete=False,
+            )
+            destination.close()
+            download.save_as(destination.name)
+            return destination.name
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                f'Timed out waiting for a saved download after clicking selector "{selector}".',
+            ) from error
 
     def wait_for_new_page_after_keypress(
         self,
@@ -929,16 +986,31 @@ class PlaywrightWebAppSession(WebAppSession):
 
 
 class PlaywrightWebAppRuntime(AbstractContextManager[PlaywrightWebAppSession]):
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        viewport_width: int = 1440,
+        viewport_height: int = 960,
+    ) -> None:
         self._playwright = None
         self._browser: Browser | None = None
         self._context: BrowserContext | None = None
         self._page: Page | None = None
+        self._viewport_width = viewport_width
+        self._viewport_height = viewport_height
 
     def __enter__(self) -> PlaywrightWebAppSession:
         self._playwright = sync_playwright().start()
-        self._browser = self._playwright.chromium.launch(headless=True)
-        self._context = self._browser.new_context(viewport={"width": 1440, "height": 960})
+        self._browser = self._playwright.chromium.launch(
+            headless=True,
+            args=_CHROMIUM_FOREGROUND_TIMING_ARGS,
+        )
+        self._context = self._browser.new_context(
+            viewport={
+                "width": self._viewport_width,
+                "height": self._viewport_height,
+            },
+        )
         self._page = self._context.new_page()
         return PlaywrightWebAppSession(self._page)
 
@@ -955,18 +1027,35 @@ class PlaywrightWebAppRuntime(AbstractContextManager[PlaywrightWebAppSession]):
 class PlaywrightStoredTokenWebAppRuntime(
     AbstractContextManager[PlaywrightWebAppSession],
 ):
-    def __init__(self, *, repository: str, token: str) -> None:
+    def __init__(
+        self,
+        *,
+        repository: str,
+        token: str,
+        viewport_width: int = 1440,
+        viewport_height: int = 960,
+    ) -> None:
         self._repository = repository
         self._token = token
         self._playwright = None
         self._browser: Browser | None = None
         self._context: BrowserContext | None = None
         self._page: Page | None = None
+        self._viewport_width = viewport_width
+        self._viewport_height = viewport_height
 
     def __enter__(self) -> PlaywrightWebAppSession:
         self._playwright = sync_playwright().start()
-        self._browser = self._playwright.chromium.launch(headless=True)
-        self._context = self._browser.new_context(viewport={"width": 1440, "height": 960})
+        self._browser = self._playwright.chromium.launch(
+            headless=True,
+            args=_CHROMIUM_FOREGROUND_TIMING_ARGS,
+        )
+        self._context = self._browser.new_context(
+            viewport={
+                "width": self._viewport_width,
+                "height": self._viewport_height,
+            },
+        )
         self._context.route("https://api.github.com/**", self._handle_github_api_route)
         storage_keys = tuple(
             sorted(

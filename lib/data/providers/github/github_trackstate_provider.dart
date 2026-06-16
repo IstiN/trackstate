@@ -245,7 +245,11 @@ class GitHubTrackStateProvider
     final json =
         await _getGitHubJson(
               '/repos/$repositoryName/git/trees/$ref',
-              queryParameters: {'recursive': '1'},
+              queryParameters: _hostedRepositoryReadQueryParameters(
+                const {'recursive': '1'},
+                disableCache: _disableHostedSyncRequestCaching,
+                cacheBustTokenFactory: _hostedSyncCacheBustTokenFactory,
+              ),
             )
             as Map<String, Object?>;
     final tree = json['tree'];
@@ -274,7 +278,11 @@ class GitHubTrackStateProvider
     final json =
         await _getGitHubJson(
               '/repos/$repositoryName/contents/$path',
-              queryParameters: {'ref': ref},
+              queryParameters: _hostedRepositoryReadQueryParameters(
+                {'ref': ref},
+                disableCache: _disableHostedSyncRequestCaching,
+                cacheBustTokenFactory: _hostedSyncCacheBustTokenFactory,
+              ),
             )
             as Map<String, Object?>;
     final encoded = json['content']?.toString().replaceAll('\n', '');
@@ -344,35 +352,54 @@ class GitHubTrackStateProvider
   ) async {
     validateRepositoryTextWrite(request);
     final connection = _requireConnection();
-    final response = await _http.put(
-      _githubUri('/repos/${connection.repository}/contents/${request.path}'),
-      headers: {
-        ..._githubHeaders(connection.token),
-        'content-type': 'application/json; charset=utf-8',
-      },
-      body: jsonEncode({
-        'message': request.message,
-        'content': base64Encode(utf8.encode(request.content)),
-        'sha': request.expectedRevision,
-        'branch': request.branch,
-      }),
-    );
-    if (response.statusCode != 200 && response.statusCode != 201) {
+    var expectedRevision = request.expectedRevision;
+    const maxAttempts = 3;
+    for (var attempt = 0; attempt < maxAttempts; attempt++) {
+      final response = await _http.put(
+        _githubUri('/repos/${connection.repository}/contents/${request.path}'),
+        headers: {
+          ..._githubHeaders(connection.token),
+          'content-type': 'application/json; charset=utf-8',
+        },
+        body: jsonEncode({
+          'message': request.message,
+          'content': base64Encode(utf8.encode(request.content)),
+          'sha': expectedRevision,
+          'branch': request.branch,
+        }),
+      );
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        final json = jsonDecode(response.body) as Map<String, Object?>;
+        final content = json['content'];
+        final revision = content is Map<String, Object?>
+            ? content['sha']?.toString()
+            : expectedRevision;
+        return RepositoryWriteResult(
+          path: request.path,
+          branch: request.branch,
+          revision: revision,
+        );
+      }
+      if (response.statusCode == 409 && attempt < maxAttempts - 1) {
+        await Future.delayed(const Duration(milliseconds: 500));
+        try {
+          final current = await readTextFile(request.path, ref: request.branch);
+          expectedRevision = current.revision;
+        } catch (_) {
+          // Ignore read failures during retry.
+        }
+        continue;
+      }
       _throwGitHubResponseException(
         path: '/repos/${connection.repository}/contents/${request.path}',
         response: response,
         prefix: 'Could not save ${request.path}',
       );
     }
-    final json = jsonDecode(response.body) as Map<String, Object?>;
-    final content = json['content'];
-    final revision = content is Map<String, Object?>
-        ? content['sha']?.toString()
-        : request.expectedRevision;
-    return RepositoryWriteResult(
-      path: request.path,
-      branch: request.branch,
-      revision: revision,
+    _throwGitHubResponseException(
+      path: '/repos/${connection.repository}/contents/${request.path}',
+      response: http.Response('Max attempts exceeded', 500),
+      prefix: 'Could not save ${request.path}',
     );
   }
 
@@ -559,7 +586,11 @@ class GitHubTrackStateProvider
     final json =
         await _getGitHubJson(
               '/repos/$repositoryName/contents/$path',
-              queryParameters: {'ref': ref},
+              queryParameters: _hostedRepositoryReadQueryParameters(
+                {'ref': ref},
+                disableCache: _disableHostedSyncRequestCaching,
+                cacheBustTokenFactory: _hostedSyncCacheBustTokenFactory,
+              ),
             )
             as Map<String, Object?>;
     final encoded = json['content']?.toString().replaceAll('\n', '');
@@ -774,39 +805,60 @@ class GitHubTrackStateProvider
     RepositoryAttachmentWriteRequest request,
   ) async {
     final connection = _requireConnection();
-    if (await _isLfsTracked(request.path, ref: request.branch)) {
+    final lfsTracked = await _isLfsTracked(request.path, ref: request.branch);
+    if (lfsTracked && !request.allowLfsTrackedWrite) {
       throw TrackStateProviderException(
         'GitHub LFS attachment uploads are not yet implemented for '
         '${request.path}.',
       );
     }
-    final response = await _http.put(
-      _githubUri('/repos/${connection.repository}/contents/${request.path}'),
-      headers: {
-        ..._githubHeaders(connection.token),
-        'content-type': 'application/json; charset=utf-8',
-      },
-      body: jsonEncode({
-        'message': request.message,
-        'content': base64Encode(request.bytes),
-        'sha': request.expectedRevision,
-        'branch': request.branch,
-      }),
-    );
-    if (response.statusCode != 200 && response.statusCode != 201) {
+    var expectedRevision = request.expectedRevision;
+    const maxAttempts = 3;
+    for (var attempt = 0; attempt < maxAttempts; attempt++) {
+      final response = await _http.put(
+        _githubUri('/repos/${connection.repository}/contents/${request.path}'),
+        headers: {
+          ..._githubHeaders(connection.token),
+          'content-type': 'application/json; charset=utf-8',
+        },
+        body: jsonEncode({
+          'message': request.message,
+          'content': base64Encode(request.bytes),
+          'sha': expectedRevision,
+          'branch': request.branch,
+        }),
+      );
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        final json = jsonDecode(response.body) as Map<String, Object?>;
+        final content = json['content'];
+        final revision = content is Map<String, Object?>
+            ? content['sha']?.toString()
+            : expectedRevision;
+        return RepositoryAttachmentWriteResult(
+          path: request.path,
+          branch: request.branch,
+          revision: revision,
+        );
+      }
+      if (response.statusCode == 409 && attempt < maxAttempts - 1) {
+        await Future.delayed(const Duration(milliseconds: 500));
+        try {
+          final current = await readAttachment(
+            request.path,
+            ref: request.branch,
+          );
+          expectedRevision = current.revision;
+        } catch (_) {
+          // Ignore read failures during retry.
+        }
+        continue;
+      }
       throw TrackStateProviderException(
         'Could not save attachment ${request.path} (${response.statusCode}): ${response.body}',
       );
     }
-    final json = jsonDecode(response.body) as Map<String, Object?>;
-    final content = json['content'];
-    final revision = content is Map<String, Object?>
-        ? content['sha']?.toString()
-        : request.expectedRevision;
-    return RepositoryAttachmentWriteResult(
-      path: request.path,
-      branch: request.branch,
-      revision: revision,
+    throw TrackStateProviderException(
+      'Could not save attachment ${request.path}: max attempts exceeded',
     );
   }
 
@@ -1489,7 +1541,14 @@ class GitHubTrackStateProvider
     required String ref,
   }) async {
     final response = await _http.get(
-      _githubUri('/repos/$repository/contents/$path', {'ref': ref}),
+      _githubUri(
+        '/repos/$repository/contents/$path',
+        _hostedRepositoryReadQueryParameters(
+          {'ref': ref},
+          disableCache: _disableHostedSyncRequestCaching,
+          cacheBustTokenFactory: _hostedSyncCacheBustTokenFactory,
+        ),
+      ),
       headers: _githubHeaders(_connection?.token),
     );
     if (response.statusCode == 404) {
@@ -1794,6 +1853,20 @@ Map<String, String>? _hostedSyncRevisionQueryParameters({
     return null;
   }
   return <String, String>{'_trackstate_refresh': cacheBustTokenFactory()};
+}
+
+Map<String, String>? _hostedRepositoryReadQueryParameters(
+  Map<String, String>? queryParameters, {
+  required bool disableCache,
+  required String Function() cacheBustTokenFactory,
+}) {
+  if (!disableCache) {
+    return queryParameters;
+  }
+  return <String, String>{
+    ...?queryParameters,
+    '_trackstate_refresh': cacheBustTokenFactory(),
+  };
 }
 
 String _defaultHostedSyncCacheBustToken() =>

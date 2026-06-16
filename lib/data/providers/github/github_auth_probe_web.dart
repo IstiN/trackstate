@@ -6,17 +6,8 @@ import 'dart:js_interop';
 import 'package:http/http.dart' as http;
 import 'package:web/web.dart' as web;
 
-class GitHubAuthProbeResponse {
-  const GitHubAuthProbeResponse({
-    required this.statusCode,
-    required this.body,
-    this.headers = const <String, String>{},
-  });
-
-  final int statusCode;
-  final String body;
-  final Map<String, String> headers;
-}
+export 'github_auth_probe.dart';
+import 'github_auth_probe.dart';
 
 Future<GitHubAuthProbeResponse> fetchGitHubAuthProbeResponse(
   Uri uri, {
