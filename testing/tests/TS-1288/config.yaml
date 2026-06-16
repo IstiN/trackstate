@@ -1,0 +1,11 @@
+test_id: TS-1288
+type: web
+framework: playwright
+platform: chromium
+dependencies:
+  - Playwright for Python with Chromium installed
+  - GH_TOKEN or GITHUB_TOKEN with access to IstiN/trackstate-setup
+notes:
+  - Opens the deployed TrackState web app in a GitHub-backed hosted session with repository write permissions removed so the live read-only Create issue recovery gate is exercised.
+  - Uses the ticket viewport of 1440x900, opens the top-bar Create issue flow, and scopes assertions to the active create surface instead of unrelated page buttons behind the modal.
+  - Verifies the guided recovery explanation and Open settings CTA remain visible while Summary, Description, Save, and Create controls are removed from the create surface DOM.

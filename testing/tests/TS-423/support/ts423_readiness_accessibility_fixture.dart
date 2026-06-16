@@ -231,7 +231,13 @@ class Ts423ReadinessAccessibilityRepository
     required TrackStateIssue issue,
     required String name,
     required Uint8List bytes,
-  }) => _delegate.uploadIssueAttachment(issue: issue, name: name, bytes: bytes);
+    String? sourceName,
+  }) => _delegate.uploadIssueAttachment(
+    issue: issue,
+    name: name,
+    bytes: bytes,
+    sourceName: sourceName,
+  );
 
   @override
   Future<Uint8List> downloadAttachment(IssueAttachment attachment) =>

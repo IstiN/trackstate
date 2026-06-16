@@ -20,6 +20,12 @@ The automation:
 ## Run this test
 
 ```bash
+mkdir -p outputs && PYTHONPATH=. python3 testing/tests/TS-460/test_ts_460.py
+```
+
+The unittest entrypoint remains available for discovery-based runs:
+
+```bash
 python3 -m unittest discover -s testing/tests/TS-460 -p 'test_*.py' -v
 ```
 

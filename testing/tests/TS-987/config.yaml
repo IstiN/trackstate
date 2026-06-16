@@ -1,0 +1,11 @@
+test_id: TS-987
+type: web
+framework: playwright
+platform: chromium
+dependencies:
+  - Playwright for Python with Chromium installed
+  - GH_TOKEN or GITHUB_TOKEN with access to IstiN/trackstate-setup
+notes:
+  - Opens the deployed TrackState web app with a stored GitHub token and a preloaded broken local workspace as the active startup target plus one hosted fallback workspace.
+  - Uses the ticket viewport of 1440x900 and waits for startup mismatch recovery state propagation before asserting the header sync pill and Workspace switcher row.
+  - Verifies the header exposes the recovery-prioritized sync error state and the saved broken local workspace row renders Unavailable with Retry or Re-authenticate instead of Active.
