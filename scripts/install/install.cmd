@@ -24,6 +24,7 @@ if /I "%~1"=="-Force" (
     set "VERSION=latest"
     set "FORCE_FLAG=-Force"
 )
+if /I "%FORCE_FLAG%"=="--force" set "FORCE_FLAG=-Force"
 
 if /I "%VERSION%"=="latest" (
     set "SCRIPT_URL=https://github.com/__REPO_PLACEHOLDER__/releases/latest/download/install.ps1"
