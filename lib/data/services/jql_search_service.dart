@@ -3,6 +3,9 @@ import '../../domain/models/trackstate_models.dart';
 class JqlSearchService {
   const JqlSearchService();
 
+  bool requiresIssueDetails(String jql) =>
+      _JqlParser().parse(jql).requiresIssueDetails;
+
   TrackStateIssueSearchPage search({
     required List<TrackStateIssue> issues,
     required ProjectConfig project,
@@ -75,6 +78,7 @@ class _JqlParser {
     'issuetype': _SupportedField.issueType,
     'status': _SupportedField.status,
     'priority': _SupportedField.priority,
+    'archived': _SupportedField.archived,
     'assignee': _SupportedField.assignee,
     'labels': _SupportedField.labels,
     'parent': _SupportedField.parent,
@@ -168,13 +172,21 @@ class _JqlParser {
       if (field == _SupportedField.project && !_isQuoted(rawValue)) {
         final parts = rawValue.split(RegExp(r'\s+'));
         if (parts.length > 1) {
+          final trailingValue = parts.skip(1).join(' ');
           return _CompoundJqlClause([
             _ComparisonJqlClause(
               field: field,
               isNegated: equalityMatch.group(2) == '!=',
               value: parts.first,
             ),
-            _TextSearchClause(parts.skip(1).join(' ')),
+            if (_looksLikeIssueKey(trailingValue))
+              _ComparisonJqlClause(
+                field: _SupportedField.key,
+                isNegated: false,
+                value: trailingValue,
+              )
+            else
+              _TextSearchClause(trailingValue),
           ]);
         }
       }
@@ -260,6 +272,9 @@ class _JqlParser {
     final last = value[value.length - 1];
     return (first == '"' && last == '"') || (first == '\'' && last == '\'');
   }
+
+  bool _looksLikeIssueKey(String value) =>
+      RegExp(r'^[A-Za-z][A-Za-z0-9]*-\d+$').hasMatch(value);
 
   List<String> _splitByKeywordOutsideQuotes(String source, String keyword) {
     final segments = <String>[];
@@ -372,6 +387,10 @@ class _ParsedJqlQuery {
   final List<_JqlClause> clauses;
   final List<_OrderByTerm> orderBys;
 
+  bool get requiresIssueDetails =>
+      clauses.any((clause) => clause.requiresIssueDetails) ||
+      orderBys.any((orderBy) => orderBy.requiresIssueDetails);
+
   bool matches(TrackStateIssue issue, ProjectConfig project) {
     for (final clause in clauses) {
       if (!clause.matches(issue, project)) {
@@ -403,6 +422,8 @@ abstract class _JqlClause {
   const _JqlClause();
 
   bool matches(TrackStateIssue issue, ProjectConfig project);
+
+  bool get requiresIssueDetails => false;
 }
 
 class _ComparisonJqlClause extends _JqlClause {
@@ -436,6 +457,7 @@ class _ComparisonJqlClause extends _JqlClause {
         project.priorityDefinitions,
         normalizedValue,
       ),
+      _SupportedField.archived => _matchesArchived(issue, normalizedValue),
       _SupportedField.assignee =>
         issue.assignee.trim().toLowerCase() == normalizedValue,
       _SupportedField.labels => issue.labels.any(
@@ -465,6 +487,20 @@ class _ComparisonJqlClause extends _JqlClause {
       }
     }
     return issueValue.toLowerCase() == candidateValue;
+  }
+
+  bool _matchesArchived(TrackStateIssue issue, String candidateValue) {
+    if (candidateValue == 'true' ||
+        candidateValue == 'yes' ||
+        candidateValue == 'archived') {
+      return issue.isArchived;
+    }
+    if (candidateValue == 'false' ||
+        candidateValue == 'no' ||
+        candidateValue == 'active') {
+      return !issue.isArchived;
+    }
+    return false;
   }
 }
 
@@ -499,6 +535,9 @@ class _TextSearchClause extends _JqlClause {
     final matches = _searchableText(issue).contains(normalizedValue);
     return isNegated ? !matches : matches;
   }
+
+  @override
+  bool get requiresIssueDetails => true;
 }
 
 class _CompoundJqlClause extends _JqlClause {
@@ -515,6 +554,10 @@ class _CompoundJqlClause extends _JqlClause {
     }
     return true;
   }
+
+  @override
+  bool get requiresIssueDetails =>
+      clauses.any((clause) => clause.requiresIssueDetails);
 }
 
 class _OrderByTerm {
@@ -522,6 +565,8 @@ class _OrderByTerm {
 
   final _SupportedField field;
   final bool descending;
+
+  bool get requiresIssueDetails => field == _SupportedField.text;
 
   int compare(
     TrackStateIssue left,
@@ -543,6 +588,10 @@ class _OrderByTerm {
       _SupportedField.priority => _comparePriority(
         left.priority,
         right.priority,
+      ),
+      _SupportedField.archived => _compareBool(
+        left.isArchived,
+        right.isArchived,
       ),
       _SupportedField.assignee => _compareText(left.assignee, right.assignee),
       _SupportedField.labels => _compareText(
@@ -595,6 +644,7 @@ enum _SupportedField {
   issueType,
   status,
   priority,
+  archived,
   assignee,
   labels,
   parent,
@@ -606,6 +656,8 @@ enum _SupportedField {
 
 int _comparePriority(IssuePriority left, IssuePriority right) =>
     _priorityRank(left).compareTo(_priorityRank(right));
+
+int _compareBool(bool left, bool right) => left == right ? 0 : (left ? 1 : -1);
 
 int _priorityRank(IssuePriority priority) => switch (priority) {
   IssuePriority.low => 1,

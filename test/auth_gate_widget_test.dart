@@ -4,7 +4,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/providers/trackstate_provider.dart';
 import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
+import '../testing/components/screens/settings_screen_robot.dart';
 import '../testing/core/fakes/reactive_issue_detail_trackstate_repository.dart';
+
+const String _readOnlyTitle = 'This repository session is read-only';
+const String _readOnlyMessage =
+    'This account can read the repository but cannot push Git-backed changes. Reconnect with a token or account that has repository Contents write access, or switch to a repository where you have that access.';
 
 void main() {
   setUp(() {
@@ -12,7 +17,7 @@ void main() {
   });
 
   testWidgets(
-    'blocked hosted create flow explains how to continue before editing starts',
+    'hosted create flow keeps the create surface gated until write access is connected',
     (tester) async {
       tester.view.physicalSize = const Size(1440, 960);
       tester.view.devicePixelRatio = 1;
@@ -28,26 +33,82 @@ void main() {
         );
         await tester.pumpAndSettle();
 
+        expect(find.text('GitHub write access is not connected'), findsWidgets);
         expect(
-          find.text('GitHub write access is not connected'),
-          findsAtLeastNWidgets(1),
-        );
-        expect(
-          find.textContaining(
-            'Create, edit, comment, and status changes stay read-only',
+          find.text(
+            'Current session flags: canWrite=false, canCreateBranch=false.',
           ),
-          findsAtLeastNWidgets(1),
+          findsWidgets,
         );
+        expect(find.text('Summary'), findsNothing);
+        expect(find.text('Description'), findsNothing);
         expect(
           find.widgetWithText(OutlinedButton, 'Open settings'),
           findsOneWidget,
         );
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      }
+    },
+  );
 
-        await tester.tap(find.widgetWithText(OutlinedButton, 'Open settings'));
+  testWidgets(
+    'read-only hosted create flow Open settings routes to Project Settings with repository access visible',
+    (tester) async {
+      SharedPreferences.setMockInitialValues({
+        'trackstate.githubToken.trackstate.trackstate': 'read-only-token',
+      });
+      const readOnlyPermission = RepositoryPermission(
+        canRead: true,
+        canWrite: false,
+        isAdmin: false,
+        canCreateBranch: false,
+        canManageAttachments: false,
+        canCheckCollaborators: false,
+      );
+      final settingsRobot = SettingsScreenRobot(tester);
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+
+      try {
+        await tester.pumpWidget(
+          TrackStateApp(
+            repository: ReactiveIssueDetailTrackStateRepository(
+              permission: readOnlyPermission,
+            ),
+          ),
+        );
         await tester.pumpAndSettle();
 
-        expect(find.byType(Dialog), findsNothing);
-        expect(find.text('Project Settings'), findsOneWidget);
+        await tester.tap(
+          find.bySemanticsLabel(RegExp('^Create issue\$')).first,
+        );
+        await tester.pumpAndSettle();
+
+        final callout = find.ancestor(
+          of: find.text(_readOnlyTitle, findRichText: true).last,
+          matching: find.byWidgetPredicate((widget) {
+            if (widget is! Semantics) {
+              return false;
+            }
+            final label = widget.properties.label ?? '';
+            return label.contains(_readOnlyTitle) &&
+                label.contains(_readOnlyMessage);
+          }, description: 'read-only create gate callout'),
+        );
+        final openSettings = find.descendant(
+          of: callout,
+          matching: find.widgetWithText(OutlinedButton, 'Open settings'),
+        );
+        expect(openSettings, findsOneWidget);
+        expect(openSettings.hitTestable(), findsOneWidget);
+
+        await tester.tap(openSettings.hitTestable().first);
+        await tester.pumpAndSettle();
+
+        expect(settingsRobot.projectSettingsHeading, findsOneWidget);
+        expect(settingsRobot.repositoryAccessSection, findsOneWidget);
       } finally {
         tester.view.resetPhysicalSize();
         tester.view.resetDevicePixelRatio();
@@ -108,7 +169,7 @@ void main() {
   );
 
   testWidgets(
-    'attachment-restricted hosted flow keeps issue edits available while explaining download-only attachments',
+    'attachment-restricted hosted flow keeps issue edits available while explaining release-backed attachment restrictions',
     (tester) async {
       SharedPreferences.setMockInitialValues({
         'trackstate.githubToken.trackstate.trackstate': 'attachment-token',
@@ -130,6 +191,7 @@ void main() {
           TrackStateApp(
             repository: ReactiveIssueDetailTrackStateRepository(
               permission: attachmentRestrictedPermission,
+              textFixtures: _githubReleasesProjectTextFixtures(),
             ),
           ),
         );
@@ -144,23 +206,23 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(
-          find.text('Attachments stay download-only in the browser'),
+          find.text('GitHub Releases uploads are unavailable in the browser'),
           findsAtLeastNWidgets(1),
         );
         expect(
           find.textContaining(
-            'Issue edits and comments can continue, but attachment upload is unavailable',
+            'Issue edits and comments can continue. For new attachments, use the repository inbox workflow',
           ),
           findsOneWidget,
         );
-        final chooseAttachment = tester.widget<OutlinedButton>(
+        expect(
           find.widgetWithText(OutlinedButton, 'Choose attachment'),
+          findsNothing,
         );
-        final uploadAttachment = tester.widget<FilledButton>(
+        expect(
           find.widgetWithText(FilledButton, 'Upload attachment'),
+          findsNothing,
         );
-        expect(chooseAttachment.onPressed, isNull);
-        expect(uploadAttachment.onPressed, isNull);
 
         final editButton = tester.widget<OutlinedButton>(
           find.widgetWithText(OutlinedButton, 'Edit').first,
@@ -174,7 +236,7 @@ void main() {
   );
 
   testWidgets(
-    'attachment-restricted hosted flow keeps browser-supported uploads enabled when attachment permission is available',
+    'attachment-restricted hosted release-backed flow becomes download-only for no-LFS sessions',
     (tester) async {
       SharedPreferences.setMockInitialValues({
         'trackstate.githubToken.trackstate.trackstate': 'attachment-token',
@@ -196,6 +258,7 @@ void main() {
           TrackStateApp(
             repository: ReactiveIssueDetailTrackStateRepository(
               permission: attachmentRestrictedPermission,
+              textFixtures: _githubReleasesProjectTextFixtures(),
             ),
           ),
         );
@@ -210,28 +273,225 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(
-          find.text('Some attachment uploads still require local Git'),
+          find.text('GitHub Releases uploads are unavailable in the browser'),
           findsAtLeastNWidgets(1),
         );
         expect(
           find.textContaining(
-            'browser-supported attachment uploads can continue here',
+            'This repository session is download-only for Git LFS attachments.',
           ),
           findsOneWidget,
         );
         expect(
-          find.text('Attachments stay download-only in the browser'),
+          find.widgetWithText(OutlinedButton, 'Choose attachment'),
           findsNothing,
         );
-
-        final chooseAttachment = tester.widget<OutlinedButton>(
-          find.widgetWithText(OutlinedButton, 'Choose attachment'),
-        );
-        final uploadAttachment = tester.widget<FilledButton>(
+        expect(
           find.widgetWithText(FilledButton, 'Upload attachment'),
+          findsNothing,
         );
-        expect(chooseAttachment.onPressed, isNotNull);
-        expect(uploadAttachment.onPressed, isNull);
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      }
+    },
+  );
+
+  testWidgets(
+    'settings hosted release-backed callout stays visible while disconnected',
+    (tester) async {
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+
+      try {
+        await tester.pumpWidget(
+          TrackStateApp(
+            repository: ReactiveIssueDetailTrackStateRepository(
+              textFixtures: _githubReleasesProjectTextFixtures(),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.bySemanticsLabel(RegExp('Settings')).first);
+        await tester.pumpAndSettle();
+
+        expect(find.text('GitHub Releases attachment storage'), findsOneWidget);
+        expect(
+          find.text(
+            'New attachments resolve to release tag browser-assets-<ISSUE_KEY>. Browser sessions cannot upload directly to GitHub Releases, so use the repository inbox workflow: commit to <PROJECT>/.trackstate/upload-inbox/<ISSUE_KEY>/<file> and push to main.',
+          ),
+          findsOneWidget,
+        );
+        expect(
+          find.text(
+            'New attachments resolve to release tag trackstate-attachments-<ISSUE_KEY>, and this hosted session can complete release-backed uploads in the browser.',
+          ),
+          findsNothing,
+        );
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      }
+    },
+  );
+
+  testWidgets(
+    'settings hosted release-backed callout stays visible while read-only',
+    (tester) async {
+      SharedPreferences.setMockInitialValues({
+        'trackstate.githubToken.trackstate.trackstate': 'read-only-token',
+      });
+      const readOnlyPermission = RepositoryPermission(
+        canRead: true,
+        canWrite: false,
+        isAdmin: false,
+        canCreateBranch: false,
+        canManageAttachments: false,
+        canCheckCollaborators: false,
+      );
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+
+      try {
+        await tester.pumpWidget(
+          TrackStateApp(
+            repository: ReactiveIssueDetailTrackStateRepository(
+              permission: readOnlyPermission,
+              textFixtures: _githubReleasesProjectTextFixtures(),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.bySemanticsLabel(RegExp('Settings')).first);
+        await tester.pumpAndSettle();
+
+        expect(find.text('GitHub Releases attachment storage'), findsOneWidget);
+        expect(
+          find.text(
+            'New attachments resolve to release tag browser-assets-<ISSUE_KEY>. Browser sessions cannot upload directly to GitHub Releases, so use the repository inbox workflow: commit to <PROJECT>/.trackstate/upload-inbox/<ISSUE_KEY>/<file> and push to main.',
+          ),
+          findsOneWidget,
+        );
+        expect(
+          find.text(
+            'New attachments resolve to release tag trackstate-attachments-<ISSUE_KEY>, and this hosted session can complete release-backed uploads in the browser.',
+          ),
+          findsNothing,
+        );
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      }
+    },
+  );
+
+  testWidgets(
+    'release-backed hosted flow hides issue-detail upload controls when direct release writes are unavailable',
+    (tester) async {
+      SharedPreferences.setMockInitialValues({
+        'trackstate.githubToken.trackstate.trackstate': 'release-backed-token',
+      });
+      const releaseRestrictedPermission = RepositoryPermission(
+        canRead: true,
+        canWrite: true,
+        isAdmin: false,
+        canCreateBranch: true,
+        canManageAttachments: true,
+        attachmentUploadMode: AttachmentUploadMode.full,
+        supportsReleaseAttachmentWrites: false,
+        canCheckCollaborators: false,
+      );
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      try {
+        final repository = ReactiveIssueDetailTrackStateRepository(
+          permission: releaseRestrictedPermission,
+          textFixtures: _githubReleasesProjectTextFixtures(),
+        );
+        await tester.pumpWidget(TrackStateApp(repository: repository));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.bySemanticsLabel(RegExp('^JQL Search\$')).first);
+        await tester.pumpAndSettle();
+        await tester.ensureVisible(
+          find.bySemanticsLabel(RegExp('^Attachments\$')).first,
+        );
+        await tester.tap(find.bySemanticsLabel(RegExp('^Attachments\$')).first);
+        await tester.pumpAndSettle();
+
+        expect(
+          find.text('GitHub Releases uploads are unavailable in the browser'),
+          findsAtLeastNWidgets(1),
+        );
+        expect(
+          find.textContaining(
+            'For new attachments, use the repository inbox workflow',
+          ),
+          findsWidgets,
+        );
+        expect(
+          find.widgetWithText(OutlinedButton, 'Choose attachment'),
+          findsNothing,
+        );
+        expect(
+          find.widgetWithText(FilledButton, 'Upload attachment'),
+          findsNothing,
+        );
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      }
+    },
+  );
+
+  testWidgets(
+    'settings hosted callouts show release-backed success messaging when hosted release writes are supported',
+    (tester) async {
+      SharedPreferences.setMockInitialValues({
+        'trackstate.githubToken.trackstate.trackstate': 'release-backed-token',
+      });
+      const releaseSupportedPermission = RepositoryPermission(
+        canRead: true,
+        canWrite: true,
+        isAdmin: false,
+        canCreateBranch: true,
+        canManageAttachments: true,
+        attachmentUploadMode: AttachmentUploadMode.full,
+        supportsReleaseAttachmentWrites: true,
+        canCheckCollaborators: false,
+      );
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+
+      try {
+        await tester.pumpWidget(
+          TrackStateApp(
+            repository: ReactiveIssueDetailTrackStateRepository(
+              permission: releaseSupportedPermission,
+              textFixtures: _githubReleasesProjectTextFixtures(),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.bySemanticsLabel(RegExp('Settings')).first);
+        await tester.pumpAndSettle();
+
+        expect(find.text('Attachments limited'), findsNothing);
+        expect(
+          find.textContaining(
+            'New attachments use GitHub Releases tags derived as browser-assets-<ISSUE_KEY>',
+          ),
+          findsOneWidget,
+        );
+        expect(
+          find.text(
+            'New attachments resolve to release tag browser-assets-<ISSUE_KEY>, and this hosted session can complete release-backed uploads in the browser.',
+          ),
+          findsOneWidget,
+        );
       } finally {
         tester.view.resetPhysicalSize();
         tester.view.resetDevicePixelRatio();
@@ -239,3 +499,22 @@ void main() {
     },
   );
 }
+
+Map<String, String> _githubReleasesProjectTextFixtures() => const {
+  'project.json': '''
+{
+  "key": "TRACK",
+  "name": "TrackState.AI",
+  "defaultLocale": "en",
+  "issueKeyPattern": "TRACK-{number}",
+  "dataModel": "nested-tree",
+  "configPath": "config",
+  "attachmentStorage": {
+    "mode": "github-releases",
+    "githubReleases": {
+      "tagPrefix": "browser-assets-"
+    }
+  }
+}
+''',
+};

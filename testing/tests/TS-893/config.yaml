@@ -1,0 +1,17 @@
+test_id: TS-893
+type: web
+framework: playwright
+platform: chromium
+dependencies:
+  - Playwright for Python with Chromium installed
+  - GH_TOKEN or GITHUB_TOKEN with access to IstiN/trackstate-setup
+notes:
+  - Opens the deployed TrackState web app with a stored signed-in GitHub token.
+  - Preloads an active local workspace plus one hosted workspace in browser storage.
+  - Uses the default desktop viewport of 1440x900 for this ticket.
+  - Simulates a transiently busy local workspace by revoking filesystem access to the prepared local repository, keeping it blocked until the header trigger is visible, then restoring access so unblock cannot happen before startup reaches the visible recovery window.
+  - Records restore-specific blocked-window diagnostics while the workspace is still blocked, such as tracked File System Access activity on the saved local workspace lineage or a TS-893 runtime probe event.
+  - Requires pre-release overlap evidence from the runtime instrumentation or tracked console activity on the blocked saved-workspace handle before a successful final `Local Git` restore can pass.
+  - Waits after the busy-state release for the workspace switcher trigger to restore the local workspace instead of asserting immediately.
+  - Treats missing overlap proof as a non-passing scenario run rather than a synthetic product bug when the visible restore contract still succeeds.
+  - Covers the deployed fixes linked from TS-882 and TS-896.

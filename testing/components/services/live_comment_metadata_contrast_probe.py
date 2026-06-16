@@ -85,11 +85,12 @@ class LiveCommentMetadataContrastProbe:
                 f"Screenshot: {screenshot_path}",
             )
 
-        timestamp_box = self._comment_timestamp_box(image, row_rect)
+        timestamp_box = self._comment_metadata_box(image, row_rect)
         timestamp_crop = image.crop(timestamp_box)
         actual_foreground = self._sample_rendered_foreground(
             timestamp_crop,
             background=row_background,
+            palette=palette,
         )
         inferred_name, inferred_color = self._infer_palette_token(
             actual_foreground=actual_foreground,
@@ -109,21 +110,32 @@ class LiveCommentMetadataContrastProbe:
 
     @staticmethod
     def _row_box(image: Image.Image, row_rect: ScreenRect) -> tuple[int, int, int, int]:
-        left = max(int(row_rect.left), 0)
-        top = max(int(row_rect.top), 0)
-        right = min(int(row_rect.left + row_rect.width), image.width)
-        bottom = min(int(row_rect.top + row_rect.height), image.height)
+        left = max(int(row_rect.left - 14), 0)
+        top = max(int(row_rect.top - 10), 0)
+        right = min(int(row_rect.left + row_rect.width + 14), image.width)
+        bottom = min(int(row_rect.top + row_rect.height + 10), image.height)
         return (left, top, right, bottom)
 
     @staticmethod
-    def _comment_timestamp_box(
+    def _comment_metadata_box(
         image: Image.Image,
         row_rect: ScreenRect,
     ) -> tuple[int, int, int, int]:
-        left = max(int(row_rect.left + (row_rect.width * 0.695)), 0)
-        top = max(int(row_rect.top + 8), 0)
-        right = min(int(row_rect.left + row_rect.width - 8), image.width)
-        bottom = min(int(row_rect.top + 30), image.height)
+        left = max(int(row_rect.left + max(row_rect.width * 0.12, 52)), 0)
+        top = max(int(row_rect.top + 12), 0)
+        right = min(
+            int(left + min(row_rect.width * 0.55, 320)),
+            image.width,
+        )
+        minimum_right = min(int(row_rect.left + row_rect.width - 16), image.width)
+        if right < minimum_right and right - left < 140:
+            right = minimum_right
+        header_height = max(24, min(int(row_rect.height * 0.24), 30))
+        bottom = min(top + header_height, image.height)
+        if bottom <= top:
+            bottom = min(int(row_rect.top + row_rect.height), image.height)
+        if right <= left:
+            right = min(int(row_rect.left + row_rect.width), image.width)
         return (left, top, right, bottom)
 
     @staticmethod
@@ -137,41 +149,110 @@ class LiveCommentMetadataContrastProbe:
         image: Image.Image,
         *,
         background: RgbColor,
+        palette: ThemePalette,
     ) -> RgbColor:
         counts = Counter(image.getdata())
-        samples = [
-            (color, count)
-            for color, count in counts.items()
-            if self._manhattan_distance(color, background) > 20
-        ]
+        samples: list[tuple[RgbColor, int]] = []
+        for minimum_distance in (20, 12, 8):
+            samples = [
+                (color, count)
+                for color, count in counts.items()
+                if self._manhattan_distance(color, background) > minimum_distance
+            ]
+            if samples:
+                break
         if not samples:
             raise AssertionError(
                 "Step 2 failed: the timestamp crop did not contain any visible metadata "
                 "pixels to evaluate contrast.",
             )
 
-        strongest_distance = max(
-            self._manhattan_distance(color, background)
-            for color, _ in samples
+        significant_samples = self._significant_samples(samples)
+        metadata_samples = self._metadata_token_samples(
+            significant_samples,
+            palette=palette,
         )
-        strongest_samples = [
+        if metadata_samples:
+            return self._weighted_average(metadata_samples)
+
+        weakest_distance = min(
+            self._manhattan_distance(color, background)
+            for color, _ in significant_samples
+        )
+        weakest_samples = [
+            (color, count)
+            for color, count in significant_samples
+            if self._manhattan_distance(color, background) - weakest_distance <= 8
+        ]
+        return self._weighted_average(weakest_samples)
+
+    @staticmethod
+    def _significant_samples(samples: list[tuple[RgbColor, int]]) -> list[tuple[RgbColor, int]]:
+        largest_count = max(count for _, count in samples)
+        minimum_count = max(2, largest_count // 20)
+        significant_samples = [
             (color, count)
             for color, count in samples
-            if strongest_distance - self._manhattan_distance(color, background) <= 8
+            if count >= minimum_count
         ]
+        return significant_samples or samples
+
+    @staticmethod
+    def _weighted_average(samples: list[tuple[RgbColor, int]]) -> RgbColor:
         red = round(
-            sum(color[0] * count for color, count in strongest_samples)
-            / sum(count for _, count in strongest_samples),
+            sum(color[0] * count for color, count in samples)
+            / sum(count for _, count in samples),
         )
         green = round(
-            sum(color[1] * count for color, count in strongest_samples)
-            / sum(count for _, count in strongest_samples),
+            sum(color[1] * count for color, count in samples)
+            / sum(count for _, count in samples),
         )
         blue = round(
-            sum(color[2] * count for color, count in strongest_samples)
-            / sum(count for _, count in strongest_samples),
+            sum(color[2] * count for color, count in samples)
+            / sum(count for _, count in samples),
         )
         return (red, green, blue)
+
+    def _metadata_token_samples(
+        self,
+        samples: list[tuple[RgbColor, int]],
+        *,
+        palette: ThemePalette,
+    ) -> list[tuple[RgbColor, int]]:
+        # Prefer concrete token-color evidence over anti-aliased edge pixels. The
+        # previous implementation picked the lowest-contrast token candidate,
+        # which could misclassify a text-colored glyph as muted when its edge
+        # pixels blended with the row background.
+        for token_color in (palette.text, palette.muted):
+            exactish_samples = [
+                (color, count)
+                for color, count in samples
+                if color_distance(color, token_color) <= 10
+            ]
+            if sum(count for _, count in exactish_samples) >= 5:
+                return exactish_samples
+
+        candidates: list[tuple[float, int, list[tuple[RgbColor, int]]]] = []
+        for priority, token_color in enumerate((palette.text, palette.muted)):
+            token_samples = [
+                (color, count)
+                for color, count in samples
+                if color_distance(color, token_color) <= 48
+            ]
+            if not token_samples:
+                continue
+            averaged = self._weighted_average(token_samples)
+            candidates.append(
+                (
+                    color_distance(averaged, token_color),
+                    priority,
+                    token_samples,
+                ),
+            )
+        if not candidates:
+            return []
+        candidates.sort(key=lambda entry: (entry[0], entry[1]))
+        return candidates[0][2]
 
     @staticmethod
     def _infer_palette_token(

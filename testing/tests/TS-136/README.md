@@ -9,7 +9,9 @@ Git repository fixture:
    `.trackstate/tombstones/TRACK-777.json` and
    `.trackstate/index/tombstones.json`, and compare the legacy
    `.trackstate/index/deleted.json` contents before vs after the delete
-2. launch the real `TrackStateApp`, open *JQL Search*, and verify the deleted
+2. verify the in-memory repository state still reserves legacy and newly deleted
+   issue keys before the next reload by creating the next issue as `TRACK-778`
+3. launch the real `TrackStateApp`, open *JQL Search*, and verify the deleted
    issue is no longer shown while the surviving issue remains visible
 
 ## Install dependencies
@@ -32,5 +34,5 @@ fixture, so no external credentials or environment variables are required.
 ## Expected passing output
 
 ```text
-00:00 +2: All tests passed!
+00:00 +3: All tests passed!
 ```

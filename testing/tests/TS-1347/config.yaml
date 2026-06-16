@@ -1,0 +1,32 @@
+test_id: TS-1347
+type: ci
+framework: unittest
+platform: python
+dependencies:
+  - Python 3.12+
+  - PyYAML
+runtime_inputs:
+  workflow_path: .github/workflows/release-on-main.yml
+  required_jobs:
+    - publish-release
+  required_steps_by_job:
+    publish-release:
+      - Publish release
+  required_markers_in_job:
+    publish-release:
+      - /repos/${GITHUB_REPOSITORY}/releases/generate-notes
+      - "## Compiled artifacts"
+      - "| Platform | Desktop | CLI |"
+      - "| Linux |"
+      - "| macOS |"
+      - "| Windows |"
+      - trackstate-${release_tag}.sha256
+      - "## Install the CLI"
+      - "### Linux / macOS"
+      - "### Windows (PowerShell)"
+      - "### Windows (Command Prompt)"
+      - --title
+      - TrackState $release_tag
+notes:
+  - Statically validates that the publish-release job requests GitHub-generated release notes and appends a structured compiled-artifacts scaffold.
+  - Does not publish an actual release.

@@ -1,15 +1,47 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:trackstate/data/providers/trackstate_provider.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
+import 'package:trackstate/data/services/jql_search_service.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 import 'package:trackstate/ui/features/tracker/services/attachment_picker.dart';
 import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
 import '../testing/components/factories/testing_dependencies.dart';
 import '../testing/core/fakes/reactive_issue_detail_trackstate_repository.dart';
+
+const String _hostedReleaseProjectJson = '''
+{
+  "key": "TRACK",
+  "name": "TrackState.AI",
+  "defaultLocale": "en",
+  "issueKeyPattern": "TRACK-{number}",
+  "dataModel": "nested-tree",
+  "configPath": "config",
+  "attachmentStorage": {
+    "mode": "github-releases",
+    "githubReleases": {
+      "tagPrefix": "widget-test-assets-"
+    }
+  }
+}
+''';
+
+const RepositoryPermission _hostedReleaseUploadPermission =
+    RepositoryPermission(
+      canRead: true,
+      canWrite: true,
+      isAdmin: false,
+      canCreateBranch: true,
+      canManageAttachments: true,
+      attachmentUploadMode: AttachmentUploadMode.full,
+      supportsReleaseAttachmentWrites: true,
+      canCheckCollaborators: false,
+    );
 
 void main() {
   setUp(() {
@@ -30,7 +62,10 @@ void main() {
 
       expect(find.bySemanticsLabel(RegExp('TrackState\\.AI')), findsWidgets);
       expect(find.bySemanticsLabel(RegExp('Dashboard')), findsWidgets);
-      expect(find.bySemanticsLabel(RegExp('Connect GitHub')), findsWidgets);
+      expect(
+        find.bySemanticsLabel(RegExp('Workspace switcher:')),
+        findsWidgets,
+      );
       expect(find.bySemanticsLabel(RegExp('Synced with Git')), findsWidgets);
       expect(find.textContaining('Platform Foundation'), findsWidgets);
     } finally {
@@ -72,6 +107,60 @@ void main() {
       semantics.dispose();
     }
   });
+
+  testWidgets(
+    'board issue cards expose an Edit action that opens the shared editor with preloaded data',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      final screen = defaultTestingDependencies.createTrackStateAppScreen(
+        tester,
+      );
+      const targetKey = 'TRACK-12';
+      const targetSummary = 'Implement Git sync service';
+      try {
+        final snapshot = await const _EditIssueFieldsLocalRuntimeRepository()
+            .loadSnapshot();
+        final issue = snapshot.issues.firstWhere(
+          (candidate) => candidate.key == targetKey,
+        );
+
+        await screen.pump(const _EditIssueFieldsLocalRuntimeRepository());
+        await screen.openSection('Board');
+        await screen.expectTextVisible(targetSummary);
+
+        final editButton = find.byKey(const ValueKey('board-edit-$targetKey'));
+
+        expect(
+          editButton,
+          findsOneWidget,
+          reason:
+              'Expected the Board card for $targetKey to expose a visible Edit '
+              'affordance without first navigating through issue detail.',
+        );
+
+        await tester.ensureVisible(editButton);
+        await tester.tap(editButton, warnIfMissed: false);
+        await tester.pumpAndSettle();
+
+        expect(find.text('Edit issue'), findsOneWidget);
+        expect(
+          await screen.readLabeledTextFieldValue('Summary'),
+          issue.summary,
+        );
+        expect(
+          await screen.readLabeledTextFieldValue('Description'),
+          issue.description,
+        );
+        expect(
+          await screen.readDropdownFieldValue('Priority'),
+          issue.priority.label,
+        );
+      } finally {
+        screen.resetView();
+        semantics.dispose();
+      }
+    },
+  );
 
   testWidgets('dragging a board card moves it to another status', (
     tester,
@@ -162,6 +251,256 @@ void main() {
     }
   });
 
+  testWidgets('empty JQL query shows every issue without needing load more', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    try {
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      await tester.pumpWidget(
+        TrackStateApp(
+          repository: DemoTrackStateRepository(
+            snapshot: _searchPaginationSnapshot(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.bySemanticsLabel(RegExp('JQL Search')).first);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Showing 6 of 8 issues'), findsOneWidget);
+      expect(find.text('Paged issue 8'), findsNothing);
+
+      final searchField = find.byType(TextField).first;
+      await tester.enterText(searchField, '');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+
+      expect(find.text('8 issues'), findsOneWidget);
+      expect(find.text('Showing 6 of 8 issues'), findsNothing);
+      expect(find.text('Paged issue 8'), findsOneWidget);
+      expect(find.bySemanticsLabel('Load more issues'), findsNothing);
+    } finally {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+      semantics.dispose();
+    }
+  });
+
+  testWidgets('active search hides archived issues from hosted results', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    try {
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      await tester.pumpWidget(
+        TrackStateApp(
+          repository: DemoTrackStateRepository(
+            snapshot: _searchPaginationSnapshot(archivedIssueIndexes: {1}),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.bySemanticsLabel(RegExp('JQL Search')).first);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Paged issue 1'), findsNothing);
+      expect(find.text('Showing 6 of 7 issues'), findsOneWidget);
+    } finally {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+      semantics.dispose();
+    }
+  });
+
+  testWidgets('explicit archived query still shows archived issues', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    try {
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      await tester.pumpWidget(
+        TrackStateApp(
+          repository: DemoTrackStateRepository(
+            snapshot: _searchPaginationSnapshot(archivedIssueIndexes: {1}),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.bySemanticsLabel(RegExp('JQL Search')).first);
+      await tester.pumpAndSettle();
+
+      final searchField = find.byType(TextField).first;
+      await tester.enterText(searchField, 'archived = true ORDER BY key ASC');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Paged issue 1'), findsWidgets);
+      expect(find.text('Paged issue 2'), findsNothing);
+      expect(find.text('1 issue'), findsOneWidget);
+    } finally {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+      semantics.dispose();
+    }
+  });
+
+  testWidgets(
+    'first hosted load keeps the shell visible and shows bootstrap-backed placeholders',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      try {
+        final snapshot = await const DemoTrackStateRepository().loadSnapshot();
+        final repository = _BootstrapLoadingRepository(
+          snapshot: _hostedBootstrapSnapshot(snapshot),
+        );
+        await tester.pumpWidget(TrackStateApp(repository: repository));
+        await tester.pump();
+        await tester.pump();
+
+        expect(find.bySemanticsLabel(RegExp('Dashboard')), findsWidgets);
+        expect(
+          find.bySemanticsLabel(RegExp('Dashboard\\s+Loading')),
+          findsOneWidget,
+        );
+
+        await tester.tap(find.text('JQL Search').first);
+        await tester.pump();
+
+        expect(find.text('Loading...'), findsWidgets);
+        expect(find.text('TRACK-12'), findsWidgets);
+        expect(find.text('Implement Git sync service'), findsWidgets);
+        expect(find.text('Description'), findsNothing);
+
+        await tester.tap(find.text('Comments').first);
+        await tester.pump();
+        expect(find.text('Loading...'), findsWidgets);
+
+        await tester.tap(find.text('Attachments').first);
+        await tester.pump();
+        expect(find.text('Loading...'), findsWidgets);
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        semantics.dispose();
+      }
+    },
+  );
+
+  testWidgets(
+    'hosted dashboard and board loading hints clear after initial search hydration completes',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      try {
+        final snapshot = await const DemoTrackStateRepository().loadSnapshot();
+        final repository = _BootstrapLoadingRepository(
+          snapshot: _hostedBootstrapSnapshot(snapshot),
+        );
+        await tester.pumpWidget(TrackStateApp(repository: repository));
+        await tester.pump();
+        await tester.pump();
+
+        expect(
+          find.bySemanticsLabel(RegExp('Dashboard\\s+Loading')),
+          findsOneWidget,
+        );
+
+        repository.completeInitialSearch();
+        await tester.pumpAndSettle();
+
+        expect(
+          find.bySemanticsLabel(RegExp('Dashboard\\s+Loading')),
+          findsNothing,
+        );
+
+        await tester.tap(find.bySemanticsLabel(RegExp('Board')).first);
+        await tester.pumpAndSettle();
+
+        expect(find.bySemanticsLabel(RegExp('Board\\s+Loading')), findsNothing);
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        semantics.dispose();
+      }
+    },
+  );
+
+  testWidgets(
+    'hosted search keeps bootstrap rows visible after the initial search fails',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      try {
+        final snapshot = await const DemoTrackStateRepository().loadSnapshot();
+        await tester.pumpWidget(
+          TrackStateApp(
+            repository: _FailingBootstrapSearchRepository(
+              snapshot: _hostedBootstrapSnapshot(snapshot),
+            ),
+          ),
+        );
+        await tester.pump();
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('JQL Search').first);
+        await tester.pumpAndSettle();
+
+        expect(
+          find.bySemanticsLabel(RegExp('JQL Search\\s+Loading')),
+          findsNothing,
+        );
+        expect(find.text('No issues match this query'), findsNothing);
+        expect(find.text('TRACK-12'), findsWidgets);
+        expect(find.text('Implement Git sync service'), findsWidgets);
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        semantics.dispose();
+      }
+    },
+  );
+
+  testWidgets(
+    'hosted bootstrap fallback excludes archived issues from active search',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      try {
+        await tester.pumpWidget(
+          TrackStateApp(
+            repository: _FailingBootstrapSearchRepository(
+              snapshot: _searchPaginationSnapshot(archivedIssueIndexes: {1}),
+            ),
+          ),
+        );
+        await tester.pump();
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('JQL Search').first);
+        await tester.pumpAndSettle();
+
+        expect(find.text('Paged issue 1'), findsNothing);
+        expect(find.text('Paged issue 7'), findsOneWidget);
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        semantics.dispose();
+      }
+    },
+  );
+
   testWidgets(
     'issue detail exposes detail, comments, attachments, and history tabs',
     (tester) async {
@@ -193,12 +532,95 @@ void main() {
         await tester.pumpAndSettle();
         expect(find.text('sync-sequence.svg'), findsOneWidget);
 
-        await tester.tap(find.bySemanticsLabel(RegExp('History')).first);
+        await tester.tap(find.text('History').first);
         await tester.pumpAndSettle();
         expect(
           find.textContaining('Updated description on TRACK-12'),
           findsOneWidget,
         );
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        semantics.dispose();
+      }
+    },
+  );
+
+  testWidgets(
+    'issue detail keeps deferred load failures inside the active tab with a local retry action',
+    (tester) async {
+      SharedPreferences.setMockInitialValues({
+        'trackstate.githubToken.trackstate.trackstate': 'write-enabled-token',
+      });
+      final semantics = tester.ensureSemantics();
+      try {
+        tester.view.physicalSize = const Size(1440, 960);
+        tester.view.devicePixelRatio = 1;
+        await tester.pumpWidget(
+          TrackStateApp(
+            repository: ReactiveIssueDetailTrackStateRepository(
+              failingTextPaths: {'TRACK-12/main.md'},
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.bySemanticsLabel(RegExp('JQL Search')).first);
+        await tester.pumpAndSettle();
+        await tester.tap(
+          find
+              .bySemanticsLabel(
+                RegExp('Open TRACK-12 Implement Git sync service'),
+              )
+              .first,
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.text('Detail'), findsWidgets);
+        expect(
+          find.textContaining('Deferred read failed for TRACK-12/main.md'),
+          findsOneWidget,
+        );
+        expect(find.text('Retry'), findsOneWidget);
+        expect(find.bySemanticsLabel('Comments'), findsWidgets);
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        semantics.dispose();
+      }
+    },
+  );
+
+  testWidgets(
+    'hosted issue detail keeps the header visible while tab hydration loads in place',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      try {
+        await tester.pumpWidget(
+          TrackStateApp(repository: _SlowHistoryReactiveRepository()),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.bySemanticsLabel(RegExp('Board')).first);
+        await tester.pumpAndSettle();
+        await tester.tap(
+          find.bySemanticsLabel(
+            RegExp('Open TRACK-12 Implement Git sync service'),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.text('Implement Git sync service'), findsWidgets);
+
+        await tester.ensureVisible(find.text('History').first);
+        await tester.tap(find.text('History').first);
+        await tester.pump();
+
+        expect(find.text('Loading...'), findsOneWidget);
+        await tester.pump(const Duration(milliseconds: 20));
+        await tester.pumpAndSettle();
       } finally {
         tester.view.resetPhysicalSize();
         tester.view.resetDevicePixelRatio();
@@ -277,6 +699,28 @@ void main() {
     },
   );
 
+  testWidgets('edit issue dialog localizes component and fix version chips', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    final screen = defaultTestingDependencies.createTrackStateAppScreen(tester);
+    try {
+      await screen.pump(
+        const _LocalizedEditIssueFieldsLocalRuntimeRepository(),
+      );
+
+      await screen.openSection('Search');
+      await screen.openIssue('TRACK-12', 'Implement Git sync service');
+      await screen.tapIssueDetailAction('TRACK-12', label: 'Edit');
+
+      await screen.expectTextVisible('Tracker Core Localized');
+      await screen.expectTextVisible('MVP Release');
+    } finally {
+      screen.resetView();
+      semantics.dispose();
+    }
+  });
+
   testWidgets('local runtime shows repository access instead of GitHub auth', (
     tester,
   ) async {
@@ -295,11 +739,8 @@ void main() {
       await tester.tap(find.bySemanticsLabel(RegExp('Local Git')).first);
       await tester.pumpAndSettle();
 
-      expect(find.text('Local Git runtime'), findsOneWidget);
-      expect(
-        find.textContaining('GitHub tokens are not used in this runtime'),
-        findsOneWidget,
-      );
+      expect(find.text('Workspace switcher'), findsOneWidget);
+      expect(find.text('No saved workspaces yet.'), findsNothing);
     } finally {
       tester.view.resetPhysicalSize();
       tester.view.resetDevicePixelRatio();
@@ -380,6 +821,63 @@ void main() {
   );
 
   testWidgets(
+    'hosted default attachment storage keeps standard upload controls visible',
+    (tester) async {
+      SharedPreferences.setMockInitialValues({
+        'trackstate.githubToken.trackstate.trackstate': 'default-upload-token',
+      });
+
+      try {
+        tester.view.physicalSize = const Size(1440, 960);
+        tester.view.devicePixelRatio = 1;
+        await tester.pumpWidget(
+          TrackStateApp(
+            repository: ReactiveIssueDetailTrackStateRepository(
+              permission: _hostedReleaseUploadPermission,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.bySemanticsLabel(RegExp('JQL Search')).first);
+        await tester.pumpAndSettle();
+        await tester.tap(
+          find
+              .bySemanticsLabel(
+                RegExp('Open TRACK-12 Implement Git sync service'),
+              )
+              .first,
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.bySemanticsLabel(RegExp('Attachments')).first);
+        await tester.pumpAndSettle();
+
+        expect(
+          find.text('Attachments stay download-only in the browser'),
+          findsNothing,
+        );
+        expect(
+          find.widgetWithText(OutlinedButton, 'Open settings'),
+          findsNothing,
+        );
+        expect(find.bySemanticsLabel('Choose attachment'), findsOneWidget);
+        expect(find.bySemanticsLabel('Upload attachment'), findsOneWidget);
+        expect(
+          tester
+              .widget<OutlinedButton>(
+                find.widgetWithText(OutlinedButton, 'Choose attachment'),
+              )
+              .onPressed,
+          isNotNull,
+        );
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      }
+    },
+  );
+
+  testWidgets(
     'attachments tab lets users choose and upload files from issue detail',
     (tester) async {
       SharedPreferences.setMockInitialValues({
@@ -397,7 +895,12 @@ void main() {
         tester.view.devicePixelRatio = 1;
         await tester.pumpWidget(
           TrackStateApp(
-            repository: ReactiveIssueDetailTrackStateRepository(),
+            repository: ReactiveIssueDetailTrackStateRepository(
+              permission: _hostedReleaseUploadPermission,
+              textFixtures: const <String, String>{
+                'project.json': _hostedReleaseProjectJson,
+              },
+            ),
             attachmentPicker: pickAttachment,
           ),
         );
@@ -416,19 +919,48 @@ void main() {
         await tester.tap(find.bySemanticsLabel(RegExp('Attachments')).first);
         await tester.pumpAndSettle();
 
-        expect(find.bySemanticsLabel('Choose attachment'), findsOneWidget);
-        expect(find.bySemanticsLabel('Upload attachment'), findsOneWidget);
+        final chooseAttachmentSemantics = find.bySemanticsLabel(
+          'Choose attachment',
+        );
+        final uploadAttachmentSemantics = find.bySemanticsLabel(
+          'Upload attachment',
+        );
+        final chooseAttachmentButton = find.widgetWithText(
+          OutlinedButton,
+          'Choose attachment',
+        );
+        final uploadAttachmentButton = find.widgetWithText(
+          FilledButton,
+          'Upload attachment',
+        );
 
-        await tester.tap(find.bySemanticsLabel('Choose attachment'));
+        expect(chooseAttachmentSemantics, findsOneWidget);
+        expect(uploadAttachmentSemantics, findsOneWidget);
+        expect(chooseAttachmentButton, findsOneWidget);
+        expect(uploadAttachmentButton, findsOneWidget);
+        expect(
+          tester.widget<OutlinedButton>(chooseAttachmentButton).onPressed,
+          isNotNull,
+        );
+        expect(
+          tester.widget<FilledButton>(uploadAttachmentButton).onPressed,
+          isNull,
+        );
+
+        await tester.tap(chooseAttachmentSemantics);
         await tester.pumpAndSettle();
 
         expect(find.text('release notes.pdf'), findsOneWidget);
         expect(find.text('4 B'), findsOneWidget);
+        expect(
+          tester.widget<FilledButton>(uploadAttachmentButton).onPressed,
+          isNotNull,
+        );
 
-        await tester.tap(find.bySemanticsLabel('Upload attachment'));
+        await tester.tap(uploadAttachmentSemantics);
         await tester.pumpAndSettle();
 
-        expect(find.text('release-notes.pdf'), findsOneWidget);
+        expect(find.text('release notes.pdf'), findsOneWidget);
         expect(
           find.text('Choose a file to review its size before upload.'),
           findsOneWidget,
@@ -459,7 +991,12 @@ void main() {
         tester.view.devicePixelRatio = 1;
         await tester.pumpWidget(
           TrackStateApp(
-            repository: ReactiveIssueDetailTrackStateRepository(),
+            repository: ReactiveIssueDetailTrackStateRepository(
+              permission: _hostedReleaseUploadPermission,
+              textFixtures: const <String, String>{
+                'project.json': _hostedReleaseProjectJson,
+              },
+            ),
             attachmentPicker: pickAttachment,
           ),
         );
@@ -493,7 +1030,7 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(find.text('Replace attachment?'), findsNothing);
-        expect(find.text('sync-sequence.svg'), findsOneWidget);
+        expect(find.text('sync sequence.svg'), findsOneWidget);
       } finally {
         tester.view.resetPhysicalSize();
         tester.view.resetDevicePixelRatio();
@@ -766,6 +1303,7 @@ class _LocalRuntimeRepository implements TrackStateRepository {
     required TrackStateIssue issue,
     required String name,
     required Uint8List bytes,
+    String? sourceName,
   }) async => issue;
 }
 
@@ -875,6 +1413,7 @@ class _FailingLocalRuntimeRepository implements TrackStateRepository {
     required TrackStateIssue issue,
     required String name,
     required Uint8List bytes,
+    String? sourceName,
   }) async {
     throw const TrackStateRepositoryException(
       'Cannot save DEMO/DEMO-1/main.md because it has staged or unstaged local changes. '
@@ -1037,6 +1576,7 @@ class _CustomCreateFieldsLocalRuntimeRepository
     required TrackStateIssue issue,
     required String name,
     required Uint8List bytes,
+    String? sourceName,
   }) async => issue;
 }
 
@@ -1071,7 +1611,123 @@ class _EditIssueFieldsLocalRuntimeRepository extends _LocalRuntimeRepository {
   }
 }
 
-TrackerSnapshot _searchPaginationSnapshot() {
+class _LocalizedEditIssueFieldsLocalRuntimeRepository
+    extends _EditIssueFieldsLocalRuntimeRepository {
+  const _LocalizedEditIssueFieldsLocalRuntimeRepository();
+
+  @override
+  Future<TrackerSnapshot> loadSnapshot() async {
+    final snapshot = await super.loadSnapshot();
+    return TrackerSnapshot(
+      project: ProjectConfig(
+        key: snapshot.project.key,
+        name: snapshot.project.name,
+        repository: snapshot.project.repository,
+        branch: snapshot.project.branch,
+        defaultLocale: 'en',
+        supportedLocales: const ['en', 'fr'],
+        issueTypeDefinitions: snapshot.project.issueTypeDefinitions,
+        statusDefinitions: snapshot.project.statusDefinitions,
+        fieldDefinitions: snapshot.project.fieldDefinitions,
+        workflowDefinitions: snapshot.project.workflowDefinitions,
+        priorityDefinitions: snapshot.project.priorityDefinitions,
+        versionDefinitions: [
+          for (final version in snapshot.project.versionDefinitions)
+            if (version.id == 'mvp')
+              version.copyWith(localizedLabels: const {'en': 'MVP Release'})
+            else
+              version,
+        ],
+        componentDefinitions: [
+          for (final component in snapshot.project.componentDefinitions)
+            if (component.id == 'tracker-core')
+              component.copyWith(
+                localizedLabels: const {'en': 'Tracker Core Localized'},
+              )
+            else
+              component,
+        ],
+        resolutionDefinitions: snapshot.project.resolutionDefinitions,
+      ),
+      issues: snapshot.issues,
+      repositoryIndex: snapshot.repositoryIndex,
+      loadWarnings: snapshot.loadWarnings,
+    );
+  }
+}
+
+class _BootstrapLoadingRepository extends _LocalRuntimeRepository {
+  _BootstrapLoadingRepository({required TrackerSnapshot snapshot})
+    : _snapshot = snapshot;
+
+  final TrackerSnapshot _snapshot;
+  final JqlSearchService _searchService = const JqlSearchService();
+  final Completer<TrackStateIssueSearchPage> _searchCompleter =
+      Completer<TrackStateIssueSearchPage>();
+
+  @override
+  Future<TrackerSnapshot> loadSnapshot() async => _snapshot;
+
+  @override
+  Future<TrackStateIssueSearchPage> searchIssuePage(
+    String jql, {
+    int startAt = 0,
+    int maxResults = 50,
+    String? continuationToken,
+  }) => _searchCompleter.future;
+
+  void completeInitialSearch() {
+    if (_searchCompleter.isCompleted) {
+      return;
+    }
+    _searchCompleter.complete(
+      _searchService.search(
+        issues: _snapshot.issues,
+        project: _snapshot.project,
+        jql: 'project = TRACK AND status != Done ORDER BY priority DESC',
+        maxResults: 6,
+      ),
+    );
+  }
+}
+
+class _FailingBootstrapSearchRepository extends _LocalRuntimeRepository {
+  _FailingBootstrapSearchRepository({required TrackerSnapshot snapshot})
+    : _snapshot = snapshot;
+
+  final TrackerSnapshot _snapshot;
+
+  @override
+  Future<TrackerSnapshot> loadSnapshot() async => _snapshot;
+
+  @override
+  Future<TrackStateIssueSearchPage> searchIssuePage(
+    String jql, {
+    int startAt = 0,
+    int maxResults = 50,
+    String? continuationToken,
+  }) async {
+    throw const JqlSearchException('Hosted bootstrap search failed.');
+  }
+}
+
+class _SlowHistoryReactiveRepository
+    extends ProviderBackedTrackStateRepository {
+  _SlowHistoryReactiveRepository()
+    : super(provider: MutableIssueDetailTrackStateProvider());
+
+  @override
+  Future<List<IssueHistoryEntry>> loadIssueHistory(
+    TrackStateIssue issue,
+  ) async {
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+    return super.loadIssueHistory(issue);
+  }
+}
+
+TrackerSnapshot _searchPaginationSnapshot({
+  Set<int> archivedIssueIndexes = const <int>{},
+}) {
   final issues = [
     for (var index = 1; index <= 8; index += 1)
       TrackStateIssue(
@@ -1102,7 +1758,7 @@ TrackerSnapshot _searchPaginationSnapshot() {
         comments: const [],
         links: const [],
         attachments: const [],
-        isArchived: false,
+        isArchived: archivedIssueIndexes.contains(index),
         storagePath: 'TRACK/TRACK-$index/main.md',
         rawMarkdown: '',
       ),
@@ -1133,3 +1789,64 @@ TrackerSnapshot _searchPaginationSnapshot() {
     issues: issues,
   );
 }
+
+TrackerSnapshot _hostedBootstrapSnapshot(TrackerSnapshot snapshot) {
+  return TrackerSnapshot(
+    project: snapshot.project,
+    issues: [for (final issue in snapshot.issues) _summaryOnlyIssue(issue)],
+    repositoryIndex: snapshot.repositoryIndex,
+    loadWarnings: snapshot.loadWarnings,
+    readiness: const TrackerBootstrapReadiness(
+      domainStates: {
+        TrackerDataDomain.projectMeta: TrackerLoadState.ready,
+        TrackerDataDomain.issueSummaries: TrackerLoadState.ready,
+        TrackerDataDomain.repositoryIndex: TrackerLoadState.ready,
+        TrackerDataDomain.issueDetails: TrackerLoadState.partial,
+      },
+      sectionStates: {
+        TrackerSectionKey.dashboard: TrackerLoadState.ready,
+        TrackerSectionKey.board: TrackerLoadState.ready,
+        TrackerSectionKey.search: TrackerLoadState.partial,
+        TrackerSectionKey.hierarchy: TrackerLoadState.ready,
+        TrackerSectionKey.settings: TrackerLoadState.ready,
+      },
+    ),
+  );
+}
+
+TrackStateIssue _summaryOnlyIssue(TrackStateIssue issue) => TrackStateIssue(
+  key: issue.key,
+  project: issue.project,
+  issueType: issue.issueType,
+  issueTypeId: issue.issueTypeId,
+  status: issue.status,
+  statusId: issue.statusId,
+  priority: issue.priority,
+  priorityId: issue.priorityId,
+  summary: issue.summary,
+  description: '',
+  assignee: issue.assignee,
+  reporter: issue.reporter,
+  labels: issue.labels,
+  components: const [],
+  fixVersionIds: const [],
+  watchers: const [],
+  customFields: const {},
+  parentKey: issue.parentKey,
+  epicKey: issue.epicKey,
+  parentPath: issue.parentPath,
+  epicPath: issue.epicPath,
+  progress: issue.progress,
+  updatedLabel: issue.updatedLabel,
+  acceptanceCriteria: const [],
+  comments: const [],
+  links: const [],
+  attachments: const [],
+  isArchived: issue.isArchived,
+  hasDetailLoaded: false,
+  hasCommentsLoaded: false,
+  hasAttachmentsLoaded: false,
+  resolutionId: issue.resolutionId,
+  storagePath: issue.storagePath,
+  rawMarkdown: issue.rawMarkdown,
+);
