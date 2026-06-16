@@ -10,9 +10,12 @@ installation guidance.
 2. The release body appends a `## Compiled artifacts` section.
 3. The artifacts table lists Linux, macOS, and Windows platforms with Desktop
    and CLI columns.
-4. The scaffold mentions the unified checksum file and a placeholder for future
-   install commands.
-5. The release title follows `TrackState vX.Y.Z`.
+4. The scaffold mentions the unified checksum file and the CLI install commands
+   for Linux, macOS, Windows PowerShell, and Windows Command Prompt.
+5. The scaffold includes an accessible `## Launching unsigned desktop packages`
+   section with macOS (`right-click` → `Open`) and Windows (`More info` →
+   `Run anyway`) launch guidance.
+6. The release title follows `TrackState vX.Y.Z`.
 
 ## Run this test
 
