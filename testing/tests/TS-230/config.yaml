@@ -1,0 +1,21 @@
+test_id: TS-230
+type: api
+framework: unittest
+platform: python
+dependencies:
+  - gh CLI authenticated with write/admin access to IstiN/trackstate-setup
+  - network access to GitHub REST API and GitHub web pages
+  - release automation on default branch of IstiN/trackstate-setup
+runtime_inputs:
+  repository: IstiN/trackstate-setup
+  default_branch: main
+  probe_file_path: README.md
+  branch_prefix: ts230-release-probe
+  pull_request_title: "TS-230 disposable probe: verify release and semantic tag on merge"
+  pull_request_body: "Disposable PR created by TS-230 automation to verify that merging into main produces a GitHub release and matching semantic version tag."
+  semver_tag_pattern: "^v\\d+\\.\\d+\\.\\d+$"
+  poll_interval_seconds: 10
+  pull_request_timeout_seconds: 180
+  release_timeout_seconds: 900
+  releases_lookup_limit: 30
+  tags_lookup_limit: 50

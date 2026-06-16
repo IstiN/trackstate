@@ -1,0 +1,1107 @@
+from __future__ import annotations
+
+from contextlib import AbstractContextManager
+from datetime import datetime, timezone
+import json
+import tempfile
+from typing import Any, Sequence
+
+try:
+    from playwright.sync_api import (
+        Browser,
+        BrowserContext,
+        Page,
+        Request,
+        Response,
+        Route,
+        sync_playwright,
+    )
+    from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+except ModuleNotFoundError:  # pragma: no cover - exercised in no-Playwright unit envs
+    Browser = BrowserContext = Page = Request = Response = Route = Any
+
+    class PlaywrightTimeoutError(Exception):
+        pass
+
+    def sync_playwright():
+        raise ModuleNotFoundError("playwright")
+
+from testing.core.interfaces.web_app_session import (
+    ElementBoundingBox,
+    FocusedElementObservation,
+    NewPageObservation,
+    WaitMatch,
+    WaitState,
+    WebAppSession,
+    WebAppTimeoutError,
+)
+
+_CHROMIUM_FOREGROUND_TIMING_ARGS = [
+    "--disable-background-timer-throttling",
+    "--disable-renderer-backgrounding",
+    "--disable-backgrounding-occluded-windows",
+]
+
+
+class PlaywrightWebAppSession(WebAppSession):
+    def __init__(self, page: Page) -> None:
+        self._page = page
+        self._network_recorders: dict[str, dict[str, Any]] = {}
+        self._page.on("request", self._handle_page_request)
+        self._page.on("requestfinished", self._handle_page_request_finished)
+        self._page.on("requestfailed", self._handle_page_request_failed)
+
+    def set_viewport_size(self, *, width: int, height: int) -> None:
+        self._page.set_viewport_size({"width": width, "height": height})
+
+    def goto(
+        self,
+        url: str,
+        *,
+        wait_until: str = "domcontentloaded",
+        timeout_ms: int = 120_000,
+    ) -> None:
+        self._page.goto(url, wait_until=wait_until, timeout=timeout_ms)
+
+    def activate_accessibility(self) -> None:
+        placeholder_selector = "flt-semantics-placeholder"
+        self.wait_for_selector(
+            placeholder_selector,
+            state="attached",
+            timeout_ms=120_000,
+        )
+        self._locator(placeholder_selector).evaluate("element => element.click()")
+
+    def wait_for_selector(
+        self,
+        selector: str,
+        *,
+        state: WaitState = "visible",
+        timeout_ms: int = 30_000,
+        has_text: str | None = None,
+        index: int = 0,
+    ) -> None:
+        try:
+            self._locator(selector, has_text=has_text, index=index).wait_for(
+                state=state,
+                timeout=timeout_ms,
+            )
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                f'Timed out waiting for selector "{selector}" to become {state}.',
+            ) from error
+
+    def click(
+        self,
+        selector: str,
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> None:
+        try:
+            locator = self._locator(selector, has_text=has_text, index=index)
+            locator.wait_for(state="visible", timeout=timeout_ms)
+            locator.click(timeout=timeout_ms)
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                f'Timed out clicking selector "{selector}".',
+            ) from error
+
+    def fill(
+        self,
+        selector: str,
+        value: str,
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> None:
+        try:
+            locator = self._locator(selector, has_text=has_text, index=index)
+            locator.wait_for(state="visible", timeout=timeout_ms)
+            locator.fill(value, timeout=timeout_ms)
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                f'Timed out filling selector "{selector}".',
+            ) from error
+
+    def type_text(
+        self,
+        selector: str,
+        value: str,
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+        delay_ms: int = 50,
+    ) -> None:
+        try:
+            locator = self._locator(selector, has_text=has_text, index=index)
+            locator.wait_for(state="visible", timeout=timeout_ms)
+            locator.click(timeout=timeout_ms)
+            self._page.wait_for_timeout(250)
+            self._page.keyboard.type(value, delay=delay_ms)
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                f'Timed out typing into selector "{selector}".',
+            ) from error
+
+    def press(
+        self,
+        selector: str,
+        key: str,
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> None:
+        try:
+            locator = self._locator(selector, has_text=has_text, index=index)
+            locator.wait_for(state="visible", timeout=timeout_ms)
+            locator.press(key, timeout=timeout_ms)
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                f'Timed out pressing key "{key}" on selector "{selector}".',
+            ) from error
+
+    def press_key(
+        self,
+        key: str,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> None:
+        del timeout_ms
+        try:
+            self._page.keyboard.press(key)
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                f'Timed out pressing page key "{key}".',
+            ) from error
+
+    def click_and_set_files(
+        self,
+        selector: str,
+        files: Sequence[str],
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> None:
+        try:
+            locator = self._locator(selector, has_text=has_text, index=index)
+            locator.wait_for(state="visible", timeout=timeout_ms)
+            with self._page.expect_file_chooser(timeout=timeout_ms) as chooser_info:
+                locator.click(timeout=timeout_ms)
+            chooser_info.value.set_files(list(files))
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                f'Timed out setting files via selector "{selector}".',
+            ) from error
+
+    def count(
+        self,
+        selector: str,
+        *,
+        has_text: str | None = None,
+    ) -> int:
+        return self._page.locator(selector, has_text=has_text).count()
+
+    def wait_for_count(
+        self,
+        selector: str,
+        expected_count: int,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> None:
+        try:
+            self._page.wait_for_function(
+                """
+                ({ selector, expectedCount }) =>
+                  document.querySelectorAll(selector).length === expectedCount
+                """,
+                arg={
+                    "selector": selector,
+                    "expectedCount": expected_count,
+                },
+                timeout=timeout_ms,
+            )
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                'Timed out waiting for selector '
+                f'"{selector}" to reach count {expected_count}.',
+            ) from error
+
+    def read_value(
+        self,
+        selector: str,
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> str:
+        try:
+            locator = self._locator(selector, has_text=has_text, index=index)
+            locator.wait_for(state="visible", timeout=timeout_ms)
+            return locator.input_value(timeout=timeout_ms)
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                f'Timed out reading the value for selector "{selector}".',
+            ) from error
+
+    def click_and_choose_file(
+        self,
+        selector: str,
+        file_paths: Sequence[str],
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> None:
+        try:
+            locator = self._locator(selector, has_text=has_text, index=index)
+            locator.wait_for(state="visible", timeout=timeout_ms)
+            with self._page.expect_file_chooser(timeout=timeout_ms) as chooser_info:
+                locator.click(timeout=timeout_ms)
+            chooser_info.value.set_files(list(file_paths))
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                f'Timed out choosing files for selector "{selector}".',
+            ) from error
+
+    def focus(
+        self,
+        selector: str,
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> None:
+        try:
+            locator = self._locator(selector, has_text=has_text, index=index)
+            locator.wait_for(state="visible", timeout=timeout_ms)
+            locator.evaluate("element => element.focus()")
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                f'Timed out focusing selector "{selector}".',
+            ) from error
+
+    def read_text(
+        self,
+        selector: str,
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> str:
+        try:
+            locator = self._locator(selector, has_text=has_text, index=index)
+            locator.wait_for(state="visible", timeout=timeout_ms)
+            return locator.inner_text(timeout=timeout_ms)
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                f'Timed out reading text for selector "{selector}".',
+            ) from error
+
+    def body_text(self) -> str:
+        return self._page.locator("body").inner_text()
+
+    def wait_for_input_value(
+        self,
+        selector: str,
+        expected_value: str,
+        *,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> str:
+        try:
+            self._page.wait_for_function(
+                """
+                ({ selector, expectedValue, index }) => {
+                    const elements = document.querySelectorAll(selector);
+                    const element = elements[index];
+                    return !!element && 'value' in element && element.value === expectedValue;
+                }
+                """,
+                arg={
+                    "selector": selector,
+                    "expectedValue": expected_value,
+                    "index": index,
+                },
+                timeout=timeout_ms,
+            )
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                f'Timed out waiting for selector "{selector}" to reach the input value '
+                f'"{expected_value}".',
+            ) from error
+        return self.read_value(selector, index=index, timeout_ms=timeout_ms)
+
+    def wait_for_text(
+        self,
+        text: str,
+        *,
+        timeout_ms: int = 60_000,
+    ) -> str:
+        try:
+            self._page.wait_for_function(
+                "(expectedText) => (document.body?.innerText ?? '').includes(expectedText)",
+                arg=text,
+                timeout=timeout_ms,
+            )
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                f'Timed out waiting for text "{text}".',
+            ) from error
+        return self.body_text()
+
+    def wait_for_text_absence(
+        self,
+        text: str,
+        *,
+        timeout_ms: int = 60_000,
+    ) -> str:
+        try:
+            self._page.wait_for_function(
+                "(expectedText) => !(document.body?.innerText ?? '').includes(expectedText)",
+                arg=text,
+                timeout=timeout_ms,
+            )
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                f'Timed out waiting for text "{text}" to disappear.',
+            ) from error
+        return self.body_text()
+
+    def wait_for_text_absent(
+        self,
+        text: str,
+        *,
+        timeout_ms: int = 60_000,
+    ) -> str:
+        return self.wait_for_text_absence(text, timeout_ms=timeout_ms)
+    def wait_for_any_text(
+        self,
+        texts: Sequence[str],
+        *,
+        timeout_ms: int = 90_000,
+    ) -> WaitMatch:
+        try:
+            wait_handle = self._page.wait_for_function(
+                """
+                (expectedTexts) => {
+                    const bodyText = document.body?.innerText ?? '';
+                    const matchedText = expectedTexts.find((text) => bodyText.includes(text));
+                    return matchedText ? { matchedText, bodyText } : null;
+                }
+                """,
+                arg=list(texts),
+                timeout=timeout_ms,
+            )
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                f"Timed out waiting for any expected text: {list(texts)}.",
+            ) from error
+        payload = wait_handle.json_value()
+        return WaitMatch(
+            matched_text=str(payload["matchedText"]),
+            body_text=str(payload["bodyText"]),
+        )
+
+    def evaluate(
+        self,
+        expression: str,
+        *,
+        arg: object | None = None,
+    ) -> object:
+        return self._page.evaluate(expression, arg)
+
+    def wait_for_function(
+        self,
+        expression: str,
+        *,
+        arg: object | None = None,
+        timeout_ms: int = 30_000,
+    ) -> object:
+        try:
+            wait_handle = self._page.wait_for_function(
+                expression,
+                arg=arg,
+                timeout=timeout_ms,
+            )
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                "Timed out waiting for the page to satisfy a function condition.",
+            ) from error
+        return wait_handle.json_value()
+    def active_element(self) -> FocusedElementObservation:
+        payload = self._page.evaluate(
+            """
+            () => {
+                const normalize = (value) => (value || "").replace(/\\s+/g, " ").trim();
+                const labelFor = (element) => {
+                    if (!(element instanceof Element)) {
+                        return null;
+                    }
+                    const ariaLabel = normalize(element.getAttribute("aria-label"));
+                    if (ariaLabel) {
+                        return ariaLabel;
+                    }
+                    const placeholder = normalize(element.getAttribute("placeholder"));
+                    if (placeholder) {
+                        return placeholder;
+                    }
+                    const title = normalize(element.getAttribute("title"));
+                    if (title) {
+                        return title;
+                    }
+                    if (
+                        element instanceof HTMLInputElement
+                        || element instanceof HTMLTextAreaElement
+                        || element instanceof HTMLSelectElement
+                    ) {
+                        const value = normalize(element.value);
+                        if (value) {
+                            return value;
+                        }
+                    }
+                    return null;
+                };
+                const derivedOwnedLabelFor = (element) => {
+                    if (!(element instanceof Element)) {
+                        return null;
+                    }
+                    const visited = new Set();
+                    const queue = [element];
+                    while (queue.length > 0) {
+                        const candidate = queue.shift();
+                        if (!(candidate instanceof Element) || visited.has(candidate)) {
+                            continue;
+                        }
+                        visited.add(candidate);
+                        const candidateLabel = labelFor(candidate);
+                        if (candidateLabel && candidate !== element) {
+                            return candidateLabel;
+                        }
+                        const ownedIds = normalize(candidate.getAttribute("aria-owns"))
+                            .split(" ")
+                            .map((value) => value.trim())
+                            .filter(Boolean);
+                        for (const ownedId of ownedIds) {
+                            const ownedElement = document.getElementById(ownedId);
+                            if (ownedElement instanceof Element) {
+                                queue.push(ownedElement);
+                            }
+                        }
+                        for (const descendant of candidate.querySelectorAll("*")) {
+                            if (descendant instanceof Element) {
+                                queue.push(descendant);
+                            }
+                        }
+                    }
+                    return null;
+                };
+                const active = document.activeElement;
+                if (!active) {
+                    return {
+                        tagName: "",
+                        role: null,
+                        accessibleName: null,
+                        text: "",
+                        tabindex: null,
+                        outerHtml: "",
+                    };
+                }
+                const text = normalize(active.textContent);
+                const accessibleName =
+                    labelFor(active)
+                    || derivedOwnedLabelFor(active)
+                    || null;
+                return {
+                    tagName: active.tagName,
+                    role: active.getAttribute("role"),
+                    accessibleName,
+                    text,
+                    tabindex: active.getAttribute("tabindex"),
+                    outerHtml: active.outerHTML.slice(0, 400),
+                };
+            }
+            """,
+        )
+        return FocusedElementObservation(
+            tag_name=str(payload["tagName"]),
+            role=str(payload["role"]) if payload["role"] is not None else None,
+            accessible_name=(
+                str(payload["accessibleName"])
+                if payload["accessibleName"] is not None
+                else None
+            ),
+            text=str(payload["text"]),
+            tabindex=str(payload["tabindex"]) if payload["tabindex"] is not None else None,
+            outer_html=str(payload["outerHtml"]),
+        )
+
+    def wait_for_active_element_change(
+        self,
+        previous_outer_html: str,
+        *,
+        timeout_ms: int = 2_000,
+    ) -> FocusedElementObservation:
+        try:
+            self._page.wait_for_function(
+                "(prevHtml) => !document.activeElement "
+                "|| document.activeElement.outerHTML.slice(0, 400) !== prevHtml",
+                arg=previous_outer_html,
+                timeout=timeout_ms,
+            )
+        except PlaywrightTimeoutError:
+            pass
+        return self.active_element()
+
+    def wait_for_download_after_keypress(
+        self,
+        key: str,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> str:
+        try:
+            with self._page.expect_download(timeout=timeout_ms) as download_info:
+                self._page.keyboard.press(key)
+            download = download_info.value
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                f'Timed out waiting for a download after pressing "{key}".',
+            ) from error
+        return download.suggested_filename
+
+    def save_download_after_keypress(
+        self,
+        key: str,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> str:
+        try:
+            with self._page.expect_download(timeout=timeout_ms) as download_info:
+                self._page.keyboard.press(key)
+            download = download_info.value
+            destination = tempfile.NamedTemporaryFile(
+                prefix="trackstate-download-",
+                suffix=f"-{download.suggested_filename}",
+                delete=False,
+            )
+            destination.close()
+            download.save_as(destination.name)
+            return destination.name
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                f'Timed out waiting for a saved download after pressing "{key}".',
+            ) from error
+
+    def wait_for_download_after_click(
+        self,
+        selector: str,
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> str:
+        try:
+            locator = self._locator(selector, has_text=has_text, index=index)
+            locator.wait_for(state="visible", timeout=timeout_ms)
+            with self._page.expect_download(timeout=timeout_ms) as download_info:
+                locator.click(timeout=timeout_ms)
+            download = download_info.value
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                f'Timed out waiting for a download after clicking selector "{selector}".',
+            ) from error
+        return download.suggested_filename
+
+    def save_download_after_click(
+        self,
+        selector: str,
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> str:
+        try:
+            locator = self._locator(selector, has_text=has_text, index=index)
+            locator.wait_for(state="visible", timeout=timeout_ms)
+            with self._page.expect_download(timeout=timeout_ms) as download_info:
+                locator.click(timeout=timeout_ms)
+            download = download_info.value
+            destination = tempfile.NamedTemporaryFile(
+                prefix="trackstate-download-",
+                suffix=f"-{download.suggested_filename}",
+                delete=False,
+            )
+            destination.close()
+            download.save_as(destination.name)
+            return destination.name
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                f'Timed out waiting for a saved download after clicking selector "{selector}".',
+            ) from error
+
+    def wait_for_new_page_after_keypress(
+        self,
+        key: str,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> NewPageObservation:
+        context = self._page.context
+        page_count_before = len(context.pages)
+        try:
+            with context.expect_page(timeout=timeout_ms) as page_info:
+                self._page.keyboard.press(key)
+            new_page = page_info.value
+            try:
+                new_page.wait_for_load_state("domcontentloaded", timeout=timeout_ms)
+            except PlaywrightTimeoutError:
+                pass
+            new_page_url = new_page.url
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                f'Timed out waiting for a new page after pressing "{key}".',
+            ) from error
+        finally:
+            page_count_after = len(context.pages)
+        return NewPageObservation(
+            url=new_page_url,
+            page_count_before=page_count_before,
+            page_count_after=page_count_after,
+        )
+
+    def wait_for_new_page_after_active_element_click(
+        self,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> NewPageObservation:
+        context = self._page.context
+        page_count_before = len(context.pages)
+        try:
+            payload = self._page.evaluate(
+                """
+                () => {
+                    const isVisible = (element) => {
+                        if (!element) {
+                            return false;
+                        }
+                        const rect = element.getBoundingClientRect();
+                        const style = window.getComputedStyle(element);
+                        return (
+                            rect.width > 0
+                            && rect.height > 0
+                            && style.visibility !== 'hidden'
+                            && style.display !== 'none'
+                        );
+                    };
+                    const active = document.activeElement;
+                    if (!active) {
+                        return null;
+                    }
+                    const candidates = [
+                        active,
+                        ...Array.from(active.querySelectorAll('*')),
+                    ];
+                    const target = candidates.find((element) => isVisible(element)) ?? null;
+                    if (!target) {
+                        return null;
+                    }
+                    const rect = target.getBoundingClientRect();
+                    return {
+                        x: rect.left + (rect.width / 2),
+                        y: rect.top + (rect.height / 2),
+                    };
+                }
+                """,
+            )
+            if not isinstance(payload, dict):
+                raise WebAppTimeoutError("No visible focused element was available to click.")
+            with context.expect_page(timeout=timeout_ms) as page_info:
+                self._page.mouse.click(float(payload["x"]), float(payload["y"]))
+            new_page = page_info.value
+            try:
+                new_page.wait_for_load_state("domcontentloaded", timeout=timeout_ms)
+            except PlaywrightTimeoutError:
+                pass
+            new_page_url = new_page.url
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                "Timed out waiting for a new page after clicking the focused element.",
+            ) from error
+        finally:
+            page_count_after = len(context.pages)
+        return NewPageObservation(
+            url=new_page_url,
+            page_count_before=page_count_before,
+            page_count_after=page_count_after,
+        )
+
+    def select_files_after_click(
+        self,
+        trigger_selector: str,
+        files: Sequence[str],
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> None:
+        try:
+            locator = self._locator(trigger_selector, has_text=has_text, index=index)
+            locator.wait_for(state="visible", timeout=timeout_ms)
+            with self._page.expect_file_chooser(timeout=timeout_ms) as file_chooser_info:
+                locator.click(timeout=timeout_ms)
+            file_chooser = file_chooser_info.value
+            file_chooser.set_files(list(files), timeout=timeout_ms)
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                f'Timed out selecting files after clicking selector "{trigger_selector}".',
+            ) from error
+
+    def screenshot(self, path: str, *, full_page: bool = True) -> None:
+        self._page.screenshot(path=path, full_page=full_page)
+
+    def bounding_box(
+        self,
+        selector: str,
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> ElementBoundingBox:
+        try:
+            self._page.wait_for_function(
+                """
+                ({ selector, hasText, index }) => {
+                    const matches = Array.from(document.querySelectorAll(selector)).filter(
+                      (element) => {
+                        if (!hasText) {
+                          return true;
+                        }
+                        const text = element.innerText ?? element.textContent ?? '';
+                        const ariaLabel = element.getAttribute('aria-label') ?? '';
+                        return text.includes(hasText) || ariaLabel.includes(hasText);
+                      }
+                    );
+                    return matches.length > index;
+                }
+                """,
+                arg={
+                    "selector": selector,
+                    "hasText": has_text,
+                    "index": index,
+                },
+                timeout=timeout_ms,
+            )
+            payload = self._page.evaluate(
+                """
+                ({ selector, hasText, index }) => {
+                    const matches = Array.from(document.querySelectorAll(selector)).filter(
+                      (element) => {
+                        if (!hasText) {
+                          return true;
+                        }
+                        const text = element.innerText ?? element.textContent ?? '';
+                        const ariaLabel = element.getAttribute('aria-label') ?? '';
+                        return text.includes(hasText) || ariaLabel.includes(hasText);
+                      }
+                    );
+                    const rect = matches[index].getBoundingClientRect();
+                    return {
+                      x: rect.x,
+                      y: rect.y,
+                      width: rect.width,
+                      height: rect.height,
+                    };
+                }
+                """,
+                arg={
+                    "selector": selector,
+                    "hasText": has_text,
+                    "index": index,
+                },
+            )
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                f'Timed out locating bounding box for selector "{selector}".',
+            ) from error
+        return ElementBoundingBox(
+            x=float(payload["x"]),
+            y=float(payload["y"]),
+            width=float(payload["width"]),
+            height=float(payload["height"]),
+        )
+
+    def mouse_click(self, x: float, y: float, *, delay_ms: int = 0) -> None:
+        self._page.mouse.click(x, y, delay=delay_ms)
+
+    def mouse_move(self, x: float, y: float) -> None:
+        self._page.mouse.move(x, y)
+
+    def start_network_recording(self, *, name: str, url_fragment: str) -> None:
+        self._network_recorders[name] = {
+            "url_fragment": url_fragment.lower(),
+            "next_id": 1,
+            "entries": [],
+            "request_ids": {},
+        }
+
+    def read_network_log(self, *, name: str) -> list[dict[str, object]]:
+        recorder = self._network_recorders.get(name)
+        if recorder is None:
+            return []
+        return [
+            dict(entry)
+            for entry in recorder.get("entries", [])
+            if isinstance(entry, dict)
+        ]
+
+    def _locator(
+        self,
+        selector: str,
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+    ):
+        locator = self._page.locator(selector, has_text=has_text)
+        return locator.nth(index)
+
+    def _handle_page_request(self, request: Request) -> None:
+        request_url = str(getattr(request, "url", ""))
+        request_method = str(getattr(request, "method", "GET")).upper()
+        request_body = self._request_post_data(request)
+        for name, recorder in self._matching_network_recorders(request_url):
+            request_id = f"{name}-{recorder['next_id']}"
+            recorder["next_id"] += 1
+            recorder["request_ids"][id(request)] = request_id
+            self._append_network_entry(
+                recorder,
+                {
+                    "phase": "request",
+                    "transport": "playwright",
+                    "requestId": request_id,
+                    "method": request_method,
+                    "url": request_url,
+                    "bodyText": request_body,
+                },
+            )
+
+    def _handle_page_request_finished(self, request: Request) -> None:
+        request_url = str(getattr(request, "url", ""))
+        request_method = str(getattr(request, "method", "GET")).upper()
+        for _, recorder in self._matching_network_recorders(request_url):
+            request_id = recorder["request_ids"].pop(id(request), None)
+            if not request_id:
+                continue
+            response = request.response()
+            response_status = None if response is None else int(response.status)
+            response_text = self._response_text(response)
+            self._append_network_entry(
+                recorder,
+                {
+                    "phase": "response",
+                    "transport": "playwright",
+                    "requestId": request_id,
+                    "method": request_method,
+                    "url": request_url,
+                    "status": response_status,
+                    "responseText": response_text,
+                },
+            )
+
+    def _handle_page_request_failed(self, request: Request) -> None:
+        request_url = str(getattr(request, "url", ""))
+        request_method = str(getattr(request, "method", "GET")).upper()
+        for _, recorder in self._matching_network_recorders(request_url):
+            request_id = recorder["request_ids"].pop(id(request), None)
+            if not request_id:
+                continue
+            self._append_network_entry(
+                recorder,
+                {
+                    "phase": "error",
+                    "transport": "playwright",
+                    "requestId": request_id,
+                    "method": request_method,
+                    "url": request_url,
+                    "errorText": self._request_failure_text(request),
+                },
+            )
+
+    def _matching_network_recorders(
+        self,
+        request_url: str,
+    ) -> list[tuple[str, dict[str, Any]]]:
+        lowered_url = request_url.lower()
+        return [
+            (name, recorder)
+            for name, recorder in self._network_recorders.items()
+            if str(recorder.get("url_fragment", "")) in lowered_url
+        ]
+
+    def _append_network_entry(
+        self,
+        recorder: dict[str, Any],
+        entry: dict[str, object],
+    ) -> None:
+        entries = recorder.setdefault("entries", [])
+        assert isinstance(entries, list)
+        entries.append(
+            {
+                **entry,
+                "order": len(entries) + 1,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+
+    def _request_post_data(self, request: Request) -> str:
+        post_data = getattr(request, "post_data", None)
+        try:
+            payload = post_data() if callable(post_data) else post_data
+        except Exception as error:  # pragma: no cover - defensive Playwright fallback
+            return f"[[unreadable request body: {error}]]"
+        if payload is None:
+            return ""
+        return str(payload)
+
+    def _response_text(self, response: Response | None) -> str | None:
+        if response is None:
+            return None
+        try:
+            return response.text()
+        except Exception as error:  # pragma: no cover - defensive Playwright fallback
+            return f"[[unreadable response body: {error}]]"
+
+    def _request_failure_text(self, request: Request) -> str | None:
+        failure = getattr(request, "failure", None)
+        try:
+            payload = failure() if callable(failure) else failure
+        except Exception as error:  # pragma: no cover - defensive Playwright fallback
+            return f"[[unreadable request failure: {error}]]"
+        if payload is None:
+            return None
+        return str(payload)
+
+
+class PlaywrightWebAppRuntime(AbstractContextManager[PlaywrightWebAppSession]):
+    def __init__(
+        self,
+        *,
+        viewport_width: int = 1440,
+        viewport_height: int = 960,
+    ) -> None:
+        self._playwright = None
+        self._browser: Browser | None = None
+        self._context: BrowserContext | None = None
+        self._page: Page | None = None
+        self._viewport_width = viewport_width
+        self._viewport_height = viewport_height
+
+    def __enter__(self) -> PlaywrightWebAppSession:
+        self._playwright = sync_playwright().start()
+        self._browser = self._playwright.chromium.launch(
+            headless=True,
+            args=_CHROMIUM_FOREGROUND_TIMING_ARGS,
+        )
+        self._context = self._browser.new_context(
+            viewport={
+                "width": self._viewport_width,
+                "height": self._viewport_height,
+            },
+        )
+        self._page = self._context.new_page()
+        return PlaywrightWebAppSession(self._page)
+
+    def __exit__(self, exc_type, exc, exc_tb) -> None:
+        if self._context is not None:
+            self._context.close()
+        if self._browser is not None:
+            self._browser.close()
+        if self._playwright is not None:
+            self._playwright.stop()
+        return None
+
+
+class PlaywrightStoredTokenWebAppRuntime(
+    AbstractContextManager[PlaywrightWebAppSession],
+):
+    def __init__(
+        self,
+        *,
+        repository: str,
+        token: str,
+        viewport_width: int = 1440,
+        viewport_height: int = 960,
+    ) -> None:
+        self._repository = repository
+        self._token = token
+        self._playwright = None
+        self._browser: Browser | None = None
+        self._context: BrowserContext | None = None
+        self._page: Page | None = None
+        self._viewport_width = viewport_width
+        self._viewport_height = viewport_height
+
+    def __enter__(self) -> PlaywrightWebAppSession:
+        self._playwright = sync_playwright().start()
+        self._browser = self._playwright.chromium.launch(
+            headless=True,
+            args=_CHROMIUM_FOREGROUND_TIMING_ARGS,
+        )
+        self._context = self._browser.new_context(
+            viewport={
+                "width": self._viewport_width,
+                "height": self._viewport_height,
+            },
+        )
+        self._context.route("https://api.github.com/**", self._handle_github_api_route)
+        storage_keys = tuple(
+            sorted(
+                {
+                    self._repository.replace("/", "."),
+                    self._repository.lower().replace("/", "."),
+                },
+            ),
+        )
+        self._context.add_init_script(
+            script=(
+                "(() => {"
+                f"const repositoryStorageKeys = {json.dumps(storage_keys)};"
+                f"const token = {json.dumps(self._token)};"
+                "for (const repositoryStorageKey of repositoryStorageKeys) {"
+                "  const keys = ["
+                "    `trackstate.githubToken.${repositoryStorageKey}`,"
+                "    `flutter.trackstate.githubToken.${repositoryStorageKey}`,"
+                "  ];"
+                "  for (const key of keys) {"
+                "    window.localStorage.setItem(key, token);"
+                "  }"
+                "}"
+                "})()"
+            ),
+        )
+        self._page = self._context.new_page()
+        return PlaywrightWebAppSession(self._page)
+
+    def _handle_github_api_route(self, route: Route) -> None:
+        self._continue_github_api_route(route)
+
+    def _continue_github_api_route(self, route: Route) -> None:
+        route.continue_(headers=self._authorized_github_headers(route.request.headers))
+
+    def _authorized_github_headers(self, headers: dict[str, str]) -> dict[str, str]:
+        return {
+            **headers,
+            "Authorization": f"Bearer {self._token}",
+        }
+
+    def __exit__(self, exc_type, exc, exc_tb) -> None:
+        if self._context is not None:
+            self._context.close()
+        if self._browser is not None:
+            self._browser.close()
+        if self._playwright is not None:
+            self._playwright.stop()
+        return None

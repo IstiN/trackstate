@@ -1,0 +1,7 @@
+test_id: TS-1316
+type: ui
+framework: flutter_test
+platform: widget
+dependencies: []
+notes:
+  - Verifies TRACK-231 is visible before archival, hidden from the active JQL path after archival, and visible again only through the archived JQL path.

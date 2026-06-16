@@ -1,0 +1,18 @@
+test_id: TS-1359
+type: install-script
+framework: unittest
+platform: windows
+dependencies:
+  - PowerShell (pwsh)
+  - Python 3.12+
+  - PyYAML
+notes:
+  - Executes scripts/install/install.ps1 against a local mock GitHub release server in an isolated temporary environment.
+  - Verifies that trackstate.exe is installed under %LOCALAPPDATA%\trackstate\bin and that the install directory is appended to the user PATH exactly once.
+  - Re-running the installer when the install directory is already on PATH must not duplicate the PATH entry.
+  - Detecting an existing trackstate.exe elsewhere on PATH and allowing -Force to override it are expected production behaviors that are currently missing and are reproduced by the test.
+runtime_inputs:
+  install_script_path: scripts/install/install.ps1
+  platform: windows-x64
+  binary_name: trackstate.exe
+  install_dir_relative: trackstate\bin

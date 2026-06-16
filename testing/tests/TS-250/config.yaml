@@ -1,0 +1,28 @@
+test_id: TS-250
+type: ci
+framework: unittest
+platform: python
+dependencies:
+  - gh CLI authenticated with push access to IstiN/trackstate-setup
+  - network access to GitHub REST APIs
+runtime_inputs:
+  repository: IstiN/trackstate-setup
+  workflow_path: .github/workflows/release-on-main.yml
+  workflow_name: Release on main
+  dry_run_name_markers:
+    - dry run
+    - dry-run
+  dry_run_command_markers:
+    - --dry-run
+    - dry-run
+  base_branch: main
+  probe_file_path: README.md
+  branch_prefix: ts250-release-dry-run-probe
+  pull_request_title: "TS-250 disposable probe: verify pull-request release dry-run"
+  pull_request_body: "Disposable PR created by TS-250 automation to verify that pull requests into main expose a successful release dry-run check before merge."
+  poll_interval_seconds: 5
+  run_timeout_seconds: 90
+  pull_request_timeout_seconds: 60
+notes:
+  - Creates a disposable pull request in IstiN/trackstate-setup and observes the live GitHub Actions checks visible on that PR.
+  - Passes only when the release workflow source declares a pull_request dry-run and the disposable PR shows a successful dry-run step on GitHub.

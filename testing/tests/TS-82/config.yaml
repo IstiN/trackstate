@@ -1,0 +1,7 @@
+test_id: TS-82
+type: web
+framework: unittest
+platform: python
+dependencies:
+  - gh authenticated with read access to IstiN/trackstate-setup
+  - Playwright Chromium runtime for the GitHub directory visibility check
