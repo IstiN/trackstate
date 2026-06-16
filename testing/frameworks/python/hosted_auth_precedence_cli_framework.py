@@ -5,6 +5,8 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import urllib.error
+import urllib.request
 
 from testing.core.config.hosted_auth_precedence_cli_config import (
     HostedAuthPrecedenceCliConfig,
@@ -69,6 +71,68 @@ class PythonHostedAuthPrecedenceCliFramework:
                 ),
             ),
             None,
+        )
+
+    def verify_hosted_repository_has_project_json(
+        self,
+        *,
+        config: HostedAuthPrecedenceCliConfig,
+        environment_token: str,
+    ) -> tuple[bool, str | None]:
+        branch = os.environ.get("TS271_REPOSITORY_REF", "main")
+        url = (
+            f"https://api.github.com/repos/{config.repository}"
+            f"/git/trees/{branch}?recursive=1"
+        )
+        headers = {
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "trackstate-ts271-automation",
+        }
+        if environment_token:
+            headers["Authorization"] = f"Bearer {environment_token}"
+        request = urllib.request.Request(url, headers=headers)
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as error:
+            body = error.read().decode("utf-8", errors="replace")
+            return (
+                False,
+                f"GitHub API returned HTTP {error.code} while probing "
+                f"{config.repository} for project.json: {body}",
+            )
+        except urllib.error.URLError as error:
+            return (
+                False,
+                f"Could not reach GitHub API to probe {config.repository} "
+                f"for project.json: {error.reason}",
+            )
+        except Exception as error:  # noqa: BLE001
+            return (
+                False,
+                f"Unexpected error probing {config.repository} for project.json: "
+                f"{type(error).__name__}: {error}",
+            )
+
+        tree = payload.get("tree", [])
+        if not isinstance(tree, list):
+            return (
+                False,
+                f"GitHub API tree payload for {config.repository} did not contain "
+                "a list of entries.",
+            )
+
+        for entry in tree:
+            if not isinstance(entry, dict):
+                continue
+            path = entry.get("path", "")
+            if path == "project.json" or path.endswith("/project.json"):
+                return True, path
+        return (
+            False,
+            f"No project.json was found in {config.repository}@{branch}. "
+            "The configured repository does not appear to be an initialized "
+            "TrackState project.",
         )
 
     def hosted_session_with_environment_token(
