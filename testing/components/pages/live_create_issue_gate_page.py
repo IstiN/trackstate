@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from testing.components.pages.live_project_settings_page import (
+    LiveProjectSettingsPage,
+    RepositoryAccessControlsObservation,
+)
 from testing.components.pages.trackstate_tracker_page import TrackStateTrackerPage
 from testing.core.interfaces.web_app_session import WebAppTimeoutError
 
@@ -13,6 +17,7 @@ class CreateIssueGateObservation:
     callout_semantics_label: str
     create_heading_visible: bool
     summary_field_count: int
+    description_field_count: int
     create_button_count: int
     save_button_count: int
     open_settings_button_count: int
@@ -80,6 +85,21 @@ class LiveCreateIssueGatePage:
               );
               const pointInRect = (x, y, rect) =>
                 x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+              const candidateSort = (left, right) => {
+                if (left.role === 'dialog' && right.role !== 'dialog') {
+                  return -1;
+                }
+                if (left.role !== 'dialog' && right.role === 'dialog') {
+                  return 1;
+                }
+                if (left.label === createLabel && right.label !== createLabel) {
+                  return -1;
+                }
+                if (left.label !== createLabel && right.label === createLabel) {
+                  return 1;
+                }
+                return right.area - left.area;
+              };
               const buttons = Array.from(
                 document.querySelectorAll('flt-semantics[role="button"]'),
               )
@@ -112,6 +132,8 @@ class LiveCreateIssueGatePage:
                     right: rect.right,
                     top: rect.top,
                     bottom: rect.bottom,
+                    role: candidate.getAttribute('role'),
+                    label: candidate.getAttribute('aria-label') ?? '',
                   };
                 })
                 .sort((left, right) => left.area - right.area);
@@ -120,7 +142,14 @@ class LiveCreateIssueGatePage:
                   pointInRect(button.centerX, button.centerY, container),
                 ),
               );
-              return bodyText.includes(createLabel) && !!gateButton;
+              const createSurface = gateButton
+                ? containers
+                    .filter((candidate) =>
+                      pointInRect(gateButton.centerX, gateButton.centerY, candidate),
+                    )
+                    .sort(candidateSort)[0] ?? null
+                : null;
+              return bodyText.includes(createLabel) && !!gateButton && !!createSurface;
             }
             """,
             arg={"actionLabel": primary_action_label},
@@ -155,11 +184,35 @@ class LiveCreateIssueGatePage:
               );
               const pointInRect = (x, y, rect) =>
                 x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
-              const buttonCount = (label) => Array.from(
+              const candidateSort = (left, right) => {
+                if (left.role === 'dialog' && right.role !== 'dialog') {
+                  return -1;
+                }
+                if (left.role !== 'dialog' && right.role === 'dialog') {
+                  return 1;
+                }
+                if (left.label === createLabel && right.label !== createLabel) {
+                  return -1;
+                }
+                if (left.label !== createLabel && right.label === createLabel) {
+                  return 1;
+                }
+                return right.area - left.area;
+              };
+              const buttonMatches = (label, scope, visibleOnly) => Array.from(
                 document.querySelectorAll('flt-semantics[role="button"]'),
               ).filter((candidate) => {
                 const text = elementText(candidate);
-                return isVisible(candidate) && text.includes(label);
+                if (!text.includes(label)) {
+                  return false;
+                }
+                if (visibleOnly && !isVisible(candidate)) {
+                  return false;
+                }
+                const rect = candidate.getBoundingClientRect();
+                const centerX = rect.left + (rect.width / 2);
+                const centerY = rect.top + (rect.height / 2);
+                return scope === null || pointInRect(centerX, centerY, scope);
               }).length;
               const buttons = Array.from(
                 document.querySelectorAll('flt-semantics[role="button"]'),
@@ -194,6 +247,7 @@ class LiveCreateIssueGatePage:
                     right: rect.right,
                     top: rect.top,
                     bottom: rect.bottom,
+                    role: candidate.getAttribute('role'),
                     label: candidate.getAttribute('aria-label') ?? '',
                     text,
                   };
@@ -215,6 +269,13 @@ class LiveCreateIssueGatePage:
                 })
                 .find((candidate) => candidate !== null);
               const gateContainer = gateMatch?.container ?? null;
+              const createSurface = gateMatch
+                ? containers
+                    .filter((candidate) =>
+                      pointInRect(gateMatch.centerX, gateMatch.centerY, candidate),
+                    )
+                    .sort(candidateSort)[0] ?? null
+                : null;
               const gateOpenSettingsButtonCount = gateContainer
                 ? buttons.filter((button) =>
                     pointInRect(button.centerX, button.centerY, gateContainer),
@@ -226,9 +287,10 @@ class LiveCreateIssueGatePage:
                 calloutSemanticsLabel: gateContainer?.label ?? '',
                 createHeadingVisible: bodyText.includes(createLabel),
                 summaryFieldCount: document.querySelectorAll('input[aria-label="Summary"]').length,
-                createButtonCount: buttonCount('Create'),
-                saveButtonCount: buttonCount('Save'),
-                openSettingsButtonCount: buttonCount(actionLabel),
+                descriptionFieldCount: document.querySelectorAll('textarea[aria-label="Description"]').length,
+                createButtonCount: buttonMatches('Create', createSurface, true),
+                saveButtonCount: buttonMatches('Save', createSurface, true),
+                openSettingsButtonCount: buttonMatches(actionLabel, null, true),
                 gateOpenSettingsButtonCount,
                 gateCtaCenterX: gateMatch?.centerX ?? null,
                 gateCtaCenterY: gateMatch?.centerY ?? null,
@@ -248,6 +310,7 @@ class LiveCreateIssueGatePage:
             callout_semantics_label=str(payload["calloutSemanticsLabel"]),
             create_heading_visible=bool(payload["createHeadingVisible"]),
             summary_field_count=int(payload["summaryFieldCount"]),
+            description_field_count=int(payload["descriptionFieldCount"]),
             create_button_count=int(payload["createButtonCount"]),
             save_button_count=int(payload["saveButtonCount"]),
             open_settings_button_count=int(payload["openSettingsButtonCount"]),
@@ -265,7 +328,7 @@ class LiveCreateIssueGatePage:
         gate: CreateIssueGateObservation,
         *,
         timeout_ms: int = 60_000,
-    ) -> str:
+    ) -> RepositoryAccessControlsObservation:
         if gate.gate_cta_center_x is None or gate.gate_cta_center_y is None:
             raise AssertionError(
                 "Step 5 failed: the create issue gate did not expose a clickable "
@@ -274,26 +337,15 @@ class LiveCreateIssueGatePage:
                 f"Observed body text:\n{self.current_body_text()}",
             )
         self._session.mouse_click(gate.gate_cta_center_x, gate.gate_cta_center_y)
-        settings_snapshot = self._session.wait_for_function(
-            """
-            (requiredFragments) => {
-              const snapshot = Array.from(document.querySelectorAll('flt-semantics'))
-                .flatMap((element) => [
-                  element.getAttribute('aria-label') ?? '',
-                  element.innerText ?? '',
-                ])
-                .map((value) => value.trim())
-                .filter((value) => value.length > 0)
-                .join('\\n');
-              return requiredFragments.every((fragment) => snapshot.includes(fragment))
-                ? snapshot
-                : null;
-            }
-            """,
-            arg=["Project Settings", "Repository access"],
-            timeout_ms=timeout_ms,
-        )
-        return str(settings_snapshot)
+        settings_page = LiveProjectSettingsPage(self._tracker_page)
+        try:
+            return settings_page.observe_repository_access_controls(timeout_ms=timeout_ms)
+        except AssertionError as error:
+            raise AssertionError(
+                "Step 5 failed: clicking the Create issue gate CTA did not route the user "
+                "to a visible Project Settings / Repository access surface.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
 
     def current_body_text(self) -> str:
         return self._tracker_page.body_text()

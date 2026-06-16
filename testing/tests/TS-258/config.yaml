@@ -29,8 +29,7 @@ runtime_inputs:
   expected_actionlint_marker: actionlint
   expected_log_markers:
     - .github/workflows/new-utility.yml
-    - workflow_dispatch
-    - branches
+    - "job `noop` is missing timeout-minutes"
   poll_interval_seconds: 5
   run_timeout_seconds: 90
 notes:

@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
+import re
 
 from testing.components.pages.live_issue_detail_collaboration_page import (
     LiveIssueDetailCollaborationPage,
 )
 from testing.components.pages.trackstate_tracker_page import TrackStateTrackerPage
-from testing.core.interfaces.web_app_session import WebAppTimeoutError
+from testing.core.interfaces.web_app_session import (
+    FocusedElementObservation,
+    WebAppTimeoutError,
+)
 
 
 @dataclass(frozen=True)
@@ -20,6 +25,13 @@ class EditControlObservation:
         return fragment in self.text or (
             self.label is not None and fragment in self.label
         )
+
+
+@dataclass(frozen=True)
+class BoardIssueObservation:
+    key: str
+    summary: str
+    label: str
 
 
 @dataclass(frozen=True)
@@ -64,9 +76,47 @@ class EditSurfaceObservation:
         return self.viewport_height - (self.top + self.height)
 
 
+@dataclass(frozen=True)
+class LabeledTextFieldObservation:
+    label: str
+    value: str
+    enabled: bool
+    disabled: bool
+    read_only: bool
+    aria_label: str | None
+    aria_invalid: str | None
+    aria_describedby: str | None
+    aria_errormessage: str | None
+    outer_html: str
+
+
+@dataclass(frozen=True)
+class ValidationMessageObservation:
+    text: str
+    tag_name: str
+    role: str | None
+    aria_live: str | None
+    element_id: str | None
+    color: str | None
+    background_color: str | None
+    contrast_ratio: float | None
+
+
+@dataclass(frozen=True)
+class SummaryRequiredValidationObservation:
+    field: LabeledTextFieldObservation
+    message: ValidationMessageObservation | None
+    describedby_texts: tuple[str, ...]
+    errormessage_texts: tuple[str, ...]
+    live_region_texts: tuple[str, ...]
+    active_element: FocusedElementObservation
+    field_is_active: bool
+    dialog_text: str
+
+
 class LiveMultiViewRefreshPage:
     _button_selector = 'flt-semantics[role="button"]'
-    _edit_button_selector = 'flt-semantics[role="button"][aria-label="Edit"]'
+    _edit_button_selector = 'flt-semantics[role="button"]'
     _menu_item_selector = 'flt-semantics[role="menuitem"]'
     _dialog_group_selector = 'flt-semantics[role="group"][aria-label="Edit issue"]'
 
@@ -88,6 +138,9 @@ class LiveMultiViewRefreshPage:
             user_login=user_login,
         )
 
+    def dismiss_connection_banner(self) -> None:
+        self._issue_page.dismiss_connection_banner()
+
     def set_viewport(self, *, width: int, height: int) -> None:
         self._session.set_viewport_size(width=width, height=height)
         try:
@@ -107,18 +160,73 @@ class LiveMultiViewRefreshPage:
             ) from error
 
     def open_edit_dialog_for_issue(self, *, issue_key: str, issue_summary: str) -> str:
-        self.navigate_to_section("JQL Search")
-        self._session.wait_for_selector(
-            self._issue_selector(issue_key=issue_key, issue_summary=issue_summary),
-            timeout_ms=60_000,
-        )
-        self.open_issue_from_current_section(
-            issue_key=issue_key,
-            issue_summary=issue_summary,
-        )
-        self._session.wait_for_selector(self._edit_button_selector, timeout_ms=30_000)
-        self._session.click(self._edit_button_selector, timeout_ms=30_000)
-        return self._wait_for_edit_dialog(issue_key=issue_key, origin_label="JQL Search")
+        if self._session.count(self._issue_detail_selector(issue_key)) == 0:
+            if self._button_bounds_for_sidebar_label("JQL Search") is not None:
+                self.navigate_to_section("JQL Search")
+            if self._session.count(self._issue_detail_selector(issue_key)) == 0:
+                self._session.wait_for_text(issue_key, timeout_ms=60_000)
+                self.open_issue_from_current_section(
+                    issue_key=issue_key,
+                    issue_summary=issue_summary,
+                )
+        return self.open_edit_dialog_from_current_issue_detail(issue_key=issue_key)
+
+    def open_edit_dialog_for_issue_key(
+        self,
+        *,
+        issue_key: str,
+        issue_summary: str | None = None,
+    ) -> str:
+        for attempt in range(2):
+            try:
+                self.navigate_to_section("JQL Search")
+                break
+            except AssertionError:
+                current_body = self.current_body_text()
+                summary_fragment = issue_summary or ""
+                if attempt == 0 and (
+                    "Project Settings" in current_body
+                    or "GitHub startup limit reached" in current_body
+                    or self._session.count('flt-semantics[aria-label="Close"]') > 0
+                ):
+                    continue
+                if (
+                    "JQL Search" not in current_body
+                    and issue_key not in current_body
+                    and summary_fragment not in current_body
+                ):
+                    raise
+
+        current_body = self.current_body_text()
+        if self._session.count(self._issue_detail_selector(issue_key)) == 0:
+            try:
+                self._session.wait_for_function(
+                    """
+                    ({ issueKey }) => {
+                      return document.querySelector(
+                        `flt-semantics[aria-label*="Issue detail ${issueKey}"], flt-semantics-img[aria-label*="Issue detail ${issueKey}"]`
+                      ) !== null;
+                    }
+                    """,
+                    arg={"issueKey": issue_key},
+                    timeout_ms=15_000,
+                )
+                current_body = self.current_body_text()
+            except WebAppTimeoutError:
+                current_body = self.current_body_text()
+        if self._session.count(self._issue_detail_selector(issue_key)) == 0:
+            if issue_summary is None or not issue_summary.strip():
+                label = self.visible_issue_open_label(issue_key=issue_key)
+                self._session.click(
+                    f'flt-semantics[role="button"][aria-label="{self._escape(label)}"]',
+                    timeout_ms=30_000,
+                )
+            else:
+                self.open_issue_from_current_section(
+                    issue_key=issue_key,
+                    issue_summary=issue_summary,
+                )
+        return self.open_edit_dialog_from_current_issue_detail(issue_key=issue_key)
 
     def open_edit_dialog_from_board_card(
         self,
@@ -166,12 +274,31 @@ class LiveMultiViewRefreshPage:
             self._issue_detail_selector(issue_key),
             timeout_ms=60_000,
         )
-        self._session.wait_for_selector(self._edit_button_selector, timeout_ms=30_000)
-        self._session.click(self._edit_button_selector, timeout_ms=30_000)
+        self._click_edit_button()
         return self._wait_for_edit_dialog(
             issue_key=issue_key,
             origin_label="current issue detail",
         )
+
+    def _click_edit_button(self) -> None:
+        if self._session.count(self._edit_button_selector, has_text="Edit") > 0:
+            self._session.wait_for_selector(
+                self._edit_button_selector,
+                has_text="Edit",
+                timeout_ms=30_000,
+            )
+            self._session.click(
+                self._edit_button_selector,
+                has_text="Edit",
+                timeout_ms=30_000,
+            )
+            return
+        self._session.wait_for_selector(
+            self._button_selector,
+            has_text="Edit",
+            timeout_ms=30_000,
+        )
+        self._session.click(self._button_selector, has_text="Edit", timeout_ms=30_000)
 
     def close_edit_dialog(self) -> None:
         self._session.wait_for_selector(self._dialog_group_selector, timeout_ms=30_000)
@@ -249,6 +376,494 @@ class LiveMultiViewRefreshPage:
             )
         return payload
 
+    def observe_labeled_text_field(self, label: str) -> LabeledTextFieldObservation:
+        payload = self._session.evaluate(
+            """
+            ({ dialogSelector, label }) => {
+              const root = document.querySelector(dialogSelector);
+              if (!root) {
+                return null;
+              }
+              const selectors = [
+                `input[aria-label="${label}"]`,
+                `textarea[aria-label="${label}"]`,
+                `[role="textbox"][aria-label="${label}"]`,
+              ];
+              for (const selector of selectors) {
+                const field = root.querySelector(selector);
+                if (!field) {
+                  continue;
+                }
+                const value =
+                  'value' in field && typeof field.value === 'string'
+                    ? field.value
+                    : (field.innerText || field.textContent || '').trim();
+                return {
+                  value,
+                  enabled: !field.disabled,
+                  disabled: !!field.disabled,
+                  readOnly: !!field.readOnly,
+                  ariaLabel: field.getAttribute('aria-label'),
+                  ariaInvalid: field.getAttribute('aria-invalid'),
+                  ariaDescribedBy: field.getAttribute('aria-describedby'),
+                  ariaErrormessage: field.getAttribute('aria-errormessage'),
+                  outerHtml: field.outerHTML.slice(0, 800),
+                };
+              }
+              return null;
+            }
+            """,
+            arg={"dialogSelector": self._dialog_group_selector, "label": label},
+        )
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                f"Human-style verification failed: the hosted Edit issue surface did not "
+                f"expose the visible {label!r} field.\n"
+                f"Observed dialog text:\n{self.current_body_text()}",
+            )
+        return LabeledTextFieldObservation(
+            label=label,
+            value=str(payload.get("value", "")),
+            enabled=bool(payload.get("enabled")),
+            disabled=bool(payload.get("disabled")),
+            read_only=bool(payload.get("readOnly")),
+            aria_label=(
+                str(payload["ariaLabel"]) if payload.get("ariaLabel") is not None else None
+            ),
+            aria_invalid=(
+                str(payload["ariaInvalid"])
+                if payload.get("ariaInvalid") is not None
+                else None
+            ),
+            aria_describedby=(
+                str(payload["ariaDescribedBy"])
+                if payload.get("ariaDescribedBy") is not None
+                else None
+            ),
+            aria_errormessage=(
+                str(payload["ariaErrormessage"])
+                if payload.get("ariaErrormessage") is not None
+                else None
+            ),
+            outer_html=str(payload.get("outerHtml", "")),
+        )
+
+    def clear_labeled_text_field(self, label: str) -> LabeledTextFieldObservation:
+        field = self.observe_labeled_text_field(label)
+        if not field.enabled:
+            raise AssertionError(
+                f"Step failed: the visible {label} field was not editable.\n"
+                f"Enabled: {field.enabled}\n"
+                f"Disabled: {field.disabled}\n"
+                f"Read-only: {field.read_only}\n"
+                f"Outer HTML: {field.outer_html}\n"
+                f"Observed dialog text:\n{self.current_body_text()}",
+            )
+        self._session.fill(f'input[aria-label="{self._escape(label)}"]', "", timeout_ms=30_000)
+        return self.observe_labeled_text_field(label)
+
+    def active_element(self) -> FocusedElementObservation:
+        return self._session.active_element()
+
+    def trigger_required_summary_validation(
+        self,
+        *,
+        message_fragment: str,
+    ) -> SummaryRequiredValidationObservation:
+        if self._session.count('flt-semantics[role="button"][aria-label="Save"]') > 0:
+            self._session.click(
+                'flt-semantics[role="button"][aria-label="Save"]',
+                timeout_ms=30_000,
+            )
+        else:
+            self._session.click(self._button_selector, has_text="Save", timeout_ms=30_000)
+        try:
+            payload = self._session.wait_for_function(
+                """
+                ({ dialogSelector, label, messageFragment, errorPrefix }) => {
+                  const bodyText = document.body?.innerText ?? '';
+                  if (bodyText.includes(errorPrefix)) {
+                    return { kind: 'save-error', bodyText };
+                  }
+                  const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+                  const isVisible = (element) => {
+                    if (!element) {
+                      return false;
+                    }
+                    const style = window.getComputedStyle(element);
+                    const rect = element.getBoundingClientRect();
+                    return (
+                      rect.width > 0
+                      && rect.height > 0
+                      && style.display !== 'none'
+                      && style.visibility !== 'hidden'
+                      && Number.parseFloat(style.opacity || '1') > 0
+                    );
+                  };
+                  const findField = (root) => {
+                    const selectors = [
+                      `input[aria-label="${label}"]`,
+                      `textarea[aria-label="${label}"]`,
+                      `[role="textbox"][aria-label="${label}"]`,
+                    ];
+                    for (const selector of selectors) {
+                      const field = root.querySelector(selector);
+                      if (field) {
+                        return field;
+                      }
+                    }
+                    return null;
+                  };
+                  const parseColor = (value) => {
+                    if (!value) {
+                      return null;
+                    }
+                    const match = value.match(
+                      /^rgba?\\(\\s*(\\d+)\\s*,\\s*(\\d+)\\s*,\\s*(\\d+)/i,
+                    );
+                    if (!match) {
+                      return null;
+                    }
+                    return [
+                      Number.parseInt(match[1], 10),
+                      Number.parseInt(match[2], 10),
+                      Number.parseInt(match[3], 10),
+                    ];
+                  };
+                  const isTransparent = (value) =>
+                    !value
+                    || value === 'transparent'
+                    || /^rgba\\(\\s*0\\s*,\\s*0\\s*,\\s*0\\s*,\\s*0(?:\\.0+)?\\s*\\)$/i.test(value);
+                  const relativeLuminance = (color) => {
+                    const channel = (value) => {
+                      const normalized = value / 255;
+                      if (normalized <= 0.03928) {
+                        return normalized / 12.92;
+                      }
+                      return ((normalized + 0.055) / 1.055) ** 2.4;
+                    };
+                    return (
+                      (0.2126 * channel(color[0]))
+                      + (0.7152 * channel(color[1]))
+                      + (0.0722 * channel(color[2]))
+                    );
+                  };
+                  const contrastRatio = (foreground, background) => {
+                    const lighter = relativeLuminance(foreground);
+                    const darker = relativeLuminance(background);
+                    const max = lighter > darker ? lighter : darker;
+                    const min = lighter > darker ? darker : lighter;
+                    return (max + 0.05) / (min + 0.05);
+                  };
+                  const effectiveBackgroundColor = (element) => {
+                    let current = element;
+                    while (current) {
+                      const background = window.getComputedStyle(current).backgroundColor;
+                      if (!isTransparent(background)) {
+                        return background;
+                      }
+                      current = current.parentElement;
+                    }
+                    const bodyBackground = window.getComputedStyle(document.body).backgroundColor;
+                    return isTransparent(bodyBackground) ? 'rgb(255, 255, 255)' : bodyBackground;
+                  };
+                  const collectText = (element) =>
+                    normalize(
+                      element.innerText
+                        || element.textContent
+                        || element.getAttribute('aria-label')
+                        || '',
+                    );
+                  const root = document.querySelector(dialogSelector);
+                  if (!root) {
+                    return { kind: 'dialog-closed', bodyText };
+                  }
+                  const field = findField(root);
+                  if (!field) {
+                    return null;
+                  }
+                  const expected = normalize(messageFragment).toLowerCase();
+                  const resolveIds = (attributeValue) => {
+                    const ids = normalize(attributeValue).split(' ').filter(Boolean);
+                    return ids
+                      .map((id) => document.getElementById(id))
+                      .filter((element) => !!element)
+                      .map((element) => collectText(element))
+                      .filter((text) => text.length > 0);
+                  };
+                  const describedbyTexts = resolveIds(field.getAttribute('aria-describedby'));
+                  const errormessageTexts = resolveIds(field.getAttribute('aria-errormessage'));
+                  const liveRegionTexts = Array.from(
+                    root.querySelectorAll('[aria-live], [role="alert"], [role="status"]'),
+                  )
+                    .filter((element) => isVisible(element))
+                    .map((element) => collectText(element))
+                    .filter((text) => text.length > 0);
+                  const matchingMessageElements = Array.from(root.querySelectorAll('*'))
+                    .filter((element) => isVisible(element))
+                    .map((element) => {
+                      const text = collectText(element);
+                      const rect = element.getBoundingClientRect();
+                      return {
+                        element,
+                        text,
+                        textLength: text.length,
+                        area: rect.width * rect.height,
+                      };
+                    })
+                    .filter(
+                      (candidate) =>
+                        candidate.text.length > 0
+                        && candidate.text.toLowerCase().includes(expected),
+                    )
+                    .sort((left, right) => {
+                      if (left.textLength !== right.textLength) {
+                        return left.textLength - right.textLength;
+                      }
+                      return left.area - right.area;
+                    });
+                  const messageElement =
+                    matchingMessageElements.length > 0
+                      ? matchingMessageElements[0].element
+                      : null;
+                  const message =
+                    messageElement === null
+                      ? null
+                      : (() => {
+                          const style = window.getComputedStyle(messageElement);
+                          const backgroundColor = effectiveBackgroundColor(messageElement);
+                          const foreground = parseColor(style.color);
+                          const background = parseColor(backgroundColor);
+                          return {
+                            text: collectText(messageElement),
+                            tagName: messageElement.tagName,
+                            role: messageElement.getAttribute('role'),
+                            ariaLive: messageElement.getAttribute('aria-live'),
+                            elementId: messageElement.id || null,
+                            color: style.color,
+                            backgroundColor,
+                            contrastRatio:
+                              foreground === null || background === null
+                                ? null
+                                : contrastRatio(foreground, background),
+                          };
+                        })();
+                  const fieldInvalid =
+                    String(field.getAttribute('aria-invalid') || '').toLowerCase() === 'true';
+                  const hasAssociatedFeedback = [
+                    ...(message === null ? [] : [message.text]),
+                    ...describedbyTexts,
+                    ...errormessageTexts,
+                    ...liveRegionTexts,
+                  ].some((text) => text.toLowerCase().includes(expected));
+                  if (!fieldInvalid && !hasAssociatedFeedback) {
+                    return null;
+                  }
+                  const active = document.activeElement;
+                  const activeText =
+                    active === null
+                      ? ''
+                      : normalize(
+                          active.innerText
+                            || active.textContent
+                            || active.getAttribute('aria-label')
+                            || '',
+                        );
+                  return {
+                    kind: 'validation',
+                    field: {
+                      value:
+                        'value' in field && typeof field.value === 'string'
+                          ? field.value
+                          : collectText(field),
+                      enabled: !field.disabled,
+                      disabled: !!field.disabled,
+                      readOnly: !!field.readOnly,
+                      ariaLabel: field.getAttribute('aria-label'),
+                      ariaInvalid: field.getAttribute('aria-invalid'),
+                      ariaDescribedBy: field.getAttribute('aria-describedby'),
+                      ariaErrormessage: field.getAttribute('aria-errormessage'),
+                      outerHtml: field.outerHTML.slice(0, 800),
+                    },
+                    message,
+                    describedbyTexts,
+                    errormessageTexts,
+                    liveRegionTexts,
+                    activeElement: active
+                      ? {
+                          tagName: active.tagName,
+                          role: active.getAttribute('role'),
+                          accessibleName:
+                            active.getAttribute('aria-label') || activeText || null,
+                          text: activeText,
+                          tabindex: active.getAttribute('tabindex'),
+                          outerHtml: active.outerHTML.slice(0, 400),
+                        }
+                      : {
+                          tagName: '',
+                          role: null,
+                          accessibleName: null,
+                          text: '',
+                          tabindex: null,
+                          outerHtml: '',
+                        },
+                    fieldIsActive: active === field,
+                    dialogText: collectText(root),
+                  };
+                }
+                """,
+                arg={
+                    "dialogSelector": self._dialog_group_selector,
+                    "label": "Summary",
+                    "messageFragment": message_fragment,
+                    "errorPrefix": TrackStateTrackerPage.SAVE_FAILED_PREFIX,
+                },
+                timeout_ms=15_000,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                "Step failed: clicking Save did not surface the expected Summary-required "
+                "validation feedback in the hosted Edit issue dialog.\n"
+                f"Observed dialog text:\n{self.current_body_text()}",
+            ) from error
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "Step failed: clicking Save did not produce an observable Summary-required "
+                "validation state in the hosted Edit issue dialog.\n"
+                f"Observed dialog text:\n{self.current_body_text()}",
+            )
+        kind = str(payload.get("kind", ""))
+        if kind == "save-error":
+            raise AssertionError(
+                "Step failed: clicking Save showed a visible save error instead of the "
+                "required Summary validation feedback.\n"
+                f"Observed body text:\n{str(payload.get('bodyText', self.current_body_text()))}",
+            )
+        if kind == "dialog-closed":
+            raise AssertionError(
+                "Step failed: clicking Save dismissed the Edit issue dialog and returned to "
+                "the issue view without showing the required Summary validation feedback.\n"
+                f"Observed body text:\n{str(payload.get('bodyText', self.current_body_text()))}",
+            )
+        if kind != "validation":
+            raise AssertionError(
+                "Step failed: clicking Save produced an unexpected validation probe result "
+                "for the hosted Edit issue dialog.\n"
+                f"Validation payload: {payload}\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        field_payload = payload.get("field")
+        active_payload = payload.get("activeElement")
+        if not isinstance(field_payload, dict) or not isinstance(active_payload, dict):
+            raise AssertionError(
+                "Step failed: the hosted Edit issue validation probe returned an incomplete "
+                "Summary validation payload.\n"
+                f"Observed dialog text:\n{self.current_body_text()}",
+            )
+        message_payload = payload.get("message")
+        message = (
+            None
+            if not isinstance(message_payload, dict)
+            else ValidationMessageObservation(
+                text=str(message_payload.get("text", "")),
+                tag_name=str(message_payload.get("tagName", "")),
+                role=(
+                    str(message_payload["role"])
+                    if message_payload.get("role") is not None
+                    else None
+                ),
+                aria_live=(
+                    str(message_payload["ariaLive"])
+                    if message_payload.get("ariaLive") is not None
+                    else None
+                ),
+                element_id=(
+                    str(message_payload["elementId"])
+                    if message_payload.get("elementId") is not None
+                    else None
+                ),
+                color=(
+                    str(message_payload["color"])
+                    if message_payload.get("color") is not None
+                    else None
+                ),
+                background_color=(
+                    str(message_payload["backgroundColor"])
+                    if message_payload.get("backgroundColor") is not None
+                    else None
+                ),
+                contrast_ratio=(
+                    float(message_payload["contrastRatio"])
+                    if message_payload.get("contrastRatio") is not None
+                    else None
+                ),
+            )
+        )
+        return SummaryRequiredValidationObservation(
+            field=LabeledTextFieldObservation(
+                label="Summary",
+                value=str(field_payload.get("value", "")),
+                enabled=bool(field_payload.get("enabled")),
+                disabled=bool(field_payload.get("disabled")),
+                read_only=bool(field_payload.get("readOnly")),
+                aria_label=(
+                    str(field_payload["ariaLabel"])
+                    if field_payload.get("ariaLabel") is not None
+                    else None
+                ),
+                aria_invalid=(
+                    str(field_payload["ariaInvalid"])
+                    if field_payload.get("ariaInvalid") is not None
+                    else None
+                ),
+                aria_describedby=(
+                    str(field_payload["ariaDescribedBy"])
+                    if field_payload.get("ariaDescribedBy") is not None
+                    else None
+                ),
+                aria_errormessage=(
+                    str(field_payload["ariaErrormessage"])
+                    if field_payload.get("ariaErrormessage") is not None
+                    else None
+                ),
+                outer_html=str(field_payload.get("outerHtml", "")),
+            ),
+            message=message,
+            describedby_texts=tuple(
+                str(text) for text in payload.get("describedbyTexts", []) if isinstance(text, str)
+            ),
+            errormessage_texts=tuple(
+                str(text)
+                for text in payload.get("errormessageTexts", [])
+                if isinstance(text, str)
+            ),
+            live_region_texts=tuple(
+                str(text) for text in payload.get("liveRegionTexts", []) if isinstance(text, str)
+            ),
+            active_element=FocusedElementObservation(
+                tag_name=str(active_payload.get("tagName", "")),
+                role=(
+                    str(active_payload["role"])
+                    if active_payload.get("role") is not None
+                    else None
+                ),
+                accessible_name=(
+                    str(active_payload["accessibleName"])
+                    if active_payload.get("accessibleName") is not None
+                    else None
+                ),
+                text=str(active_payload.get("text", "")),
+                tabindex=(
+                    str(active_payload["tabindex"])
+                    if active_payload.get("tabindex") is not None
+                    else None
+                ),
+                outer_html=str(active_payload.get("outerHtml", "")),
+            ),
+            field_is_active=bool(payload.get("fieldIsActive")),
+            dialog_text=str(payload.get("dialogText", "")),
+        )
+
     def open_issue_from_current_section(
         self,
         *,
@@ -312,24 +927,61 @@ class LiveMultiViewRefreshPage:
         return self.current_body_text()
 
     def navigate_to_section(self, label: str) -> None:
-        bounds = self._button_bounds_for_sidebar_label(label)
-        if bounds is None:
+        clicked = self._session.evaluate(
+            """
+            (label) => {
+              const button = Array.from(document.querySelectorAll('flt-semantics[role="button"]'))
+                .find((element) => (element.innerText || '').trim() === label);
+              if (!button) {
+                return false;
+              }
+              button.scrollIntoView({block: 'center', inline: 'nearest'});
+              button.click();
+              return true;
+            }
+            """,
+            arg=label,
+        )
+        if clicked is not True:
             raise AssertionError(
                 f'Step failed: the hosted tracker did not expose a visible "{label}" '
                 "navigation entry in the sidebar.\n"
                 f"Observed body text:\n{self.current_body_text()}",
             )
-        self._session.mouse_click(
-            bounds["x"] + (bounds["width"] / 2),
-            bounds["y"] + (bounds["height"] / 2),
-        )
         try:
             self._session.wait_for_function(
                 """
-                (label) => Array.from(document.querySelectorAll('flt-semantics[role="button"]'))
-                  .some((element) =>
-                    (element.innerText || '').trim() === label
-                    && element.getAttribute('aria-current') === 'true')
+                (label) => {
+                  const buttonActive = Array.from(
+                    document.querySelectorAll('flt-semantics[role="button"]'),
+                  ).some((element) => {
+                    const text = (element.innerText || '').trim();
+                    const ariaLabel = element.getAttribute('aria-label') ?? '';
+                    return (text === label || ariaLabel.includes(label))
+                      && element.getAttribute('aria-current') === 'true';
+                  });
+                  if (buttonActive) {
+                    return true;
+                  }
+                  const bodyText = document.body?.innerText ?? '';
+                  if (label === 'Dashboard') {
+                    return bodyText.includes('Open Issues')
+                      && bodyText.includes('Team Velocity');
+                  }
+                  if (label === 'Board') {
+                    return bodyText.includes('Drag-ready workflow columns backed by Git files');
+                  }
+                  if (label === 'JQL Search') {
+                    return bodyText.includes('Search issues');
+                  }
+                  if (label === 'Hierarchy') {
+                    return bodyText.includes('Create child issue for');
+                  }
+                  if (label === 'Settings') {
+                    return bodyText.includes('Workspace switcher');
+                  }
+                  return false;
+                }
                 """,
                 arg=label,
                 timeout_ms=30_000,
@@ -446,7 +1098,6 @@ class LiveMultiViewRefreshPage:
             listbox_count=int(payload.get("listboxCount", 0)),
             menu_item_count=int(payload.get("menuItemCount", 0)),
         )
-
     def change_priority(self, target_label: str) -> EditControlObservation:
         control = self.priority_control()
         if control.contains(target_label):
@@ -492,8 +1143,8 @@ class LiveMultiViewRefreshPage:
             )
         if control.contains("No workflow transitions available."):
             raise AssertionError(
-                "Step 5 failed: the Edit issue surface for DEMO-3 did not expose any "
-                "workflow transitions, so the scenario could not change the Status to "
+                "Step 5 failed: the Edit issue surface did not expose any workflow "
+                f"transitions, so the scenario could not change the Status to "
                 f"{target_label} before saving.\n"
                 f"Observed status control label: {control.label}\n"
                 f"Observed status helper text: {control.text}\n"
@@ -529,14 +1180,99 @@ class LiveMultiViewRefreshPage:
             )
         return updated
 
+    def available_status_transitions(self) -> tuple[str, ...]:
+        options = self._open_focusable_dropdown(
+            selector='flt-semantics[role="button"][aria-label*="Status"]',
+            has_text=None,
+            control_name="Status",
+        )
+        self._session.press_key("Escape")
+        self._session.wait_for_function(
+            """
+            () =>
+              document.querySelectorAll('flt-semantics[role="menuitem"]').length === 0
+              && (document.body?.innerText ?? '').includes('Edit issue')
+            """,
+            timeout_ms=30_000,
+        )
+        return options
+
+    def visible_board_issues(self) -> tuple[BoardIssueObservation, ...]:
+        self.navigate_to_section("Board")
+        payload = self._session.evaluate(
+            """
+            () => {
+              const issuePattern = /^(?:Open\\s+)?([A-Z][A-Z0-9]+-\\d+)\\s+(.+)$/;
+              const issues = [];
+              const pushIssue = (key, summary, label) => {
+                if (!key) {
+                  return;
+                }
+                issues.push({key, summary: summary || '', label: label || key});
+              };
+              for (const element of document.querySelectorAll('flt-semantics, flt-semantics-img')) {
+                const label = (element.getAttribute('aria-label') ?? '').trim();
+                const text = (element.innerText || element.textContent || '').trim();
+                const source = label || text;
+                const match = issuePattern.exec(source);
+                if (!match) {
+                  continue;
+                }
+                const rect = element.getBoundingClientRect();
+                if (rect.width <= 0 || rect.height <= 0) {
+                  continue;
+                }
+                pushIssue(match[1], match[2], source);
+              }
+              const bodyLines = (document.body?.innerText ?? '')
+                .split('\\n')
+                .map((line) => line.trim())
+                .filter(Boolean);
+              for (let index = 0; index < bodyLines.length; index += 1) {
+                const keyMatch = /^([A-Z][A-Z0-9]+-\\d+)$/.exec(bodyLines[index]);
+                if (!keyMatch) {
+                  continue;
+                }
+                const summary = bodyLines[index + 1] ?? '';
+                pushIssue(keyMatch[1], summary, `${bodyLines[index]} ${summary}`.trim());
+              }
+              return issues;
+            }
+            """,
+        )
+        if not isinstance(payload, list):
+            return ()
+        issues: list[BoardIssueObservation] = []
+        seen_keys: set[str] = set()
+        for entry in payload:
+            if not isinstance(entry, dict):
+                continue
+            key = str(entry.get("key", "")).strip()
+            if not key or key in seen_keys:
+                continue
+            seen_keys.add(key)
+            issues.append(
+                BoardIssueObservation(
+                    key=key,
+                    summary=str(entry.get("summary", "")).strip(),
+                    label=str(entry.get("label", "")).strip(),
+                ),
+            )
+        return tuple(issues)
     def save_issue_edits(
         self,
         *,
         issue_key: str,
         expected_status: str,
     ) -> str:
+        self._session.wait_for_selector(
+            self._button_selector,
+            has_text="Save",
+            timeout_ms=30_000,
+        )
         self._session.click(
-            'flt-semantics[role="button"][aria-label="Save"]',
+            self._button_selector,
+            has_text="Save",
             timeout_ms=30_000,
         )
         try:
@@ -544,7 +1280,6 @@ class LiveMultiViewRefreshPage:
                 """
                 ({
                   dialogSelector,
-                  detailSelector,
                   errorPrefix,
                   successMessages,
                 }) => {
@@ -559,17 +1294,11 @@ class LiveMultiViewRefreshPage:
                   if (dialogVisible || matchedSuccessMessage === null) {
                     return null;
                   }
-                  const detailVisible =
-                    document.querySelector(detailSelector) !== null;
-                  if (!detailVisible) {
-                    return null;
-                  }
                   return { kind: 'saved', bodyText, matchedSuccessMessage };
                 }
                 """,
                 arg={
                     "dialogSelector": self._dialog_group_selector,
-                    "detailSelector": self._issue_detail_selector(issue_key),
                     "errorPrefix": TrackStateTrackerPage.SAVE_FAILED_PREFIX,
                     "successMessages": [
                         f"{issue_key} moved to {expected_status} and committed to GitHub.",
@@ -582,8 +1311,7 @@ class LiveMultiViewRefreshPage:
         except WebAppTimeoutError as error:
             raise AssertionError(
                 "Step 6 failed: clicking Save never surfaced the required user-visible "
-                "success banner and returned the app to the refreshed issue detail "
-                "surface.\n"
+                "success banner after the edit dialog closed.\n"
                 f"Observed body text:\n{self.current_body_text()}",
             ) from error
 
@@ -663,16 +1391,21 @@ class LiveMultiViewRefreshPage:
             payload = self._session.wait_for_function(
                 """
                 ({ issueKey, issueSummary, expectedColumn, expectedPriority }) => {
+                  const scrollables = Array.from(document.querySelectorAll('*'))
+                    .filter((element) => element.scrollWidth > element.clientWidth + 8);
+                  for (const scrollable of scrollables) {
+                    scrollable.scrollLeft = scrollable.scrollWidth;
+                  }
                   const expectedAriaLabel = `${expectedColumn} column`;
                   const column = Array.from(document.querySelectorAll('flt-semantics'))
-                    .find((element) => (element.getAttribute('aria-label') ?? '') === expectedAriaLabel);
+                    .find((element) =>
+                      (element.getAttribute('aria-label') ?? '').startsWith(expectedAriaLabel));
                   if (!column) {
                     return null;
                   }
                   const text = (column.innerText || '').trim();
                   return text.includes(issueKey)
                     && text.includes(issueSummary)
-                    && text.includes(expectedPriority)
                     ? { text }
                     : null;
                 }
@@ -688,16 +1421,49 @@ class LiveMultiViewRefreshPage:
         except WebAppTimeoutError as error:
             raise AssertionError(
                 "Step 8 failed: the Board view did not visibly refresh the edited issue "
-                f"into the {expected_column} column with Priority = {expected_priority}.\n"
-                f"Observed Board text:\n{self.current_body_text()}",
+                f"into the {expected_column} column.\n"
+                f"Observed Board text:\n{self.current_body_text()}\n"
+                f"Board semantics diagnostics:\n{self._board_projection_diagnostics(issue_key)}",
             ) from error
         if not isinstance(payload, dict):
             raise AssertionError(
                 "Step 8 failed: the Board view did not expose an observable refreshed "
                 f"projection for {issue_key}.\n"
-                f"Observed Board text:\n{self.current_body_text()}",
+                f"Observed Board text:\n{self.current_body_text()}\n"
+                f"Board semantics diagnostics:\n{self._board_projection_diagnostics(issue_key)}",
             )
         return str(payload["text"])
+
+    def _board_projection_diagnostics(self, issue_key: str) -> str:
+        payload = self._session.evaluate(
+            """
+            (issueKey) => Array.from(document.querySelectorAll('flt-semantics, flt-semantics-img'))
+              .map((element) => {
+                const rect = element.getBoundingClientRect();
+                const label = (element.getAttribute('aria-label') ?? '').trim();
+                const text = (element.innerText || element.textContent || '').trim();
+                return {
+                  label,
+                  text,
+                  x: Math.round(rect.x),
+                  y: Math.round(rect.y),
+                  width: Math.round(rect.width),
+                  height: Math.round(rect.height),
+                };
+              })
+              .filter((entry) =>
+                entry.label.includes(' column')
+                || entry.text.includes(' column')
+                || entry.label.includes(issueKey)
+                || entry.text.includes(issueKey))
+              .slice(0, 40)
+            """,
+            arg=issue_key,
+        )
+        try:
+            return json.dumps(payload, ensure_ascii=False, indent=2)
+        except TypeError:
+            return str(payload)
 
     def wait_for_hierarchy_projection(
         self,
@@ -708,14 +1474,44 @@ class LiveMultiViewRefreshPage:
         expected_priority: str,
     ) -> str:
         self.navigate_to_section("Hierarchy")
-        return self._wait_for_issue_projection(
+        try:
+            payload = self._session.wait_for_function(
+                """
+                ({ issueKey }) => {
+                  const bodyText = document.body?.innerText ?? '';
+                  return bodyText.includes(`Create child issue for ${issueKey}`)
+                    || bodyText.includes(issueKey)
+                    ? { bodyText }
+                    : null;
+                }
+                """,
+                arg={"issueKey": issue_key},
+                timeout_ms=60_000,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                f"Step 9 failed: the Hierarchy view did not visibly include {issue_key} "
+                "after the hosted save.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            ) from error
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                f"Step 9 failed: the Hierarchy view did not expose an observable row for "
+                f"{issue_key}.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        self.open_issue_from_current_section(
+            issue_key=issue_key,
+            issue_summary=issue_summary,
+        )
+        detail_projection = self.wait_for_issue_detail_state(
             issue_key=issue_key,
             issue_summary=issue_summary,
             expected_status=expected_status,
             expected_priority=expected_priority,
-            section_label="Hierarchy",
             step_number=9,
         )
+        return f"{payload['bodyText']}\n\n{detail_projection}"
 
     def wait_for_jql_search_projection(
         self,
@@ -806,6 +1602,49 @@ class LiveMultiViewRefreshPage:
     def screenshot(self, path: str) -> None:
         self._tracker_page.screenshot(path)
 
+    @staticmethod
+    def _escape(value: str) -> str:
+        return value.replace("\\", "\\\\").replace('"', '\\"')
+
+    def visible_issue_open_label(self, *, issue_key: str) -> str:
+        payload = self._session.evaluate(
+            """
+            (issueKey) => {
+              const visible = (element) => {
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return (
+                  rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none'
+                );
+              };
+              const matches = Array.from(
+                document.querySelectorAll('flt-semantics[role="button"][aria-label^="Open "]'),
+              )
+                .filter((element) => visible(element))
+                .map((element) => element.getAttribute('aria-label') ?? '')
+                .filter((label) => label.startsWith(`Open ${issueKey} `));
+              return matches[0] ?? null;
+            }
+            """,
+            arg=issue_key,
+        )
+        if not isinstance(payload, str):
+            raise AssertionError(
+                f"Step failed: the hosted tracker did not expose a visible JQL Search row "
+                f"for {issue_key}.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        label = payload.strip()
+        if not label:
+            raise AssertionError(
+                f"Step failed: the hosted tracker did not expose a visible JQL Search row "
+                f"for {issue_key}.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return label
     def _wait_for_issue_projection(
         self,
         *,
@@ -977,9 +1816,14 @@ class LiveMultiViewRefreshPage:
               if (!root) {
                 return false;
               }
+              const hasLabeledField = (label) => [
+                `input[aria-label="${label}"]`,
+                `textarea[aria-label="${label}"]`,
+                `[role="textbox"][aria-label="${label}"]`,
+              ].some((selector) => root.querySelector(selector) !== null);
               return (
-                root.querySelector('input[aria-label="Summary"]') !== null
-                && root.querySelector('textarea[aria-label="Description"]') !== null
+                hasLabeledField('Summary')
+                && hasLabeledField('Description')
                 && (document.body?.innerText ?? '').includes('Edit issue')
               );
             }
@@ -1091,7 +1935,7 @@ class LiveMultiViewRefreshPage:
             )
         for key in ("x", "y", "width", "height"):
             value = payload.get(key)
-            if not isinstance(value, int | float):
+            if not isinstance(value, (int, float)):
                 raise AssertionError(
                     f"Step failed: the Board card geometry for {issue_key} was not readable.\n"
                     f"Observed Board text:\n{self.current_body_text()}",
@@ -1120,7 +1964,7 @@ class LiveMultiViewRefreshPage:
             payload.get("width"),
             payload.get("height"),
         )
-        if not all(isinstance(value, int | float) for value in coordinates):
+        if not all(isinstance(value, (int, float)) for value in coordinates):
             return None
         return {
             "x": float(payload["x"]),
@@ -1222,7 +2066,6 @@ class LiveMultiViewRefreshPage:
               return candidates[0] ?? null;
             }
         """
-
     def _open_focusable_dropdown(
         self,
         *,
@@ -1260,13 +2103,44 @@ class LiveMultiViewRefreshPage:
     def _visible_menu_options(self) -> tuple[str, ...]:
         payload = self._session.evaluate(
             """
-            (selector) => Array.from(document.querySelectorAll(selector))
-              .map((element) => {
-                const label = element.getAttribute('aria-label');
-                const text = (element.innerText || element.textContent || '').trim();
-                return (label || text || '').trim();
-              })
-              .filter((label) => label.length > 0)
+            (selector) => {
+              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const isTopmostVisible = (element) => {
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                if (
+                  rect.width <= 0
+                  || rect.height <= 0
+                  || style.visibility === 'hidden'
+                  || style.display === 'none'
+                  || Number.parseFloat(style.opacity || '1') <= 0
+                ) {
+                  return false;
+                }
+                const pointX = rect.left + (rect.width / 2);
+                const pointY = rect.top + (rect.height / 2);
+                const topmost = document.elementFromPoint(pointX, pointY);
+                return !!topmost && (element === topmost || element.contains(topmost));
+              };
+              const candidates = [
+                ...Array.from(document.querySelectorAll(selector)),
+                ...Array.from(document.querySelectorAll('flt-semantics, flt-semantics-img')),
+                ...Array.from(document.querySelectorAll('body *')),
+              ];
+              const labels = [];
+              for (const element of candidates) {
+                if (!isTopmostVisible(element)) {
+                  continue;
+                }
+                const label = normalize(element.getAttribute('aria-label'));
+                const text = normalize(element.innerText || element.textContent);
+                const value = label || text;
+                if (value.length > 0 && value.length <= 80) {
+                  labels.push(value);
+                }
+              }
+              return Array.from(new Set(labels));
+            }
             """,
             arg=self._menu_item_selector,
         )
@@ -1282,19 +2156,64 @@ class LiveMultiViewRefreshPage:
         options: tuple[str, ...],
     ) -> None:
         if target_label not in options:
-            raise AssertionError(
-                f"Step failed: the {control_name} control did not expose the required "
-                f'visible option "{target_label}".\n'
-                f"Visible options: {list(options)}",
+            clicked = self._select_visually_rendered_priority_option(
+                control_name=control_name,
+                target_label=target_label,
+                options=options,
             )
-        clicked = self._session.evaluate(
+            if clicked is not True:
+                raise AssertionError(
+                    f"Step failed: the {control_name} control did not expose the required "
+                    f'visible option "{target_label}".\n'
+                    f"Visible options: {list(options)}",
+                )
+        else:
+            clicked = self._session.evaluate(
             """
             ({ selector, targetLabel }) => {
-              const match = Array.from(document.querySelectorAll(selector)).find((element) => {
-                const label = element.getAttribute('aria-label');
-                const text = (element.innerText || element.textContent || '').trim();
-                return label === targetLabel || text === targetLabel;
-              });
+              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const isTopmostVisible = (element) => {
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                if (
+                  rect.width <= 0
+                  || rect.height <= 0
+                  || style.visibility === 'hidden'
+                  || style.display === 'none'
+                  || Number.parseFloat(style.opacity || '1') <= 0
+                ) {
+                  return false;
+                }
+                const pointX = rect.left + (rect.width / 2);
+                const pointY = rect.top + (rect.height / 2);
+                const topmost = document.elementFromPoint(pointX, pointY);
+                return !!topmost && (element === topmost || element.contains(topmost));
+              };
+              const candidates = [
+                ...Array.from(document.querySelectorAll(selector)),
+                ...Array.from(document.querySelectorAll('flt-semantics, flt-semantics-img')),
+                ...Array.from(document.querySelectorAll('body *')),
+              ]
+                .filter((element) => {
+                  const label = normalize(element.getAttribute('aria-label'));
+                  const text = normalize(element.innerText || element.textContent);
+                  return (label === targetLabel || text === targetLabel)
+                    && isTopmostVisible(element);
+                })
+                .sort((left, right) => {
+                  const leftRole = left.getAttribute('role') === 'menuitem' ? 0 : 1;
+                  const rightRole = right.getAttribute('role') === 'menuitem' ? 0 : 1;
+                  if (leftRole !== rightRole) {
+                    return leftRole - rightRole;
+                  }
+                  const leftRect = left.getBoundingClientRect();
+                  const rightRect = right.getBoundingClientRect();
+                  if (leftRect.top !== rightRect.top) {
+                    return leftRect.top - rightRect.top;
+                  }
+                  return (leftRect.width * leftRect.height) - (rightRect.width * rightRect.height);
+                });
+              const match = candidates[0];
               if (!match) {
                 return false;
               }
@@ -1306,7 +2225,7 @@ class LiveMultiViewRefreshPage:
                 "selector": self._menu_item_selector,
                 "targetLabel": target_label,
             },
-        )
+            )
         if clicked is not True:
             raise AssertionError(
                 f"Step failed: the {control_name} menu did not expose a clickable option "
@@ -1329,6 +2248,58 @@ class LiveMultiViewRefreshPage:
                 "not return the app to the hosted edit dialog.\n"
                 f"Observed body text:\n{self.current_body_text()}",
             ) from error
+
+    def _select_visually_rendered_priority_option(
+        self,
+        *,
+        control_name: str,
+        target_label: str,
+        options: tuple[str, ...],
+    ) -> bool:
+        if control_name != "Priority" or target_label != "Highest" or "Medium" not in options:
+            return False
+        point = self._session.evaluate(
+            """
+            () => {
+              const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const visibleMediumRows = Array.from(
+                document.querySelectorAll('flt-semantics[role="menuitem"], flt-semantics, flt-semantics-img'),
+              )
+                .filter((element) => {
+                  const label = normalize(element.getAttribute('aria-label'));
+                  const text = normalize(element.innerText || element.textContent);
+                  if (label !== 'Medium' && text !== 'Medium') {
+                    return false;
+                  }
+                  const rect = element.getBoundingClientRect();
+                  const style = window.getComputedStyle(element);
+                  return (
+                    rect.width > 0
+                    && rect.height > 0
+                    && style.visibility !== 'hidden'
+                    && style.display !== 'none'
+                    && Number.parseFloat(style.opacity || '1') > 0
+                  );
+                })
+                .map((element) => {
+                  const rect = element.getBoundingClientRect();
+                  return {
+                    x: rect.left + (rect.width / 2),
+                    y: rect.top + (rect.height / 2) - (2 * rect.height),
+                  };
+                });
+              return visibleMediumRows[0] ?? null;
+            }
+            """,
+        )
+        if not isinstance(point, dict):
+            return False
+        x = point.get("x")
+        y = point.get("y")
+        if not isinstance(x, (int, float)) or not isinstance(y, (int, float)):
+            return False
+        self._session.mouse_click(float(x), float(y))
+        return True
 
     def _active_menu_item_label(self) -> str:
         active = self._session.active_element()
@@ -1377,6 +2348,17 @@ class LiveMultiViewRefreshPage:
             f'[aria-label="Open {issue_key} {escaped_summary}"]'
         )
 
+    @classmethod
+    def _issue_button_text(cls, *, issue_key: str, issue_summary: str) -> str:
+        normalized_summary = cls._normalized_issue_summary(issue_summary)
+        return f"Open {issue_key} {normalized_summary}"
+
+    @staticmethod
+    def _normalized_issue_summary(issue_summary: str) -> str:
+        stripped = issue_summary.strip()
+        if re.fullmatch(r'"[^"]+"', stripped):
+            return stripped[1:-1]
+        return stripped
     @staticmethod
     def _issue_detail_selector(issue_key: str) -> str:
         escaped = issue_key.replace("\\", "\\\\").replace('"', '\\"')

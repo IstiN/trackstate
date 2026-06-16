@@ -40,12 +40,13 @@ void main() {
       );
       await tester.pumpAndSettle();
 
+      const expectedHeight = 32.0;
       final syncPill = find.ancestor(
         of: find.text('Synced with Git').last,
         matching: find.byWidgetPredicate(
           (widget) =>
               widget is Container &&
-              widget.constraints?.minHeight == 58 &&
+              widget.constraints?.minHeight == expectedHeight &&
               widget.alignment == Alignment.center,
           description: 'desktop top bar sync pill container',
         ),
@@ -54,8 +55,10 @@ void main() {
       final createIssueButton = find
           .bySemanticsLabel(RegExp('^Create issue\$'))
           .last;
-      final repositoryAccessButton = find
-          .bySemanticsLabel(RegExp('^Attachments limited\$'))
+      final workspaceSwitcherButton = find
+          .bySemanticsLabel(
+            RegExp('^Workspace switcher: .*Attachments limited\$'),
+          )
           .last;
       final themeToggle = find
           .bySemanticsLabel(RegExp('^(Dark theme|Light theme)\$'))
@@ -67,15 +70,15 @@ void main() {
       expect(syncPill, findsOneWidget);
       expect(searchField, findsOneWidget);
       expect(createIssueButton, findsOneWidget);
-      expect(repositoryAccessButton, findsOneWidget);
+      expect(workspaceSwitcherButton, findsOneWidget);
       expect(themeToggle, findsOneWidget);
       expect(profileIdentity, findsWidgets);
 
-      final expectedHeight = tester.getRect(searchField).height;
       final controlHeights = <String, double>{
+        'search field': tester.getRect(searchField).height,
         'sync pill': tester.getRect(syncPill).height,
         'create issue': tester.getRect(createIssueButton).height,
-        'repository access': tester.getRect(repositoryAccessButton).height,
+        'workspace switcher': tester.getRect(workspaceSwitcherButton).height,
         'theme toggle': tester.getRect(themeToggle).height,
         'profile identity': tester.getRect(profileIdentity.last).height,
       };
@@ -85,7 +88,7 @@ void main() {
           entry.value,
           closeTo(expectedHeight, 1),
           reason:
-              'Expected ${entry.key} to match the desktop header search field height ($expectedHeight), but it rendered at ${entry.value}.',
+              'Expected ${entry.key} to stay at the required 32px desktop header height, but it rendered at ${entry.value}.',
         );
       }
     } finally {
@@ -94,4 +97,138 @@ void main() {
       semantics.dispose();
     }
   });
+
+  testWidgets(
+    'desktop top bar search field keeps zero vertical content padding',
+    (tester) async {
+      const attachmentRestrictedPermission = RepositoryPermission(
+        canRead: true,
+        canWrite: true,
+        isAdmin: false,
+        canCreateBranch: true,
+        canManageAttachments: false,
+        attachmentUploadMode: AttachmentUploadMode.noLfs,
+        canCheckCollaborators: false,
+      );
+
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+
+      try {
+        await tester.pumpWidget(
+          TrackStateApp(
+            repository: ReactiveIssueDetailTrackStateRepository(
+              permission: attachmentRestrictedPermission,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final searchField = tester.widget<TextField>(find.byType(TextField));
+        final contentPadding = searchField.decoration?.contentPadding;
+        final resolvedPadding = contentPadding! as EdgeInsets;
+
+        expect(contentPadding, isA<EdgeInsets>());
+        expect(
+          resolvedPadding.top,
+          0,
+          reason:
+              'Desktop search field should not add vertical content padding, or the browser text-editing host grows beyond the required 32px header height.',
+        );
+        expect(
+          resolvedPadding.bottom,
+          0,
+          reason:
+              'Desktop search field should not add vertical content padding, or the browser text-editing host grows beyond the required 32px header height.',
+        );
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      }
+    },
+  );
+
+  testWidgets(
+    'desktop top bar exposes a shared semantics container for audited controls',
+    (tester) async {
+      const attachmentRestrictedPermission = RepositoryPermission(
+        canRead: true,
+        canWrite: true,
+        isAdmin: false,
+        canCreateBranch: true,
+        canManageAttachments: false,
+        attachmentUploadMode: AttachmentUploadMode.noLfs,
+        canCheckCollaborators: false,
+      );
+
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+
+      try {
+        await tester.pumpWidget(
+          TrackStateApp(
+            repository: ReactiveIssueDetailTrackStateRepository(
+              permission: attachmentRestrictedPermission,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final headerContainer = find.byWidgetPredicate((widget) {
+          if (widget is! Semantics) {
+            return false;
+          }
+          return widget.properties.identifier ==
+              'trackstate-desktop-header-controls';
+        }, description: 'desktop header semantics container');
+
+        expect(headerContainer, findsOneWidget);
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      }
+    },
+  );
+
+  testWidgets(
+    'desktop top bar search field exposes a stable semantics identifier',
+    (tester) async {
+      const attachmentRestrictedPermission = RepositoryPermission(
+        canRead: true,
+        canWrite: true,
+        isAdmin: false,
+        canCreateBranch: true,
+        canManageAttachments: false,
+        attachmentUploadMode: AttachmentUploadMode.noLfs,
+        canCheckCollaborators: false,
+      );
+
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+
+      try {
+        await tester.pumpWidget(
+          TrackStateApp(
+            repository: ReactiveIssueDetailTrackStateRepository(
+              permission: attachmentRestrictedPermission,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final searchSemantics = find.byWidgetPredicate((widget) {
+          if (widget is! Semantics) {
+            return false;
+          }
+          return widget.properties.identifier ==
+              'trackstate-desktop-search-input';
+        }, description: 'desktop search semantics identifier');
+
+        expect(searchSemantics, findsOneWidget);
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      }
+    },
+  );
 }

@@ -140,6 +140,35 @@ void main() {
     expect(childIssues.issues.map((issue) => issue.key), ['TRACK-4']);
   });
 
+  test(
+    'supports archived lifecycle filters for active and archived queries',
+    () {
+      final archivedIssues = [
+        ...issues.take(1),
+        issues[1].copyWith(isArchived: true),
+        ...issues.skip(2),
+      ];
+      final activePage = service.search(
+        issues: archivedIssues,
+        project: project,
+        jql: 'archived != true ORDER BY key ASC',
+      );
+      final archivedPage = service.search(
+        issues: archivedIssues,
+        project: project,
+        jql: 'archived = true',
+      );
+
+      expect(activePage.issues.map((issue) => issue.key), [
+        'TRACK-2',
+        'TRACK-4',
+        'TRACK-10',
+        'TRACK-11',
+      ]);
+      expect(archivedPage.issues.map((issue) => issue.key), ['TRACK-3']);
+    },
+  );
+
   test('keeps project-plus-free-text compatibility for key lookups', () {
     final page = service.search(
       issues: issues,
@@ -149,6 +178,31 @@ void main() {
 
     expect(page.issues.map((issue) => issue.key), ['TRACK-10']);
   });
+
+  test(
+    'treats project-plus-issue-key compatibility lookups as exact key matches',
+    () {
+      final noisyIssues = [
+        ...issues,
+        _issue(
+          key: 'TRACK-12',
+          summary: 'Reference another ticket',
+          description: 'Mentions TRACK-10 in the description only.',
+          acceptanceCriteria: const [],
+          priority: IssuePriority.medium,
+          priorityId: 'medium',
+        ),
+      ];
+      final page = service.search(
+        issues: noisyIssues,
+        project: project,
+        jql: 'project = TRACK TRACK-10',
+      );
+
+      expect(page.issues.map((issue) => issue.key), ['TRACK-10']);
+      expect(service.requiresIssueDetails('project = TRACK TRACK-10'), isFalse);
+    },
+  );
 
   test(
     'flags project-plus-free-text compatibility clauses for detail hydration',
@@ -247,6 +301,7 @@ TrackStateIssue _issue({
   String issueTypeId = 'story',
   IssueStatus status = IssueStatus.inProgress,
   String statusId = 'in-progress',
+  bool isArchived = false,
 }) {
   return TrackStateIssue(
     key: key,
@@ -276,7 +331,7 @@ TrackStateIssue _issue({
     comments: const [],
     links: const [],
     attachments: const [],
-    isArchived: false,
+    isArchived: isArchived,
     storagePath: 'TRACK/$key/main.md',
     rawMarkdown: '',
   );
