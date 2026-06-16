@@ -31,6 +31,18 @@ runtime_inputs:
       - --draft=false
       - --prerelease=false
       - "TrackState $release_tag"
+      - "linux/$DESKTOP_LINUX"
+      - "linux/$CLI_LINUX"
+      - "windows/$DESKTOP_WINDOWS"
+      - "windows/$CLI_WINDOWS"
+      - "macos/$DESKTOP_MACOS"
+      - "macos/$CLI_MACOS"
+      - "build/linux/$DESKTOP_LINUX"
+      - "build/linux/$CLI_LINUX"
+      - "build/windows/$DESKTOP_WINDOWS"
+      - "build/windows/$CLI_WINDOWS"
+      - "build/macos/$DESKTOP_MACOS"
+      - "build/macos/$CLI_MACOS"
 notes:
   - Statically validates that the publish-release job aggregates all platform artifacts, generates a unified checksum file, and creates a non-draft, non-prerelease GitHub release.
   - Does not publish an actual release.
