@@ -32,7 +32,7 @@ void main() {
     expect(workflow, contains('Run actionlint'));
   });
 
-  test('setup repository keeps a single shipped actionlint PR gate', () {
+  test('setup repository detects workflow file changes on pushes and PRs', () {
     final workflowFile = repositoryFile(
       'trackstate-setup/.github/workflows/actionlint.yml',
     );
@@ -45,7 +45,8 @@ void main() {
       isTrue,
       reason:
           'trackstate-setup must keep the contributor-visible actionlint '
-          'workflow that validates workflow pull requests.',
+          'workflow that validates workflow edits before they break release '
+          'automation.',
     );
     expect(
       fallbackWorkflowFile.existsSync(),
@@ -61,20 +62,26 @@ void main() {
     expect(workflow, isNot(contains('pull_request_target:')));
     expect(
       workflow,
-      contains('Determine whether this PR changes workflow files'),
+      contains('Determine whether workflow files changed'),
     );
     expect(workflow, contains('git diff --name-only'));
+    expect(workflow, contains('github.event.before'));
+    expect(workflow, contains('github.sha'));
+    expect(workflow, contains('git merge-base'));
+    expect(workflow, contains('origin/HEAD'));
     expect(workflow, contains('.github/workflows/'));
-    expect(workflow, contains('No workflow file changes in this pull request'));
+    expect(workflow, contains('No workflow file changes'));
     expect(
       workflow,
       contains("steps.workflow-changes.outputs.changed == 'true'"),
     );
+    expect(workflow, isNot(contains('if: github.event_name == \'pull_request\'')));
+    expect(workflow, isNot(contains('if: github.event_name != \'pull_request\'')));
     expect(workflow, contains('fetch-depth: 0'));
     expect(
       workflow,
       contains(
-        'Skipping actionlint because this pull request does not modify '
+        'Skipping actionlint because this run does not modify '
         '.github/workflows/.',
       ),
     );
