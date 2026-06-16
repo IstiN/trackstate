@@ -1,7 +1,15 @@
 # TS-1344 test automation
 
-Verifies that `.github/workflows/release-on-main.yml` defines the expected
-Linux and Windows build jobs, steps, outputs, and artifact naming conventions.
+Statically validates that `.github/workflows/release-on-main.yml` defines the
+expected Linux and Windows build jobs, steps, outputs, runners, and artifact
+naming conventions.
+
+## Scope
+
+This test performs **static YAML validation only**. It inspects the workflow
+file structure and asserts that the declared jobs, steps, outputs, and markers
+match the expected cross-platform artifact generation contract. It does **not**
+trigger the workflow, download archives, or verify executable contents.
 
 ## What is tested
 

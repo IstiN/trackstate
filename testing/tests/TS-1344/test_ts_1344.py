@@ -25,7 +25,7 @@ PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
 BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
 
 
-class CrossPlatformArtifactGenerationTest(unittest.TestCase):
+class CrossPlatformArtifactGenerationStaticTest(unittest.TestCase):
     def setUp(self) -> None:
         self.config = ReleaseWorkflowStaticConfig.from_file(
             REPO_ROOT / "testing" / "tests" / "TS-1344" / "config.yaml",
@@ -196,15 +196,16 @@ def _jira_pass_summary(observation: ReleaseWorkflowStaticObservation) -> str:
         "",
         "*Status:* ✅ PASSED",
         "*Test Case:* TS-1344 — Cross-platform Artifact Generation — Linux and Windows binaries produced on hosted runners",
+        "*Scope:* Static validation only",
         f"*Workflow:* {{.github/workflows/release-on-main.yml}}",
         f"*Jobs:* {_job_names(observation)}",
         "",
         "h2. What was tested",
-        "* Verified {{build-linux}} runs on {{ubuntu-latest}} and produces {{TrackState-linux-x64-vX.Y.Z.tar.gz}} plus {{trackstate-cli-linux-x64-vX.Y.Z.tar.gz}}.",
-        "* Verified {{build-windows}} runs on {{windows-latest}} and produces {{TrackState-windows-x64-vX.Y.Z.zip}} plus {{trackstate-cli-windows-x64-vX.Y.Z.tar.gz}}.",
+        "* Statically verified that {{build-linux}} is defined to run on {{ubuntu-latest}} and declares artifact names {{TrackState-linux-x64-vX.Y.Z.tar.gz}} and {{trackstate-cli-linux-x64-vX.Y.Z.tar.gz}}.",
+        "* Statically verified that {{build-windows}} is defined to run on {{windows-latest}} and declares artifact names {{TrackState-windows-x64-vX.Y.Z.zip}} and {{trackstate-cli-windows-x64-vX.Y.Z.tar.gz}}.",
         "* Verified each job exposes {{desktop_archive}}, {{cli_archive}}, and {{artifact_name}} outputs.",
         "* Verified build, package, and upload steps use clear headings.",
-        "* Verified upload steps fail fast with {{if-no-files-found: error}}.",
+        "* Verified upload steps set {{if-no-files-found: error}}.",
         "",
         "h2. Observed",
         f"* Linux runner: {_runner(linux_job)}",
@@ -233,6 +234,7 @@ def _jira_failure_summary(
         "",
         "*Status:* ❌ FAILED",
         "*Test Case:* TS-1344 — Cross-platform Artifact Generation — Linux and Windows binaries produced on hosted runners",
+        "*Scope:* Static validation only",
         f"*Workflow:* {{.github/workflows/release-on-main.yml}}",
         f"*Workflow exists:* {observation.workflow_exists}",
         f"*Jobs:* {_job_names(observation)}",
@@ -258,15 +260,16 @@ def _markdown_pass_summary(observation: ReleaseWorkflowStaticObservation) -> str
         "",
         "**Status:** ✅ PASSED",
         "**Test Case:** TS-1344 — Cross-platform Artifact Generation — Linux and Windows binaries produced on hosted runners",
+        "**Scope:** Static validation only",
         "**Workflow:** `.github/workflows/release-on-main.yml`",
         f"**Jobs:** `{_job_names(observation)}`",
         "",
         "### What was automated",
-        "- Verified `build-linux` runs on `ubuntu-latest` and produces `TrackState-linux-x64-vX.Y.Z.tar.gz` plus `trackstate-cli-linux-x64-vX.Y.Z.tar.gz`.",
-        "- Verified `build-windows` runs on `windows-latest` and produces `TrackState-windows-x64-vX.Y.Z.zip` plus `trackstate-cli-windows-x64-vX.Y.Z.tar.gz`.",
+        "- Statically verified `build-linux` is defined to run on `ubuntu-latest` and declares `TrackState-linux-x64-vX.Y.Z.tar.gz` plus `trackstate-cli-linux-x64-vX.Y.Z.tar.gz`.",
+        "- Statically verified `build-windows` is defined to run on `windows-latest` and declares `TrackState-windows-x64-vX.Y.Z.zip` plus `trackstate-cli-windows-x64-vX.Y.Z.tar.gz`.",
         "- Verified each job exposes `desktop_archive`, `cli_archive`, and `artifact_name` outputs.",
         "- Verified build, package, and upload steps use clear headings.",
-        "- Verified upload steps fail fast with `if-no-files-found: error`.",
+        "- Verified upload steps set `if-no-files-found: error`.",
         "",
         "### Observed",
         f"- Linux runner: `{_runner(linux_job)}`",
@@ -290,6 +293,7 @@ def _markdown_failure_summary(
         "",
         "**Status:** ❌ FAILED",
         "**Test Case:** TS-1344 — Cross-platform Artifact Generation — Linux and Windows binaries produced on hosted runners",
+        "**Scope:** Static validation only",
         "**Workflow:** `.github/workflows/release-on-main.yml`",
         f"**Workflow exists:** `{observation.workflow_exists}`",
         f"**Jobs:** `{_job_names(observation)}`",
@@ -317,19 +321,22 @@ def _bug_description(
         "**Summary:** Cross-platform Artifact Generation — Linux and Windows binaries "
         "produced on hosted runners\n"
         "\n"
+        "**Scope:** Static validation only. The test inspects the workflow YAML "
+        "structure and does not trigger the workflow or verify executable contents.\n"
+        "\n"
         "## Steps to Reproduce\n"
         "1. Open `.github/workflows/release-on-main.yml`.\n"
         "2. Inspect the `build-linux` and `build-windows` jobs.\n"
         "3. Compare the job definitions to the TS-1344 expected result.\n"
         "\n"
         "## Expected Result\n"
-        "- `build-linux` runs on `ubuntu-latest`, builds the Linux desktop app and CLI, "
-        "packages them as `TrackState-linux-x64-vX.Y.Z.tar.gz` and "
-        "`trackstate-cli-linux-x64-vX.Y.Z.tar.gz`, and uploads the archives with "
+        "- `build-linux` is defined to run on `ubuntu-latest`, build the Linux desktop app and CLI, "
+        "package them as `TrackState-linux-x64-vX.Y.Z.tar.gz` and "
+        "`trackstate-cli-linux-x64-vX.Y.Z.tar.gz`, and upload the archives with "
         "`if-no-files-found: error`.\n"
-        "- `build-windows` runs on `windows-latest`, builds the Windows desktop app and CLI, "
-        "packages them as `TrackState-windows-x64-vX.Y.Z.zip` and "
-        "`trackstate-cli-windows-x64-vX.Y.Z.tar.gz`, and uploads the archives with "
+        "- `build-windows` is defined to run on `windows-latest`, build the Windows desktop app and CLI, "
+        "package them as `TrackState-windows-x64-vX.Y.Z.zip` and "
+        "`trackstate-cli-windows-x64-vX.Y.Z.tar.gz`, and upload the archives with "
         "`if-no-files-found: error`.\n"
         "\n"
         "## Actual Result\n"
