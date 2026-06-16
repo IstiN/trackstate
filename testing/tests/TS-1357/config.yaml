@@ -1,0 +1,25 @@
+test_id: TS-1357
+type: ci
+framework: unittest
+platform: python
+dependencies:
+  - Python 3.12+
+  - PyYAML
+runtime_inputs:
+  workflow_path: .github/workflows/release-on-main.yml
+  required_jobs:
+    - publish-release
+  required_steps_by_job:
+    publish-release:
+      - Prepare install script assets
+  required_markers_in_job:
+    publish-release:
+      - "build/install/$INSTALL_SH"
+      - "build/install/$INSTALL_PS1"
+      - "build/install/$INSTALL_CMD"
+      - "gh release upload"
+      - "$INSTALL_SH"
+      - "$INSTALL_PS1"
+      - "$INSTALL_CMD"
+notes:
+  - Statically validates that the release workflow attaches install.sh, install.ps1, and install.cmd as standalone release assets.
