@@ -123,6 +123,25 @@ class Ts1362CompiledCliRegressionScenario:
             if failures:
                 return result, failures
 
+            # Skip read-ticket parity on non-Linux/macOS platforms where dart compile exe
+            # may not be supported or the binary may not be executable.
+            if platform.system() not in ("Linux", "Darwin"):
+                _record_step(
+                    result,
+                    step=2,
+                    status="skipped",
+                    action="Skip `read ticket` parity on unsupported platform.",
+                    observed=f"platform={platform.system()}",
+                )
+                _record_step(
+                    result,
+                    step=3,
+                    status="skipped",
+                    action="Skip `session` auth parity on unsupported platform.",
+                    observed=f"platform={platform.system()}",
+                )
+                return result, failures
+
             with tempfile.TemporaryDirectory(prefix="trackstate-ts-1362-repo-") as temp_dir:
                 self._repository_path = Path(temp_dir)
                 self._seed_local_repository(self._repository_path)
