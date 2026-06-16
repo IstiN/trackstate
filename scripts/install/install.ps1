@@ -12,7 +12,9 @@
 # No administrator privileges are required.
 param(
     [Parameter(Position = 0)]
-    [string]$Version = "latest"
+    [string]$Version = "latest",
+
+    [switch]$Force
 )
 
 $ErrorActionPreference = "Stop"
@@ -28,6 +30,26 @@ function Write-ErrorAndExit {
     param([string]$Message)
     Write-Host "ERROR: $Message" -ForegroundColor Red
     exit 1
+}
+
+function Get-ConflictingTrackStateBinary {
+    param([string]$InstallDir)
+
+    $pathSeparator = [System.IO.Path]::PathSeparator
+    $pathDirs = $env:PATH -split [regex]::Escape($pathSeparator)
+
+    foreach ($dir in $pathDirs) {
+        if ([string]::IsNullOrWhiteSpace($dir)) {
+            continue
+        }
+
+        $candidate = Join-Path $dir "trackstate.exe"
+        if ((Test-Path $candidate) -and ($dir -ne $InstallDir)) {
+            return $candidate
+        }
+    }
+
+    return $null
 }
 
 function Resolve-ReleaseTag {
@@ -82,6 +104,15 @@ $InstallDir = Join-Path $env:LOCALAPPDATA "trackstate\bin"
 $archiveName = "trackstate-cli-$platform-$releaseTag.tar.gz"
 $checksumName = "trackstate-$releaseTag.sha256"
 $downloadBase = "https://github.com/$Repo/releases/download/$releaseTag"
+
+if (-not $Force) {
+    $conflictingBinary = Get-ConflictingTrackStateBinary -InstallDir $InstallDir
+    if ($conflictingBinary) {
+        Write-Host "WARNING: A conflicting trackstate.exe already exists on PATH: $conflictingBinary" -ForegroundColor Yellow
+        Write-Host "Use -Force to override this conflict and continue installation." -ForegroundColor Yellow
+        exit 1
+    }
+}
 
 Write-Info "Installing TrackState CLI $releaseTag for $platform..."
 
