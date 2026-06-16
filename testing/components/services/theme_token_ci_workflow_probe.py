@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 from typing import Any
@@ -238,10 +239,12 @@ class ThemeTokenCiWorkflowProbe:
         finally:
             if pull_request_number is not None:
                 cleanup_closed_pull_request = self._close_pull_request(
-                    pull_request_number
+                    pull_request_number, temp_repository_root
                 )
             if branch_pushed:
-                cleanup_deleted_branch = self._delete_branch(branch_name)
+                cleanup_deleted_branch = self._delete_branch(
+                    branch_name, temp_repository_root
+                )
             if temp_repository_root.exists():
                 shutil.rmtree(temp_repository_root)
 
@@ -488,24 +491,42 @@ class ThemeTokenCiWorkflowProbe:
         )
         return self._optional_string(payload.get("state"))
 
-    def _close_pull_request(self, pull_request_number: int) -> bool:
+    def _close_pull_request(
+        self, pull_request_number: int, repo_root: Path
+    ) -> bool:
         try:
-            self._read_json_object(
-                f"/repos/{self._config.repository}/pulls/{pull_request_number}",
-                method="PATCH",
-                field_args=["-f", "state=closed"],
+            # Use the gh CLI from inside the cloned repo so authentication
+            # and repository context are consistent with the rest of the probe.
+            self._run_command(
+                [
+                    "gh",
+                    "pr",
+                    "close",
+                    str(pull_request_number),
+                    "--repo",
+                    self._config.repository,
+                ],
+                cwd=repo_root,
             )
-        except ThemeTokenCiError:
+        except ThemeTokenCiError as error:
+            print(
+                f"Failed to close disposable PR #{pull_request_number}: {error}",
+                file=sys.stderr,
+            )
             return False
         return True
 
-    def _delete_branch(self, branch_name: str) -> bool:
+    def _delete_branch(self, branch_name: str, repo_root: Path) -> bool:
         try:
             self._run_command(
                 ["git", "push", "origin", "--delete", branch_name],
-                cwd=None,
+                cwd=repo_root,
             )
-        except ThemeTokenCiError:
+        except ThemeTokenCiError as error:
+            print(
+                f"Failed to delete disposable branch {branch_name}: {error}",
+                file=sys.stderr,
+            )
             return False
         return True
 
