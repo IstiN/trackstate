@@ -35,9 +35,9 @@ class PosixInstallScriptIdempotencyAndConflictTest(unittest.TestCase):
             binary_name="trackstate",
         )
         server = MockGitHubReleaseServer(assets, repo="test/repo")
-        server.__enter__()
-        patched = tmpdir / "install.sh"
-        patch_install_sh(INSTALL_SCRIPT, patched, server)
+        with server:
+            patched = tmpdir / "install.sh"
+            patch_install_sh(INSTALL_SCRIPT, patched, server)
         return patched, assets, server
 
     def test_posix_install_script_path_idempotency_and_conflict_management(self) -> None:
@@ -48,8 +48,16 @@ class PosixInstallScriptIdempotencyAndConflictTest(unittest.TestCase):
             install_dir = home_dir / ".trackstate" / "bin"
             profile = detect_profile(home_dir, shell_name="bash")
 
-            patched, _assets, server = self._create_patched_script(tmpdir)
-            try:
+            assets = MockReleaseAssets.build(
+                tag="v1.2.3",
+                platform="linux-x64",
+                binary_name="trackstate",
+            )
+            server = MockGitHubReleaseServer(assets, repo="test/repo")
+            with server:
+                patched = tmpdir / "install.sh"
+                patch_install_sh(INSTALL_SCRIPT, patched, server)
+
                 base_env = {
                     "HOME": str(home_dir),
                     "SHELL": "/bin/bash",
@@ -129,8 +137,6 @@ class PosixInstallScriptIdempotencyAndConflictTest(unittest.TestCase):
                     (install_dir / "trackstate").exists(),
                     "The managed binary should be installed when --force is used.",
                 )
-            finally:
-                server.__exit__(None, None, None)
 
 
 if __name__ == "__main__":
