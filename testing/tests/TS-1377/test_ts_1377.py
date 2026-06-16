@@ -1,17 +1,14 @@
 from __future__ import annotations
 
-import os
 import shutil
 import tempfile
 import unittest
 from pathlib import Path
 
 from testing.components.services.install_script_test_runtime import (
-    MockGitHubReleaseServer,
     MockReleaseAssets,
     path_entry_count,
-    patch_install_ps1,
-    run_install_ps1,
+    run_patched_install_ps1,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -24,36 +21,6 @@ class WindowsPowerShellInstallScriptForceOverrideTest(unittest.TestCase):
             self.skipTest(
                 "PowerShell (pwsh) is required for the Windows installer functional test."
             )
-
-    def _run_patched_install(
-        self,
-        tmpdir: Path,
-        assets: MockReleaseAssets,
-        version: str | None = None,
-        flags: list[str] | None = None,
-        path_prefix: str | None = None,
-    ) -> tuple[Path, Path, Path, "subprocess.CompletedProcess[str]"]:
-        local_app_data = tmpdir / "localappdata"
-        local_app_data.mkdir(exist_ok=True)
-        install_dir = local_app_data / "trackstate" / "bin"
-        path_store = tmpdir / "user_path.txt"
-        temp_dir = tmpdir / "temp"
-        temp_dir.mkdir(exist_ok=True)
-
-        with MockGitHubReleaseServer(assets, repo="test/repo") as server:
-            patched = tmpdir / "install.ps1"
-            patch_install_ps1(INSTALL_SCRIPT, patched, server, local_app_data, path_store)
-
-            base_path = os.environ.get("PATH", "")
-            env_path = base_path if path_prefix is None else f"{path_prefix}{os.pathsep}{base_path}"
-            env = {
-                "LOCALAPPDATA": str(local_app_data),
-                "TEMP": str(temp_dir),
-                "PATH": env_path,
-            }
-            result = run_install_ps1(patched, version=version, flags=flags, timeout=60, env=env)
-
-        return local_app_data, install_dir, path_store, result
 
     def test_install_ps1_force_allows_override_of_conflict(self) -> None:
         """Regression test for TS-1375: the -Force switch bypasses the PATH
@@ -71,7 +38,8 @@ class WindowsPowerShellInstallScriptForceOverrideTest(unittest.TestCase):
             conflict_dir.mkdir()
             (conflict_dir / "trackstate.exe").write_text("@echo off\necho conflict\n")
 
-            local_app_data, install_dir, path_store, result = self._run_patched_install(
+            local_app_data, install_dir, path_store, result = run_patched_install_ps1(
+                INSTALL_SCRIPT,
                 tmpdir,
                 assets,
                 version="v1.2.3",
