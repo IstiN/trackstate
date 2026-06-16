@@ -44,6 +44,11 @@ migrate_working_dir/
 /test/failures/
 /test-results/
 
+# Test environment / temporary artifacts
+/testing/venv/
+/testing/*.png
+/*.png
+
 # Symbolication related
 app.*.symbols
 
