@@ -87,8 +87,10 @@ class ReleaseOnMergeProbeService:
                 "TS-230 expected a numeric release id for the observed release entry."
             )
 
-        releases_page_html = self._read_url(self._config.releases_page_url)
-        tags_page_html = self._read_url(self._config.tags_page_url)
+        release_html_url = str(release_entry.get("html_url", ""))
+        specific_release_page_html = self._read_url(release_html_url) if release_html_url else ""
+        specific_tag_page_url = f"https://github.com/{self._config.repository}/releases/tag/{tag_name}"
+        specific_tag_page_html = self._read_url(specific_tag_page_url)
 
         return ReleaseOnMergeObservation(
             repository=self._config.repository,
@@ -100,16 +102,16 @@ class ReleaseOnMergeProbeService:
             pull_request_merge_commit_sha=pull_request_merge_commit_sha,
             release_id=release_id,
             release_tag_name=release_tag_name,
-            release_html_url=str(release_entry.get("html_url", "")),
+            release_html_url=release_html_url,
             release_published_at=self._optional_string(release_entry.get("published_at")),
             release_is_draft=self._is_true(release_entry.get("draft")),
             release_is_prerelease=self._is_true(release_entry.get("prerelease")),
             tag_name=tag_name,
             tag_commit_sha=self._optional_string((tag_entry.get("commit") or {}).get("sha")),
-            releases_page_url=self._config.releases_page_url,
-            tags_page_url=self._config.tags_page_url,
-            releases_page_contains_tag=release_tag_name in releases_page_html,
-            tags_page_contains_tag=tag_name in tags_page_html,
+            releases_page_url=release_html_url,
+            tags_page_url=specific_tag_page_url,
+            releases_page_contains_tag=release_tag_name in specific_release_page_html,
+            tags_page_contains_tag=tag_name in specific_tag_page_html,
             poll_attempts=poll_attempts,
         )
 

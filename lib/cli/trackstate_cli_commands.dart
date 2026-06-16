@@ -4052,7 +4052,6 @@ extension _TrackStateCliCommands on TrackStateCli {
     _ResolvedTarget target,
     TrackStateCliOutput output,
   ) async {
-    final credential = await _resolveOptionalLocalCredential();
     final provider = _providerFactory.createLocal(
       repositoryPath: target.value,
       dataRef: 'HEAD',
@@ -4065,7 +4064,7 @@ extension _TrackStateCliCommands on TrackStateCli {
       final connection = RepositoryConnection(
         repository: target.value,
         branch: branch,
-        token: credential?.token ?? '',
+        token: '',
       );
       final user = await provider.authenticate(connection);
       final permission = await provider.getPermission();
@@ -4078,7 +4077,7 @@ extension _TrackStateCliCommands on TrackStateCli {
         'command': 'session',
         'provider': target.provider,
         'branch': branch,
-        'authSource': credential?.source ?? 'none',
+        'authSource': 'none',
         'user': <String, Object?>{
           'login': user.login,
           'displayName': user.displayName,

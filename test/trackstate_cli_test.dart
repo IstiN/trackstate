@@ -99,11 +99,15 @@ void main() {
       expect(error['category'], 'validation');
     });
 
-    test('uses the current directory for local targets by default', () async {
-      final cli = TrackStateCli(
+    TrackStateCli localSessionCli({
+      Future<String?> Function()? readGhAuthToken,
+    }) {
+      Future<String?> defaultGhToken() async => null;
+      return TrackStateCli(
         environment: TrackStateCliEnvironment(
           workingDirectory: '/workspace/repo',
           resolvePath: (path) => path,
+          readGhAuthToken: readGhAuthToken ?? defaultGhToken,
         ),
         providerFactory: _FakeTrackStateCliProviderFactory(
           localProvider: _FakeLocalGitTrackStateProvider(
@@ -127,6 +131,10 @@ void main() {
           localRepository: _FakeSearchRepository(snapshot: _sampleSnapshot()),
         ),
       );
+    }
+
+    test('uses the current directory for local targets by default', () async {
+      final cli = localSessionCli();
 
       final result = await cli.run(const <String>[
         'session',
@@ -150,33 +158,7 @@ void main() {
     test(
       'accepts root target flags as a session shorthand for local targets',
       () async {
-        final cli = TrackStateCli(
-          environment: TrackStateCliEnvironment(
-            workingDirectory: '/workspace/repo',
-            resolvePath: (path) => path,
-          ),
-          providerFactory: _FakeTrackStateCliProviderFactory(
-            localProvider: _FakeLocalGitTrackStateProvider(
-              repositoryPath: '/workspace/repo',
-              branch: 'feature/local',
-              user: const RepositoryUser(
-                login: 'local@example.com',
-                displayName: 'Local User',
-              ),
-              permission: const RepositoryPermission(
-                canRead: true,
-                canWrite: true,
-                isAdmin: false,
-                canCreateBranch: true,
-                canManageAttachments: true,
-                canCheckCollaborators: false,
-              ),
-            ),
-          ),
-          repositoryFactory: _FakeTrackStateCliRepositoryFactory(
-            localRepository: _FakeSearchRepository(snapshot: _sampleSnapshot()),
-          ),
-        );
+        final cli = localSessionCli();
 
         final result = await cli.run(const <String>['--target', 'local']);
         final json = jsonDecode(result.stdout) as Map<String, Object?>;
@@ -189,6 +171,24 @@ void main() {
           'value': '/workspace/repo',
         });
         expect(data['branch'], 'feature/local');
+        expect(data['authSource'], 'none');
+      },
+    );
+
+    test(
+      'local session reports authSource none even when a gh token is present',
+      () async {
+        final cli = localSessionCli(readGhAuthToken: _ghToken);
+
+        final result = await cli.run(const <String>[
+          'session',
+          '--target',
+          'local',
+        ]);
+        final json = jsonDecode(result.stdout) as Map<String, Object?>;
+        final data = json['data']! as Map<String, Object?>;
+
+        expect(result.exitCode, 0);
         expect(data['authSource'], 'none');
       },
     );
