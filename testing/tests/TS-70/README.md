@@ -10,7 +10,7 @@ python -m playwright install chromium
 ## Run this test
 
 ```bash
-python testing/tests/TS-70/ts70_fine_grained_pat_auth_playwright.py
+python testing/tests/TS-70/test_ts_70.py
 ```
 
 ## Required environment

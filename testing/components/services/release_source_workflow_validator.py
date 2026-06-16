@@ -62,6 +62,8 @@ class ReleaseSourceWorkflowValidator:
         for entry in payload:
             if not isinstance(entry, dict):
                 continue
+            if entry.get("draft") is True or entry.get("prerelease") is True:
+                continue
             tag_name = str(entry.get("tag_name", "")).strip()
             if not tag_name:
                 continue
@@ -210,5 +212,8 @@ class ReleaseSourceWorkflowValidator:
 
     @staticmethod
     def _is_not_found(error: ReleaseSourceWorkflowError) -> bool:
+        cause = error.__cause__
+        if isinstance(cause, GitHubApiClientError) and cause.status_code == 404:
+            return True
         message = str(error)
         return "HTTP 404" in message or "Not Found" in message

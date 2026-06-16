@@ -1,0 +1,9 @@
+name: ts90_provider_session_retry_probe
+publish_to: none
+
+environment:
+  sdk: ^3.9.2
+
+dependencies:
+  http:
+    path: packages/http

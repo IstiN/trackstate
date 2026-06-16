@@ -1,0 +1,10 @@
+test_id: TS-167
+type: api
+framework: flutter_test
+platform: linux
+dependencies:
+  - TS-161 archiveIssue lifecycle fix deployed on main
+  - TS-135 archive lifecycle repository fixture coverage
+notes:
+  - Reuses the TS-135 LocalTrackStateRepository fixture with seeded priority, components, and fixVersions frontmatter.
+  - Verifies archiveIssue adds archived: true without rewriting parsed metadata or the physical YAML frontmatter for integrated clients.

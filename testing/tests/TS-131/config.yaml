@@ -1,0 +1,26 @@
+test_id: TS-131
+type: ci
+framework: unittest
+platform: python
+dependencies:
+  - gh CLI authenticated with push access to IstiN/trackstate and GitHub Actions
+  - network access to GitHub REST APIs
+  - Flutter SDK 3.35.3 available on PATH, at /tmp/flutter/bin/flutter, or bootstrapped automatically
+runtime_inputs:
+  repository: IstiN/trackstate
+  workflow_path: .github/workflows/unit-tests.yml
+  workflow_name: Flutter Required Checks
+  workflow_job_name: Flutter checks
+  workflow_step_name: Enforce theme tokens
+  gate_command: dart run tool/check_theme_tokens.dart
+  base_branch: main
+  probe_path: lib/ts131_pull_request_probe.dart
+  branch_prefix: ts131-non-tokenized-color
+  pr_title: "TS-131 disposable probe: verify non-tokenized color gate"
+  pr_body: "Disposable PR created by TS-131 automation to verify the theme-token policy gate blocks a pull request with a hardcoded Flutter color."
+  poll_interval_seconds: 5
+  run_timeout_seconds: 600
+  pull_request_timeout_seconds: 90
+notes:
+  - Creates a disposable branch and pull request, then verifies the failing gate on that exact PR surface.
+  - Reuses the TS-115 hardcoded-hex probe to require a non-zero local gate exit code and contributor-visible diagnostic.

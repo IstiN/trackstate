@@ -1,0 +1,10 @@
+test_id: TS-382
+type: cli
+framework: unittest
+platform: python
+dependencies:
+  - Dart SDK available on PATH or via TRACKSTATE_DART_BIN
+  - git CLI available on PATH for seeding a disposable Local Git repository
+notes:
+  - Executes `trackstate attachment download --attachment-id <seeded-id> --out ./downloads/downloaded_file.png --target local` from a seeded local repository.
+  - Verifies the binary file is written to disk, the JSON success envelope returns attachment metadata plus the resolved saved-file path, and stdout does not include base64-encoded attachment content.
