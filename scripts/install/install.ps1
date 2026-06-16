@@ -7,12 +7,17 @@
 #   irm https://github.com/__REPO_PLACEHOLDER__/releases/download/v1.2.3/install.ps1 -OutFile install.ps1
 #   .\install.ps1 -Version v1.2.3
 #
+#   .\install.ps1 -Force
+#   .\install.ps1 -Version v1.2.3 -Force
+#
 # The script installs the TrackState CLI into a user-local directory and
 # appends that directory to the user-level PATH when it is not already present.
 # No administrator privileges are required.
 param(
     [Parameter(Position = 0)]
-    [string]$Version = "latest"
+    [string]$Version = "latest",
+
+    [switch]$Force
 )
 
 $ErrorActionPreference = "Stop"
@@ -28,6 +33,28 @@ function Write-ErrorAndExit {
     param([string]$Message)
     Write-Host "ERROR: $Message" -ForegroundColor Red
     exit 1
+}
+
+function Get-ConflictingTrackStateBinary {
+    param([string]$InstallDir)
+
+    $pathSeparator = [System.IO.Path]::PathSeparator
+    $pathDirs = $env:PATH -split [regex]::Escape($pathSeparator)
+    $normalizedInstallDir = [System.IO.Path]::GetFullPath($InstallDir).TrimEnd('\','/').ToLowerInvariant()
+
+    foreach ($dir in $pathDirs) {
+        if ([string]::IsNullOrWhiteSpace($dir)) {
+            continue
+        }
+
+        $candidate = Join-Path $dir "trackstate.exe"
+        $normalizedDir = [System.IO.Path]::GetFullPath($dir).TrimEnd('\','/').ToLowerInvariant()
+        if ((Test-Path $candidate -PathType Leaf) -and ($normalizedDir -ne $normalizedInstallDir)) {
+            return $candidate
+        }
+    }
+
+    return $null
 }
 
 function Resolve-ReleaseTag {
@@ -82,6 +109,13 @@ $InstallDir = Join-Path $env:LOCALAPPDATA "trackstate\bin"
 $archiveName = "trackstate-cli-$platform-$releaseTag.tar.gz"
 $checksumName = "trackstate-$releaseTag.sha256"
 $downloadBase = "https://github.com/$Repo/releases/download/$releaseTag"
+
+if (-not $Force) {
+    $conflictingBinary = Get-ConflictingTrackStateBinary -InstallDir $InstallDir
+    if ($conflictingBinary) {
+        Write-ErrorAndExit "A conflicting trackstate.exe already exists on PATH: $conflictingBinary. Use -Force to override this conflict and continue installation."
+    }
+}
 
 Write-Info "Installing TrackState CLI $releaseTag for $platform..."
 
