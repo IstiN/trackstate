@@ -1,0 +1,18 @@
+test_id: TS-505
+type: api
+framework: python
+platform: dart-probe
+dependencies:
+  - shared Python Dart runtime bootstrap in testing/frameworks/python/dart_probe_runtime.py
+  - offline dart pub get in testing/tests/TS-505/dart_probe
+  - probe-local path dependency for package:http
+notes:
+  - Exercises the production ProviderBackedTrackStateRepository github-releases upload transaction with a scripted 500 on the release asset POST.
+  - Reuses a cached snapshot plus a fake provider so the test can verify the caller-visible failure and the exact unchanged attachments.json manifest without modifying production code.
+runtime_inputs:
+  issue_key: DEMO-2
+  issue_path: DEMO/DEMO-1/DEMO-2
+  manifest_path: DEMO/DEMO-1/DEMO-2/attachments.json
+  failed_attachment_name: release-failure.pdf
+  existing_attachment_name: architecture-notes.txt
+  expected_release_tag: ts505-DEMO-2

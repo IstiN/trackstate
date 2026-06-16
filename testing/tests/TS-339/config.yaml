@@ -1,0 +1,11 @@
+test_id: TS-339
+type: cli
+framework: unittest
+platform: python
+dependencies:
+  - Dart SDK available on PATH or via TRACKSTATE_DART_BIN
+  - git CLI available on PATH
+notes:
+  - Executes the exact ticket command `trackstate search --jql "project = TRACK" --start-at 0 --max-results 1` from a seeded temporary TrackState repository.
+  - Compiles a temporary CLI binary from this checkout so the seeded repository can remain the current working directory.
+  - Uses the equivalent camelCase aliases as a control command to prove the seeded fixture is valid and to verify alias consistency.

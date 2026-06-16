@@ -1,0 +1,8 @@
+test_id: TS-616
+type: web
+framework: playwright
+platform: chromium
+dependencies: []
+notes:
+  - Opens the deployed hosted TrackState app in Chromium, navigates to Dashboard, and verifies the current desktop top-bar controls in the live implementation.
+  - Audits hover, focus, theme-toggle, and desktop-resize interactions for the sync pill, Create issue action, workspace switcher, Search issues field wrapper, and theme toggle.

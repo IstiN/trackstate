@@ -23,7 +23,7 @@ class HostedAuthPrecedenceCliConfig:
     @classmethod
     def from_env(cls) -> "HostedAuthPrecedenceCliConfig":
         dart_bin = os.environ.get("TRACKSTATE_DART_BIN", "dart")
-        repository = os.environ.get("TS271_REPOSITORY", "IstiN/trackstate")
+        repository = os.environ.get("TS271_REPOSITORY", "IstiN/trackstate-setup")
         provider = os.environ.get("TS271_PROVIDER", "github")
         invalid_explicit_token = os.environ.get(
             "TS271_INVALID_TOKEN",

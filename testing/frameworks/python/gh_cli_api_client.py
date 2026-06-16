@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 from typing import Any, Mapping, Sequence
 
@@ -15,6 +16,7 @@ from testing.core.interfaces.github_api_client import (
 class GhCliApiClient(GitHubApiClient):
     def __init__(self, repository_root: Path) -> None:
         self._repository_root = Path(repository_root)
+        self._gh_executable = _resolve_gh_executable()
 
     def request_text(
         self,
@@ -24,7 +26,7 @@ class GhCliApiClient(GitHubApiClient):
         field_args: Sequence[str] | None = None,
         stdin_json: Mapping[str, Any] | None = None,
     ) -> str:
-        command = ["gh", "api", "-X", method, endpoint]
+        command = [self._gh_executable, "api", "-X", method, endpoint]
         if field_args:
             command.extend(field_args)
 
@@ -51,3 +53,16 @@ class GhCliApiClient(GitHubApiClient):
                 f"{completed.stderr}"
             )
         return completed.stdout
+
+
+def _resolve_gh_executable() -> str:
+    configured = os.environ.get("GH_CLI_PATH", "").strip()
+    if configured:
+        return configured
+    path_candidate = shutil.which("gh")
+    if path_candidate:
+        return path_candidate
+    homebrew_candidate = Path("/opt/homebrew/bin/gh")
+    if homebrew_candidate.exists():
+        return str(homebrew_candidate)
+    return "gh"

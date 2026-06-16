@@ -1,0 +1,9 @@
+test_id: TS-316
+type: ui
+framework: flutter_test
+platform: widget
+dependencies: []
+notes:
+  - Verifies JQL Search falls back to issue key ascending when no ORDER BY clause is present.
+  - Verifies ORDER BY priority DESC still uses issue key ascending as the final tie-breaker.
+  - Verifies a priority tie split across the six-row page boundary stays stable after loading the next page.

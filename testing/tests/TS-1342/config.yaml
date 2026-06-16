@@ -1,0 +1,15 @@
+test_id: TS-1342
+type: cli
+framework: unittest
+platform: python
+dependencies:
+  - bash
+  - git CLI available on PATH
+  - Python 3.12+
+runtime_inputs:
+  script_tool_path: tool/resolve_semantic_version.sh
+  semver_tag_pattern: "^v\\d+\\.\\d+\\.\\d+$"
+notes:
+  - Creates a disposable git repository with seeded semantic version tags.
+  - Runs tool/resolve_semantic_version.sh in auto mode to verify patch bump.
+  - Runs the script again with an existing tag pointing at HEAD to verify reuse.

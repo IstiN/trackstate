@@ -1,0 +1,34 @@
+test_id: TS-1319
+type: api
+framework: gh-cli
+platform: github-actions
+dependencies:
+  - GitHub CLI authenticated with repo and workflow scopes for IstiN/trackstate
+  - Playwright for Chromium-based human-style verification of the GitHub Actions run pages
+runtime_inputs:
+  repository: IstiN/trackstate
+  default_branch: main
+  workflow_name: Build macOS release artifacts
+  workflow_file: build-macos-reusable.yml
+  workflow_path: .github/workflows/build-macos-reusable.yml
+  preflight_job_name: Verify macOS runner availability
+  downstream_job_name: Build macOS desktop and CLI artifacts
+  expected_preflight_runner: ubuntu-latest
+  expected_runner_labels:
+    - self-hosted
+    - macOS
+    - trackstate-release
+    - ARM64
+  expected_failure_markers:
+    - timed out
+    - timeout
+    - maximum execution time
+    - exit code 124
+    - Operation timed out
+  recent_runs_limit: 20
+  poll_interval_seconds: 15
+  run_timeout_seconds: 900
+  ui_timeout_seconds: 60
+notes:
+  - Creates a disposable semantic version tag on the live main branch and waits for the Apple Release Builds workflow run to finish.
+  - Verifies that the Ubuntu preflight readiness gate terminates after about five minutes instead of hanging indefinitely.
