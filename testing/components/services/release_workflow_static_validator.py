@@ -73,7 +73,9 @@ class LocalReleaseWorkflowStaticValidator(ReleaseWorkflowStaticValidator):
         failures.extend(self._check_outputs(config, jobs))
         failures.extend(self._check_env_vars(config, parsed))
         failures.extend(self._check_markers(config, jobs))
+        failures.extend(self._check_literal_markers(config, jobs))
         failures.extend(self._check_call_inputs(config, jobs))
+        failures.extend(self._check_source_files(config))
 
         if config.script_tool_path:
             failures.extend(self._run_script_tool(config))
@@ -267,6 +269,34 @@ class LocalReleaseWorkflowStaticValidator(ReleaseWorkflowStaticValidator):
                         f"Job '{job_name}' input '{input_name}' expected "
                         f"'{expected_value}', observed '{observed}'"
                     )
+        return failures
+
+    def _check_literal_markers(
+        self, config: ReleaseWorkflowStaticConfig, jobs: dict[str, Any]
+    ) -> list[str]:
+        failures = []
+        for job_name, markers in config.required_literal_markers_in_job.items():
+            job = jobs.get(job_name)
+            if not isinstance(job, dict):
+                failures.append(f"Cannot check literal markers for missing job '{job_name}'")
+                continue
+            job_text = json.dumps(job)
+            for marker in markers:
+                if marker not in job_text:
+                    failures.append(
+                        f"Job '{job_name}' missing required literal marker '{marker}'"
+                    )
+        return failures
+
+    def _check_source_files(
+        self, config: ReleaseWorkflowStaticConfig
+    ) -> list[str]:
+        failures = []
+        for source_path in config.required_source_files:
+            if not source_path.exists():
+                failures.append(f"Required source file not found: {source_path}")
+            elif not source_path.is_file():
+                failures.append(f"Required source path is not a file: {source_path}")
         return failures
 
     def _run_script_tool(
