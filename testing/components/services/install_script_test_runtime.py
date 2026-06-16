@@ -231,3 +231,109 @@ def path_entry_count(profile_path: Path, install_dir: Path) -> int:
 
 def install_dir_on_path_env(env_path: str, install_dir: Path) -> bool:
     return str(install_dir) in env_path.split(os.pathsep)
+
+
+def patch_install_ps1(
+    source_path: Path,
+    patched_path: Path,
+    server: MockGitHubReleaseServer,
+    local_app_data: Path,
+    path_store: Path,
+) -> None:
+    """Patch install.ps1 so it can run in an isolated, cross-platform test.
+
+    The script is redirected to the mock GitHub release server, forced to the
+    windows-x64 platform, and uses a file-backed user PATH store so the test
+    does not touch the host registry or require a Windows user profile.
+    """
+    original = source_path.read_text(encoding="utf-8")
+    patched = original
+
+    patched = patched.replace('__REPO_PLACEHOLDER__', server.repo)
+    patched = patched.replace(
+        "https://api.github.com/repos/",
+        f"{server.base_url}/repos/",
+    )
+    patched = patched.replace(
+        "https://github.com/$Repo/",
+        f"{server.base_url}/{server.repo}/",
+    )
+    patched = patched.replace(
+        "https://github.com/${Repo}/",
+        f"{server.base_url}/{server.repo}/",
+    )
+    patched = patched.replace(
+        "https://github.com/${REPO}/",
+        f"{server.base_url}/{server.repo}/",
+    )
+
+    # Force the platform detection to windows-x64 so the test can run on Linux.
+    patched = patched.replace(
+        'function Get-PlatformSuffix {\n'
+        '    $os = $PSVersion.Platform\n'
+        '    $arch = [System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture\n'
+        '\n'
+        '    if ($IsWindows -or ($os -eq "Win32NT")) {\n'
+        '        if ($arch -eq [System.Runtime.InteropServices.Architecture]::X64) {\n'
+        '            return "windows-x64"\n'
+        '        }\n'
+        '        Write-ErrorAndExit "Unsupported architecture on Windows: $arch. Supported: X64."\n'
+        '    }\n'
+        '\n'
+        '    Write-ErrorAndExit "Unsupported operating system: $os. This PowerShell installer supports Windows only."\n'
+        '}',
+        'function Get-PlatformSuffix { return "windows-x64" }',
+    )
+
+    # Redirect user PATH reads/writes to a file so the test is isolated and
+    # works on hosts where the User scope is not backed by the registry.
+    patched = patched.replace(
+        '$userPath = [Environment]::GetEnvironmentVariable("Path", "User")',
+        f'$userPath = if (Test-Path "{path_store}") '
+        f'{{ (Get-Content -Path "{path_store}" -Raw).Trim() }} '
+        f'else {{ "" }}',
+    )
+    patched = patched.replace(
+        '[Environment]::SetEnvironmentVariable(\n'
+        '            "Path",\n'
+        '            "$InstallDir;$userPath",\n'
+        '            "User"\n'
+        '        )',
+        f'Set-Content -Path "{path_store}" '
+        f'-Value "$InstallDir;$userPath" -NoNewline -Encoding UTF8',
+    )
+
+    patched_path.write_text(patched, encoding="utf-8")
+
+
+def run_install_ps1(
+    script_path: Path,
+    version: str | None = None,
+    flags: list[str] | None = None,
+    env: dict[str, str] | None = None,
+    cwd: Path | None = None,
+    timeout: int = 60,
+) -> subprocess.CompletedProcess[str]:
+    command = [
+        "pwsh",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-NoProfile",
+        "-File",
+        str(script_path),
+    ]
+    if flags:
+        command.extend(flags)
+    if version is not None:
+        command.extend(["-Version", version])
+    merged_env = os.environ.copy()
+    if env:
+        merged_env.update(env)
+    return subprocess.run(
+        command,
+        cwd=cwd or Path.cwd(),
+        capture_output=True,
+        text=True,
+        env=merged_env,
+        timeout=timeout,
+    )
