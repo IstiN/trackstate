@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import '../../domain/models/trackstate_models.dart';
 import 'foundation_compat.dart';
 
@@ -36,6 +38,14 @@ abstract interface class RepositoryFileMutator {
 
 abstract interface class RepositoryPermissionChecker {
   Future<RepositoryPermission> getPermission();
+}
+
+abstract interface class RepositorySyncChecker {
+  Future<RepositorySyncCheck> checkSync({RepositorySyncState? previousState});
+}
+
+abstract interface class RepositoryCatalogReader {
+  Future<List<HostedRepositoryReference>> listAccessibleRepositories();
 }
 
 abstract interface class RepositoryAttachmentStore {
@@ -81,6 +91,7 @@ abstract interface class TrackStateProviderAdapter
         RepositorySessionManager,
         RepositoryCommitManager,
         RepositoryPermissionChecker,
+        RepositorySyncChecker,
         RepositoryAttachmentStore {
   ProviderType get providerType;
   String get repositoryLabel;
@@ -178,10 +189,75 @@ class ProviderSession {
 }
 
 class RepositoryTreeEntry {
-  const RepositoryTreeEntry({required this.path, required this.type});
+  const RepositoryTreeEntry({
+    required this.path,
+    required this.type,
+    this.revision,
+  });
 
   final String path;
   final String type;
+  final String? revision;
+}
+
+class RepositorySyncState {
+  const RepositorySyncState({
+    required this.providerType,
+    required this.repositoryRevision,
+    required this.sessionRevision,
+    required this.connectionState,
+    this.workingTreeRevision,
+    this.permission,
+  });
+
+  final ProviderType providerType;
+  final String repositoryRevision;
+  final String sessionRevision;
+  final ProviderConnectionState connectionState;
+  final String? workingTreeRevision;
+  final RepositoryPermission? permission;
+
+  Map<String, Object?> toJson() {
+    return <String, Object?>{
+      'provider_type': providerType.name,
+      'repository_revision': repositoryRevision,
+      'session_revision': sessionRevision,
+      'connection_state': connectionState.name,
+      'working_tree_revision': workingTreeRevision,
+      'permission': permission?.toJson(),
+    };
+  }
+}
+
+class RepositorySyncCheck {
+  const RepositorySyncCheck({
+    required this.state,
+    this.signals = const <WorkspaceSyncSignal>{},
+    this.changedPaths = const <String>{},
+    this.hostedSnapshotReloadDirective,
+  });
+
+  final RepositorySyncState state;
+  final Set<WorkspaceSyncSignal> signals;
+  final Set<String> changedPaths;
+  final HostedSnapshotReloadDirective? hostedSnapshotReloadDirective;
+
+  Map<String, Object?> toJson() {
+    final payload = <String, Object?>{
+      'state': state.toJson(),
+      'signals': signals.map((signal) => signal.name).toList()..sort(),
+      'changed_paths': changedPaths.toList()..sort(),
+    };
+    final loadSnapshotDelta = switch (hostedSnapshotReloadDirective) {
+      HostedSnapshotReloadDirective.enabled => 1,
+      HostedSnapshotReloadDirective.disabled => 0,
+      null => null,
+    };
+    if (loadSnapshotDelta != null) {
+      payload['load_snapshot_delta'] = loadSnapshotDelta;
+    }
+    return payload;
+  }
 }
 
 class RepositoryTextFile {
@@ -196,8 +272,8 @@ class RepositoryTextFile {
   final String? revision;
 }
 
-class RepositoryWriteRequest {
-  const RepositoryWriteRequest({
+class RepositoryChangeRequest {
+  const RepositoryChangeRequest({
     required this.path,
     required this.content,
     required this.message,
@@ -210,6 +286,108 @@ class RepositoryWriteRequest {
   final String message;
   final String branch;
   final String? expectedRevision;
+}
+
+class RepositoryWriteRequest extends RepositoryChangeRequest {
+  const RepositoryWriteRequest({
+    required super.path,
+    required super.content,
+    required super.message,
+    required super.branch,
+    super.expectedRevision,
+  });
+}
+
+void validateRepositoryTextWrite(RepositoryWriteRequest request) {
+  _validateRepositoryTextContent(path: request.path, content: request.content);
+}
+
+void validateRepositoryTextChange(RepositoryTextFileChange change) {
+  _validateRepositoryTextContent(path: change.path, content: change.content);
+}
+
+void _validateRepositoryTextContent({
+  required String path,
+  required String content,
+}) {
+  if (!_isLinksJsonPath(path)) {
+    return;
+  }
+
+  final decoded = _decodeLinksJson(path, content);
+  if (decoded is! List) {
+    throw TrackStateProviderException(
+      'Validation failed for $path: links.json must contain a JSON array of link records.',
+    );
+  }
+
+  for (final entry in decoded) {
+    if (entry is! Map) {
+      throw TrackStateProviderException(
+        'Validation failed for $path: links.json must contain only link objects.',
+      );
+    }
+    _validateStoredLinkRecord(path, entry);
+  }
+}
+
+bool _isLinksJsonPath(String path) =>
+    path == 'links.json' || path.endsWith('/links.json');
+
+Object? _decodeLinksJson(String path, String content) {
+  try {
+    return jsonDecode(content);
+  } on FormatException catch (error) {
+    throw TrackStateProviderException(
+      'Validation failed for $path: links.json must contain valid JSON. ${error.message}',
+    );
+  }
+}
+
+void _validateStoredLinkRecord(String path, Map entry) {
+  final rawType = entry['type']?.toString();
+  if (rawType == null || rawType.trim().isEmpty) {
+    throw TrackStateProviderException(
+      'Validation failed for $path: each links.json record must include a non-empty type.',
+    );
+  }
+
+  final normalizedType = _canonicalStorageToken(rawType);
+  final canonicalType = _canonicalStoredLinkType(normalizedType);
+  if (canonicalType == null) {
+    return;
+  }
+
+  final rawDirection = entry['direction']?.toString() ?? 'outward';
+  final normalizedDirection = _canonicalStorageToken(rawDirection);
+  if (normalizedType == canonicalType && normalizedDirection == 'outward') {
+    return;
+  }
+
+  throw TrackStateProviderException(
+    'Validation failed for $path: standardized links.json records must use the canonical outward form. '
+    'Found type "$rawType" with direction "$rawDirection".',
+  );
+}
+
+String? _canonicalStoredLinkType(String normalizedType) {
+  return switch (normalizedType) {
+    'blocks' || 'is-blocked-by' => 'blocks',
+    'relates' || 'relates-to' => 'relates-to',
+    'duplicates' || 'is-duplicated-by' => 'duplicates',
+    'clones' || 'is-cloned-by' => 'clones',
+    _ => null,
+  };
+}
+
+String _canonicalStorageToken(String? value) {
+  final text = value?.trim().toLowerCase() ?? '';
+  if (text.isEmpty) {
+    return '';
+  }
+  return text
+      .replaceAll(RegExp(r'[^a-z0-9]+'), '-')
+      .replaceAll(RegExp(r'^-+|-+$'), '');
 }
 
 class RepositoryWriteResult {
@@ -224,20 +402,14 @@ class RepositoryWriteResult {
   final String? revision;
 }
 
-class RepositoryCommitRequest {
+class RepositoryCommitRequest extends RepositoryChangeRequest {
   const RepositoryCommitRequest({
-    required this.path,
-    required this.content,
-    required this.message,
-    required this.branch,
-    this.expectedRevision,
+    required super.path,
+    required super.content,
+    required super.message,
+    required super.branch,
+    super.expectedRevision,
   });
-
-  final String path;
-  final String content;
-  final String message;
-  final String branch;
-  final String? expectedRevision;
 }
 
 class RepositoryCommitResult {
@@ -245,11 +417,13 @@ class RepositoryCommitResult {
     required this.branch,
     required this.message,
     this.revision,
+    this.createdCommit = true,
   });
 
   final String branch;
   final String message;
   final String? revision;
+  final bool createdCommit;
 }
 
 class RepositoryFileChangeRequest {
@@ -339,6 +513,21 @@ class RepositoryPermission {
   final bool supportsReleaseAttachmentWrites;
   final String? releaseAttachmentWriteFailureReason;
   final bool canCheckCollaborators;
+
+  Map<String, Object?> toJson() {
+    return <String, Object?>{
+      'can_read': canRead,
+      'can_write': canWrite,
+      'is_admin': isAdmin,
+      'can_create_branch': canCreateBranch,
+      'can_manage_attachments': canManageAttachments,
+      'attachment_upload_mode': attachmentUploadMode.name,
+      'supports_release_attachment_writes': supportsReleaseAttachmentWrites,
+      'release_attachment_write_failure_reason':
+          releaseAttachmentWriteFailureReason,
+      'can_check_collaborators': canCheckCollaborators,
+    };
+  }
 }
 
 class RepositoryAttachment {
@@ -364,6 +553,7 @@ class RepositoryAttachmentWriteRequest {
     required this.message,
     required this.branch,
     this.expectedRevision,
+    this.allowLfsTrackedWrite = false,
   });
 
   final String path;
@@ -371,6 +561,7 @@ class RepositoryAttachmentWriteRequest {
   final String message;
   final String branch;
   final String? expectedRevision;
+  final bool allowLfsTrackedWrite;
 }
 
 class RepositoryAttachmentWriteResult {
@@ -476,9 +667,10 @@ class RepositoryHistoryCommit {
 }
 
 class TrackStateProviderException implements Exception {
-  const TrackStateProviderException(this.message);
+  const TrackStateProviderException(this.message, {this.details = const {}});
 
   final String message;
+  final Map<String, Object?> details;
 
   @override
   String toString() => message;

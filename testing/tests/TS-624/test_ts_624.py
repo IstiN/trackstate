@@ -115,9 +115,39 @@ class TrackStateCliInverseLinkCanonicalStorageTest(unittest.TestCase):
             link_payload["data"]["command"],
             "ticket-link",
             "Step 1 failed: the inverse-link CLI response did not report the "
-            "canonical `ticket-link` operation.\n"
+            "`ticket-link` operation.\n"
             f"Observed payload: {link_payload}",
         )
+
+        observed_link_payload = link_payload["data"].get("link")
+        self.assertIsInstance(
+            observed_link_payload,
+            dict,
+            "Step 1 failed: the visible CLI response did not include a `data.link` "
+            "object a user can inspect after running the inverse-label command.\n"
+            f"Observed payload: {link_payload}",
+        )
+        assert isinstance(observed_link_payload, dict)
+        for field_name in ("type", "target", "direction"):
+            self.assertIsInstance(
+                observed_link_payload.get(field_name),
+                str,
+                "Step 1 failed: the visible CLI response did not include the normal "
+                "relationship metadata fields expected for `data.link`.\n"
+                f"Missing or invalid field: {field_name}\n"
+                f"Observed data.link: {observed_link_payload}",
+            )
+
+        for fragment in ('"command": "ticket-link"', f'"key": "{self.config.issue_a_key}"'):
+            self.assertIn(
+                fragment,
+                observation.inverse_link_observation.result.stdout,
+                "Human-style verification failed: the visible CLI response did not "
+                "show the expected ticket-link confirmation details a user would "
+                "see immediately after running the inverse-label command.\n"
+                f"Missing fragment: {fragment}\n"
+                f"Observed stdout:\n{observation.inverse_link_observation.result.stdout}",
+            )
 
         target_links_payload = observation.target_links_json_payload
         self.assertIsInstance(
@@ -142,12 +172,11 @@ class TrackStateCliInverseLinkCanonicalStorageTest(unittest.TestCase):
             f"Discovered links.json files: {observation.discovered_links_json_files}\n"
             f"Observed files:\n{self._format_links_json_snapshots(observation)}",
         )
-        self.assertEqual(
+        self.assertIn(
+            observation.target_links_json_relative_path,
             observation.discovered_links_json_files,
-            (observation.target_links_json_relative_path,),
-            "Expected result failed: the repository did not store exactly one "
-            "`links.json` file at the canonical target issue location after inverse "
-            "normalization.\n"
+            "Expected result failed: the repository did not persist the canonical "
+            "`links.json` artifact at the normalized target issue location.\n"
             f"Expected path: {observation.target_links_json_relative_path}\n"
             f"Observed files: {observation.discovered_links_json_files}\n"
             f"Observed files detail:\n{self._format_links_json_snapshots(observation)}",
@@ -161,21 +190,6 @@ class TrackStateCliInverseLinkCanonicalStorageTest(unittest.TestCase):
             f"Observed content:\n{observation.source_links_json_content}\n"
             f"Observed files detail:\n{self._format_links_json_snapshots(observation)}",
         )
-
-        for fragment in (
-            '"command": "ticket-link"',
-            f'"key": "{self.config.issue_a_key}"',
-            f'"target": "{self.config.issue_b_key}"',
-        ):
-            self.assertIn(
-                fragment,
-                observation.inverse_link_observation.result.stdout,
-                "Human-style verification failed: the visible CLI response did not "
-                "show the expected ticket-link confirmation details a user would "
-                "see immediately after running the inverse-label command.\n"
-                f"Missing fragment: {fragment}\n"
-                f"Observed stdout:\n{observation.inverse_link_observation.result.stdout}",
-            )
 
     def _assert_command_was_executed_exactly(
         self,

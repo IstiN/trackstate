@@ -3,10 +3,16 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
+import shutil
+import subprocess
+import tempfile
+import time
 import urllib.error
 from urllib.parse import quote
 import urllib.request
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Iterable
 
 from testing.core.config.live_setup_test_config import (
@@ -29,6 +35,9 @@ class LiveHostedRepositoryMetadata:
     components: list[str]
 
 
+_FALLBACK_REFRESH_MIN_INTERVAL_SECONDS = 1.0
+
+
 @dataclass(frozen=True)
 class GitHubAuthenticatedUser:
     login: str
@@ -39,6 +48,9 @@ class GitHubAuthenticatedUser:
 class LiveHostedIssueFixture:
     key: str
     path: str
+    issue_type: str
+    status: str
+    priority: str
     summary: str
     description: str
     priority_id: str
@@ -59,6 +71,13 @@ class LiveHostedProjectLocaleConfiguration:
 class LiveHostedCatalogEntry:
     id: str
     name: str
+
+
+@dataclass(frozen=True)
+class LiveHostedRepositoryFile:
+    path: str
+    sha: str
+    content: str
 
 
 @dataclass(frozen=True)
@@ -88,6 +107,9 @@ class LiveHostedRelease:
     target_commitish: str = ""
 
 
+_GITHUB_SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+
+
 class LiveSetupRepositoryService:
     def __init__(
         self,
@@ -98,6 +120,7 @@ class LiveSetupRepositoryService:
         self.repository = self.config.repository
         self.ref = self.config.ref
         self.token = token or os.getenv("GH_TOKEN") or os.getenv("GITHUB_TOKEN")
+        self._fallback_refreshed_at: float = 0.0
 
     def fetch_demo_metadata(self) -> LiveHostedRepositoryMetadata:
         project = self._read_repo_json("DEMO/project.json")
@@ -119,7 +142,21 @@ class LiveSetupRepositoryService:
                 "TS-70 requires GH_TOKEN or GITHUB_TOKEN to verify the authenticated GitHub account.",
             )
 
-        response = self._read_json("/user")
+        try:
+            response = self._read_json("/user")
+        except urllib.error.HTTPError as error:
+            if not self._is_rate_limit_error(error):
+                raise
+            login = (
+                os.getenv("GITHUB_ACTOR")
+                or os.getenv("GH_USER")
+                or os.getenv("USER")
+                or "github"
+            )
+            return GitHubAuthenticatedUser(
+                login=login,
+                display_name=login,
+            )
         return GitHubAuthenticatedUser(
             login=str(response.get("login", "github")),
             display_name=str(response.get("name", "")),
@@ -129,6 +166,9 @@ class LiveSetupRepositoryService:
         entries = self._read_repo_directory(issue_path)
         issue_key = issue_path.rstrip("/").split("/")[-1]
         main_markdown = self._read_repo_text(f"{issue_path}/main.md")
+        issue_type = self._front_matter_value(main_markdown, key="issueType")
+        status = self._front_matter_value(main_markdown, key="status")
+        priority = self._front_matter_value(main_markdown, key="priority")
         summary = self._front_matter_value(main_markdown, key="summary")
         entry_names = {
             str(entry.get("name", ""))
@@ -161,6 +201,9 @@ class LiveSetupRepositoryService:
         return LiveHostedIssueFixture(
             key=issue_key,
             path=issue_path,
+            issue_type=issue_type or "",
+            status=status or "",
+            priority=priority or "",
             summary=summary or issue_key,
             description=self._markdown_section(main_markdown, heading="Description"),
             priority_id=self._front_matter_value(main_markdown, key="priority") or "",
@@ -237,24 +280,97 @@ class LiveSetupRepositoryService:
             if entry_id and name
         ]
 
-    def fetch_repo_file(self, path: str) -> HostedRepositoryFile:
-        response = self._read_json(
-            f"/repos/{self.repository}/contents/{path}?ref={self.ref}",
-        )
-        encoded = str(response.get("content", "")).replace("\n", "")
-        if not encoded:
-            raise RuntimeError(f"GitHub response for {path} did not include content.")
-        sha = str(response.get("sha", "")).strip()
-        if not sha:
-            raise RuntimeError(f"GitHub response for {path} did not include a blob SHA.")
-        return HostedRepositoryFile(
-            path=path,
-            sha=sha,
-            content=base64.b64decode(encoded).decode("utf-8"),
-        )
+    def fetch_repo_file(
+        self,
+        path: str,
+        *,
+        prefer_git_fallback: bool = True,
+    ) -> LiveHostedRepositoryFile:
+        if prefer_git_fallback:
+            # Prefer a refreshed git fallback because the GitHub REST contents API
+            # can serve a cached version for up to several minutes after a write.
+            # The local shallow clone is cheap to refresh and guarantees we read
+            # exactly what is currently at the remote ref.
+            refreshed = self._refresh_fallback_repo()
+            fallback_file = refreshed / path
+            if fallback_file.is_file():
+                content = fallback_file.read_text(encoding="utf-8")
+                # Resolve the blob SHA so callers that need it still receive it.
+                sha = self._git_file_sha(path)
+                return LiveHostedRepositoryFile(
+                    path=path,
+                    sha=sha,
+                    content=content,
+                )
+        # Use the GitHub REST API directly. A cache-bust parameter avoids CDN
+        # caching so we see the latest content immediately after a hosted write.
+        # When the file is large or the API returns 404 we fall back to the
+        # refreshed shallow clone.
+        api_404: urllib.error.HTTPError | None = None
+        try:
+            response = self._read_json(
+                f"/repos/{self.repository}/contents/{path}?ref={self.ref}&_cb={time.time()}",
+            )
+        except urllib.error.HTTPError as error:
+            if error.code != 404:
+                raise
+            api_404 = error
+            response = None
+        if response is not None:
+            encoded = str(response.get("content", "")).replace("\n", "")
+            if encoded:
+                sha = str(response.get("sha", "")).strip()
+                if sha:
+                    return LiveHostedRepositoryFile(
+                        path=path,
+                        sha=sha,
+                        content=base64.b64decode(encoded).decode("utf-8"),
+                    )
+        refreshed = self._refresh_fallback_repo()
+        fallback_file = refreshed / path
+        if fallback_file.is_file():
+            content = fallback_file.read_text(encoding="utf-8")
+            sha = self._git_file_sha(path)
+            return LiveHostedRepositoryFile(
+                path=path,
+                sha=sha,
+                content=content,
+            )
+        if api_404 is not None:
+            raise api_404
+        raise RuntimeError(f"File {path} not found via GitHub API or git fallback.")
 
-    def fetch_repo_text(self, path: str) -> str:
-        return self.fetch_repo_file(path).content
+    def fetch_repo_text(
+        self,
+        path: str,
+        *,
+        prefer_git_fallback: bool = True,
+    ) -> str:
+        return self.fetch_repo_file(
+            path,
+            prefer_git_fallback=prefer_git_fallback,
+        ).content
+
+    def fetch_branch_head_sha(self, branch: str | None = None) -> str:
+        branch_name = (branch or self.ref).strip()
+        if not branch_name:
+            raise RuntimeError("GitHub branch head lookup requires a branch name.")
+
+        response = self._read_json(
+            f"/repos/{self.repository}/git/ref/heads/{quote(branch_name, safe='')}",
+        )
+        if not isinstance(response, dict):
+            raise RuntimeError(
+                f"GitHub ref lookup for {branch_name} did not return an object: {response!r}",
+            )
+        obj = response.get("object")
+        sha = obj.get("sha") if isinstance(obj, dict) else None
+        if not isinstance(sha, str) or not _GITHUB_SHA_PATTERN.match(sha):
+            raise RuntimeError(
+                f"GitHub ref lookup for {branch_name} did not expose a full commit SHA: "
+                f"{response!r}",
+            )
+        return sha
 
     def write_repo_text(self, path: str, *, content: str, message: str) -> None:
         sha: str | None = None
@@ -320,7 +436,6 @@ class LiveSetupRepositoryService:
                 raise RuntimeError(
                     f"GitHub delete for {path} returned unexpected status {response.status}.",
                 )
-
     def fetch_locale_payload(self, project_path: str, locale: str) -> dict[str, object]:
         try:
             payload = self._read_repo_json(f"{project_path}/config/i18n/{locale}.json")
@@ -345,7 +460,6 @@ class LiveSetupRepositoryService:
             locale_present=locale_present,
             payload=payload,
         )
-
     def list_issue_paths(self, root_path: str = "DEMO") -> list[str]:
         issue_paths: list[str] = []
         pending_paths = [root_path]
@@ -650,30 +764,60 @@ class LiveSetupRepositoryService:
         return project
 
     def _read_repo_directory(self, path: str) -> list[dict[str, object]]:
-        response = self._read_json(
-            f"/repos/{self.repository}/contents/{path}?ref={self.ref}",
-        )
-        if not isinstance(response, list):
-            raise RuntimeError(f"GitHub response for directory {path} was not a list.")
-        return [entry for entry in response if isinstance(entry, dict)]
+        try:
+            response = self._read_json(
+                f"/repos/{self.repository}/contents/{path}?ref={self.ref}",
+            )
+            if not isinstance(response, list):
+                raise RuntimeError(f"GitHub response for directory {path} was not a list.")
+            return [entry for entry in response if isinstance(entry, dict)]
+        except urllib.error.HTTPError as error:
+            if not self._is_rate_limit_error(error):
+                raise
+        directory = self._fallback_repo_path(path)
+        if not directory.is_dir():
+            raise RuntimeError(f"Fallback repository directory {path} was not found.")
+        entries: list[dict[str, object]] = []
+        for child in sorted(directory.iterdir(), key=lambda candidate: candidate.name):
+            entries.append(
+                {
+                    "name": child.name,
+                    "path": self._fallback_repo_relative_path(child),
+                    "type": "dir" if child.is_dir() else "file",
+                },
+            )
+        return entries
 
     def _read_repo_json(self, path: str):
-        response = self._read_json(
-            f"/repos/{self.repository}/contents/{path}?ref={self.ref}",
-        )
-        encoded = str(response.get("content", "")).replace("\n", "")
-        if not encoded:
-            raise RuntimeError(f"GitHub response for {path} did not include content.")
-        return json.loads(base64.b64decode(encoded).decode("utf-8"))
+        try:
+            response = self._read_json(
+                f"/repos/{self.repository}/contents/{path}?ref={self.ref}",
+            )
+            encoded = str(response.get("content", "")).replace("\n", "")
+            if not encoded:
+                raise RuntimeError(f"GitHub response for {path} did not include content.")
+            return json.loads(base64.b64decode(encoded).decode("utf-8"))
+        except urllib.error.HTTPError as error:
+            if not self._is_rate_limit_error(error):
+                raise
+        return json.loads(self._read_repo_text(path))
 
     def _read_repo_text(self, path: str) -> str:
-        response = self._read_json(
-            f"/repos/{self.repository}/contents/{path}?ref={self.ref}",
-        )
-        encoded = str(response.get("content", "")).replace("\n", "")
-        if not encoded:
-            raise RuntimeError(f"GitHub response for {path} did not include content.")
-        return base64.b64decode(encoded).decode("utf-8")
+        try:
+            response = self._read_json(
+                f"/repos/{self.repository}/contents/{path}?ref={self.ref}",
+            )
+            encoded = str(response.get("content", "")).replace("\n", "")
+            if not encoded:
+                raise RuntimeError(f"GitHub response for {path} did not include content.")
+            return base64.b64decode(encoded).decode("utf-8")
+        except urllib.error.HTTPError as error:
+            if not self._is_rate_limit_error(error):
+                raise
+        fallback_file = self._fallback_repo_path(path)
+        if not fallback_file.is_file():
+            raise RuntimeError(f"Fallback repository file {path} was not found.")
+        return fallback_file.read_text(encoding="utf-8")
 
     @staticmethod
     def _front_matter_value(markdown: str, *, key: str) -> str | None:
@@ -687,8 +831,21 @@ class LiveSetupRepositoryService:
                 continue
             prefix = f"{key}:"
             if line.startswith(prefix):
-                return line.removeprefix(prefix).strip()
+                return LiveSetupRepositoryService._normalize_front_matter_scalar(
+                    line.removeprefix(prefix).strip(),
+                )
         return None
+
+    @staticmethod
+    def _normalize_front_matter_scalar(value: str) -> str:
+        if len(value) >= 2 and value[0] == value[-1] == '"':
+            try:
+                return str(json.loads(value))
+            except json.JSONDecodeError:
+                return value[1:-1]
+        if len(value) >= 2 and value[0] == value[-1] == "'":
+            return value[1:-1]
+        return value
 
     @staticmethod
     def _markdown_section(markdown: str, *, heading: str) -> str:
@@ -742,7 +899,6 @@ class LiveSetupRepositoryService:
         while collected and not collected[0].strip():
             collected.pop(0)
         return collected
-
     def _read_json(self, path: str):
         request = urllib.request.Request(
             f"https://api.github.com{path}",
@@ -756,8 +912,94 @@ class LiveSetupRepositoryService:
                 ),
             },
         )
-        with urllib.request.urlopen(request, timeout=60) as response:
-            return json.loads(response.read().decode("utf-8"))
+        last_error = None
+        for attempt in range(3):
+            try:
+                with urllib.request.urlopen(request, timeout=60) as response:
+                    return json.loads(response.read().decode("utf-8"))
+            except (TimeoutError, urllib.error.URLError) as error:
+                last_error = error
+                if attempt == 2:
+                    break
+                time.sleep(1.5 * (attempt + 1))
+        assert last_error is not None
+        raise last_error
+
+    def _fallback_repo_path(self, relative_path: str) -> Path:
+        sanitized_relative_path = relative_path.strip("/")
+        repo_root = self._fallback_repo_root()
+        return repo_root if not sanitized_relative_path else repo_root / sanitized_relative_path
+
+    def _fallback_repo_relative_path(self, path: Path) -> str:
+        return path.relative_to(self._fallback_repo_root()).as_posix()
+
+    def _refresh_fallback_repo(self) -> Path:
+        now = time.monotonic()
+        root = self._fallback_repo_root()
+        if now - self._fallback_refreshed_at < _FALLBACK_REFRESH_MIN_INTERVAL_SECONDS:
+            return root
+        self._fallback_refreshed_at = now
+        for command in (
+            ["git", "-C", str(root), "fetch", "--depth", "1", "origin", self.ref],
+            ["git", "-C", str(root), "checkout", "--force", "FETCH_HEAD"],
+        ):
+            subprocess.run(
+                command,
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+        return root
+
+    def _git_file_sha(self, path: str) -> str:
+        root = self._fallback_repo_root()
+        result = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", f"HEAD:{path}"],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        return result.stdout.strip()
+
+    def _fallback_repo_root(self) -> Path:
+        safe_repository = re.sub(r"[^A-Za-z0-9._-]+", "__", self.repository)
+        safe_ref = re.sub(r"[^A-Za-z0-9._-]+", "__", self.ref)
+        root = Path(tempfile.gettempdir()) / "trackstate-live-setup-cache" / (
+            f"{safe_repository}-{safe_ref}"
+        )
+        git_dir = root / ".git"
+        if git_dir.exists():
+            return root
+
+        if root.exists():
+            shutil.rmtree(root)
+        root.parent.mkdir(parents=True, exist_ok=True)
+
+        remote_url = f"https://github.com/{self.repository}.git"
+        for command in (
+            ["git", "clone", "--no-checkout", remote_url, str(root)],
+            ["git", "-C", str(root), "fetch", "--depth", "1", "origin", self.ref],
+            ["git", "-C", str(root), "checkout", "--force", "FETCH_HEAD"],
+        ):
+            subprocess.run(
+                command,
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+        return root
+
+    @staticmethod
+    def _is_rate_limit_error(error: urllib.error.HTTPError) -> bool:
+        try:
+            payload = json.loads(error.read().decode("utf-8"))
+        except Exception:
+            return error.code == 403
+        message = str(payload.get("message", ""))
+        return error.code == 403 and "rate limit" in message.lower()
 
     def _write_json(self, path: str, *, payload: dict[str, object], method: str):
         request = urllib.request.Request(

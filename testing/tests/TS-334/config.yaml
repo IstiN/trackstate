@@ -4,5 +4,5 @@ framework: flutter_test
 platform: widget
 dependencies: []
 notes:
-  - Verifies the desktop Create issue surface stays right-docked at 1440x960.
+  - Verifies the desktop Create issue surface stays right-docked at the default 1440x900 desktop viewport.
   - Confirms the right edge is flush with the viewport so the prior 276px right inset regression does not return.

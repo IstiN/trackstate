@@ -132,7 +132,13 @@ class _InitialLoadDelayedTrackStateRepository
     required TrackStateIssue issue,
     required String name,
     required Uint8List bytes,
-  }) => _delegate.uploadIssueAttachment(issue: issue, name: name, bytes: bytes);
+    String? sourceName,
+  }) => _delegate.uploadIssueAttachment(
+    issue: issue,
+    name: name,
+    bytes: bytes,
+    sourceName: sourceName,
+  );
 
   @override
   Future<TrackerSnapshot> saveProjectSettings(ProjectSettingsCatalog settings) {

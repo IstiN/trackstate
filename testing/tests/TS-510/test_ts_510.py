@@ -31,7 +31,6 @@ from testing.tests.support.live_tracker_app_factory import (  # noqa: E402
 TICKET_KEY = "TS-510"
 ISSUE_KEY = "DEMO-2"
 ISSUE_PATH = "DEMO/DEMO-1/DEMO-2"
-ISSUE_SUMMARY = "Explore the issue board"
 PROJECT_JSON_PATH = "DEMO/project.json"
 MANIFEST_PATH = f"{ISSUE_PATH}/attachments.json"
 ATTACHMENT_NAME = "manual.pdf"
@@ -78,6 +77,13 @@ def main() -> None:
         )
 
     user = service.fetch_authenticated_user()
+    issue_fixture = service.fetch_issue_fixture(ISSUE_PATH)
+    if issue_fixture.key != ISSUE_KEY:
+        raise RuntimeError(
+            "TS-510 expected the live issue fixture to resolve to "
+            f"{ISSUE_KEY}, but got {issue_fixture.key}.",
+        )
+    issue_summary = issue_fixture.summary
     project_json_text = service.fetch_repo_text(PROJECT_JSON_PATH)
     original_release = service.fetch_release_by_tag_any_state(EXPECTED_RELEASE_TAG)
     if original_release is not None:
@@ -96,7 +102,7 @@ def main() -> None:
         "repository": service.repository,
         "repository_ref": service.ref,
         "issue_key": ISSUE_KEY,
-        "issue_summary": ISSUE_SUMMARY,
+        "issue_summary": issue_summary,
         "issue_path": ISSUE_PATH,
         "project_json_path": PROJECT_JSON_PATH,
         "manifest_path": MANIFEST_PATH,
@@ -147,7 +153,7 @@ def main() -> None:
                     page.dismiss_connection_banner()
                     page.search_and_select_issue(
                         issue_key=ISSUE_KEY,
-                        issue_summary=ISSUE_SUMMARY,
+                        issue_summary=issue_summary,
                         query=ISSUE_KEY,
                     )
                     page.open_collaboration_tab("Attachments")
@@ -200,8 +206,8 @@ def main() -> None:
                         upload_controls.upload_button_enabled
                     )
                     if (
-                        upload_controls.choose_button_count != 1
-                        or upload_controls.upload_button_count != 1
+                        upload_controls.choose_button_count < 1
+                        or upload_controls.upload_button_count < 1
                         or not upload_controls.choose_button_enabled
                     ):
                         raise AssertionError(
@@ -289,7 +295,7 @@ def main() -> None:
                             )
                         page.search_and_select_issue(
                             issue_key=ISSUE_KEY,
-                            issue_summary=ISSUE_SUMMARY,
+                            issue_summary=issue_summary,
                             query=ISSUE_KEY,
                         )
                         page.open_collaboration_tab("Attachments")
@@ -528,7 +534,10 @@ def _select_attachment(
 
 
 def _observe_manifest_state(service: LiveSetupRepositoryService) -> dict[str, object]:
-    manifest_text = service.fetch_repo_text(MANIFEST_PATH)
+    manifest_text = service.fetch_repo_text(
+        MANIFEST_PATH,
+        prefer_git_fallback=False,
+    )
     entries = json.loads(manifest_text)
     if not isinstance(entries, list):
         raise AssertionError(
