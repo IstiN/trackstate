@@ -10,7 +10,6 @@ runtime_inputs:
   required_jobs:
     - build-linux
     - build-windows
-    - build-macos
   required_steps_by_job:
     build-linux:
       - Build Linux desktop app
