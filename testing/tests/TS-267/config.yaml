@@ -1,0 +1,29 @@
+test_id: TS-267
+type: ci
+framework: unittest
+platform: python
+dependencies:
+  - gh CLI authenticated for GitHub API access
+  - network access to GitHub REST APIs and the GitHub web UI
+  - Playwright Chromium runtime for browser verification
+runtime_inputs:
+  repository: IstiN/trackstate-setup
+  base_branch: main
+  dependabot_path: .github/dependabot.yml
+  expected_package_ecosystem: github-actions
+  expected_directory: /
+  required_schedule_keys:
+    - interval
+  expected_visible_texts:
+    - dependabot.yml
+    - github-actions
+    - schedule
+  ui_missing_page_markers:
+    - Page not found
+    - There isn’t anything here
+    - Uh oh!
+  ui_timeout_seconds: 60
+notes:
+  - Verifies that the live repository exposes .github/dependabot.yml.
+  - Confirms the file contains a github-actions updates block rooted at / with a defined schedule.
+  - Performs human-style verification against the visible GitHub file page.

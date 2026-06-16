@@ -1,0 +1,41 @@
+test_id: TS-1346
+type: ci
+framework: unittest
+platform: python
+dependencies:
+  - Python 3.12+
+  - PyYAML
+runtime_inputs:
+  repository: IstiN/trackstate
+  default_branch: main
+  workflow_path: .github/workflows/build-native.yml
+  workflow_file: build-native.yml
+  required_triggers:
+    - workflow_dispatch
+  required_jobs:
+    - resolve-release
+    - build-macos
+    - publish-release
+  required_uses_by_job:
+    build-macos:
+      - ./.github/workflows/build-macos-reusable.yml
+  required_call_inputs:
+    build-macos:
+      release_tag: ${{ needs.resolve-release.outputs.release_tag }}
+      release_checkout_ref: ${{ needs.resolve-release.outputs.release_checkout_ref }}
+      build_number: ${{ needs.resolve-release.outputs.build_number }}
+  dispatch_inputs:
+    reusable_workflow_path: .github/workflows/build-macos-reusable.yml
+    build_macos_job_name: Build macOS release artifacts
+    required_runner_labels:
+      - self-hosted
+      - macOS
+      - trackstate-release
+      - ARM64
+    release_ref: v0.0.98
+    run_timeout_seconds: 1800
+    poll_interval_seconds: 15
+notes:
+  - Statically validates that build-native.yml remains a thin wrapper around the reusable macOS workflow.
+  - Dispatches build-native.yml via workflow_dispatch with release_ref=v0.0.98 when a self-hosted macOS release runner is online.
+  - Reports blocked_by_human when the required runner or GitHub token is unavailable.

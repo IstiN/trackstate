@@ -54,11 +54,18 @@ void main() {
             'Observed ${readOnlyState.transition.describe()}.',
           );
         }
-        if (!writableState.edit.enabled) {
+        if (!writableState.edit.visible) {
           failures.add(
-            'TS-42 cannot verify Edit is capability-guarded because the '
-            'writable baseline does not expose Edit as an enabled action. '
-            'Observed ${writableState.edit.describe()}.',
+            'Edit is not exposed on the issue-detail surface even when '
+            'canWrite=true, so the product does not provide the ticketed '
+            'Edit action to capability-guard. Observed '
+            '${writableState.edit.describe()}.',
+          );
+        } else if (!writableState.edit.enabled) {
+          failures.add(
+            'Edit is rendered but not enabled even when canWrite=true, so '
+            'TS-42 cannot verify a writable baseline. Observed '
+            '${writableState.edit.describe()}.',
           );
         } else if (!readOnlyState.edit.isUnavailable) {
           failures.add(
@@ -66,11 +73,18 @@ void main() {
             'Observed ${readOnlyState.edit.describe()}.',
           );
         }
-        if (!writableState.comment.enabled) {
+        if (!writableState.comment.visible) {
           failures.add(
-            'TS-42 cannot verify Comments is capability-guarded because the '
-            'writable baseline does not expose Comments as an enabled action. '
+            'Comments is not exposed as an actionable control on the issue-'
+            'detail surface even when canWrite=true, so the product does not '
+            'provide the ticketed Comment action to capability-guard. '
             'Observed ${writableState.comment.describe()}.',
+          );
+        } else if (!writableState.comment.enabled) {
+          failures.add(
+            'Comments is rendered but not enabled even when canWrite=true, '
+            'so TS-42 cannot verify a writable baseline. Observed '
+            '${writableState.comment.describe()}.',
           );
         } else if (!readOnlyState.comment.isUnavailable) {
           failures.add(

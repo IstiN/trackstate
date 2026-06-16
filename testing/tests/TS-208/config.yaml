@@ -1,0 +1,10 @@
+test_id: TS-208
+type: ui
+framework: flutter_test
+platform: linux
+dependencies: [TS-122, TS-123]
+notes:
+  - Reuses the shared Local Git TrackState widget-test flow and a ticket-specific malformed fields.json fixture.
+  - Requires the malformed config path to report the parse error before asserting the fallback UI behavior.
+  - Verifies the production-visible Create issue flow still opens when DEMO/config/fields.json contains invalid JSON.
+  - Checks the user-visible fallback form keeps Summary, Description, Save, and Cancel usable without surfacing a framework exception.

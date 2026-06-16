@@ -1,0 +1,14 @@
+test_id: TS-904
+type: ui
+framework: flutter_test
+platform: widget
+dependencies:
+  - Flutter SDK available on PATH
+notes:
+  - Uses an in-memory workspace sync repository fixture so the production JQL Search, issue-detail, and app-resume sync refresh flows run unchanged.
+  - Removes a non-selected issue from the repository index during background sync and verifies the active selection remains intact without showing the unavailable banner.
+runtime_inputs:
+  issue_a_key: TRACK-904-A
+  issue_b_key: TRACK-904-B
+  query: status = Open
+  run_command: flutter test testing/tests/TS-904/test_ts_904.dart --reporter expanded

@@ -1,0 +1,9 @@
+test_id: TS-274
+type: cli
+framework: unittest
+platform: python
+dependencies:
+  - Dart SDK available on PATH or via TRACKSTATE_DART_BIN
+notes:
+  - Verifies the root TrackState CLI help output documents stable target-selection options and minimal local/hosted usage examples.
+  - Executes the packaged CLI help text from the repository under test and falls back to `dart run trackstate --help` when a standalone `trackstate` binary is not installed on PATH.

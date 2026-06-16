@@ -1,0 +1,8 @@
+test_id: TS-518
+type: ui
+framework: flutter_test
+platform: widget
+dependencies: []
+notes:
+  - Pumps the production issue-detail Attachments tab with hosted GitHub Releases storage configured and hosted release-backed uploads unavailable.
+  - Verifies keyboard Tab traversal reaches the inline Open settings recovery action and that the very next Tab focuses the first attachment download action instead of losing focus or redirecting elsewhere.

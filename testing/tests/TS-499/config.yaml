@@ -1,0 +1,8 @@
+test_id: TS-499
+type: ui
+framework: flutter_test
+platform: widget
+dependencies: []
+notes:
+  - Pumps the production hosted Settings repository-access area with remembered-token sessions that have fully available attachment uploads and limited attachment uploads.
+  - Verifies visible storage-aware messaging, semantics labels, screen-reader traversal order, keyboard Tab order through token controls, and WCAG AA contrast on the green and amber callouts.

@@ -1,0 +1,8 @@
+test_id: TS-482
+type: ui
+framework: flutter_test
+platform: widget
+dependencies: []
+notes:
+  - Pumps the production Flutter TrackState app against a seeded Local Git repository whose project.json omits attachmentStorage.
+  - Verifies the Settings > Attachments tab defaults the missing storage mode to Repository Path, rejects an empty GitHub Releases tag prefix with a visible save error, and persists the saved attachmentStorage object back to project.json.

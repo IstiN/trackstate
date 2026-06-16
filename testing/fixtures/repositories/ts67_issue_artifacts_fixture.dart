@@ -156,8 +156,8 @@ Another linked task used to verify alternate link keys.
 ''');
 
     _git(['init', '-b', 'main']);
-    _git(['config', 'user.name', 'TS-67 Tester']);
-    _git(['config', 'user.email', 'ts67@example.com']);
+    _git(['config', '--local', 'user.name', 'TS-67 Tester']);
+    _git(['config', '--local', 'user.email', 'ts67@example.com']);
     _git(['add', '.']);
     _git(['commit', '-m', 'Seed TS-67 issue artifacts fixture']);
   }
