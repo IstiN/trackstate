@@ -23,7 +23,9 @@ class ReleaseWorkflowStaticConfig:
     required_outputs_by_job: dict[str, list[str]] = field(default_factory=dict)
     required_env_vars: list[str] = field(default_factory=list)
     required_markers_in_job: dict[str, list[str]] = field(default_factory=dict)
+    required_literal_markers_in_job: dict[str, list[str]] = field(default_factory=dict)
     required_call_inputs: dict[str, dict[str, Any]] = field(default_factory=dict)
+    required_source_files: list[Path] = field(default_factory=list)
     script_tool_path: Path | None = None
     script_args: list[str] = field(default_factory=list)
     script_expected_outputs: dict[str, str] = field(default_factory=dict)
@@ -46,6 +48,8 @@ class ReleaseWorkflowStaticConfig:
         workflow_relative = runtime_inputs.get("workflow_path", ".github/workflows/release-on-main.yml")
         script_tool_path = runtime_inputs.get("script_tool_path")
 
+        source_files = runtime_inputs.get("required_source_files", []) or []
+
         return cls(
             test_id=payload.get("test_id", path.parent.name),
             repository_root=repository_root,
@@ -59,7 +63,9 @@ class ReleaseWorkflowStaticConfig:
             required_outputs_by_job=runtime_inputs.get("required_outputs_by_job", {}),
             required_env_vars=runtime_inputs.get("required_env_vars", []),
             required_markers_in_job=runtime_inputs.get("required_markers_in_job", {}),
+            required_literal_markers_in_job=runtime_inputs.get("required_literal_markers_in_job", {}),
             required_call_inputs=runtime_inputs.get("required_call_inputs", {}),
+            required_source_files=[repository_root / Path(p) for p in source_files],
             script_tool_path=repository_root / script_tool_path if script_tool_path else None,
             script_args=runtime_inputs.get("script_args", []),
             script_expected_outputs=runtime_inputs.get("script_expected_outputs", {}),
