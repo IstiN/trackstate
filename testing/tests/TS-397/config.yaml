@@ -1,0 +1,9 @@
+test_id: TS-397
+type: web
+framework: playwright
+platform: chromium
+dependencies: []
+notes:
+  - Exercises the hosted tracker at https://istin.github.io/trackstate-setup/ using the stored GitHub token flow.
+  - Uses the live DEMO-3 issue as the production-visible reproduction for constrained Components and Fix versions metadata selection.
+  - The deployed UI renders these fields as constrained chip groups rather than free-text inputs, so the test proves ad-hoc values cannot be entered inline.

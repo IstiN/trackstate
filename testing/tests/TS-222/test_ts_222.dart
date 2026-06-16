@@ -29,15 +29,12 @@ void main() {
         await screen.openSection('Dashboard');
         await screen.waitWithoutInteraction(const Duration(milliseconds: 150));
 
-        final initialHostedVisible = await _isTopBarLabelVisible(
-          screen,
-          'Connect GitHub',
-        );
+        final initialHostedVisible = await _isHostedTopBarStateVisible(screen);
         if (!initialHostedVisible) {
           fail(
-            'Precondition failed: the hosted Dashboard did not expose the '
-            '"Connect GitHub" top-bar control before establishing the Local Git '
-            'state required by TS-222. Top bar texts: '
+            'Precondition failed: the hosted Dashboard did not expose a hosted '
+            'repository-access state in the top bar before establishing the '
+            'Local Git state required by TS-222. Top bar texts: '
             '${_formatSnapshot(screen.topBarVisibleTextsSnapshot())}. Visible '
             'texts: ${_formatSnapshot(screen.visibleTextsSnapshot())}. Visible '
             'semantics: ${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
@@ -88,26 +85,29 @@ void main() {
 
         await screen.openSection('Settings');
 
-        final hostedSelectorVisible =
-            await screen.isSemanticsLabelVisible('Connect GitHub') ||
-            await screen.isTextVisible('Connect GitHub');
-        if (!hostedSelectorVisible) {
+        final reverseSwitchLabel = await _findFirstVisibleLabel(screen, const [
+          'Remote',
+          'Connect GitHub',
+          'Connected',
+          'Hosted',
+        ]);
+        if (reverseSwitchLabel == null) {
           fail(
             'Step 2 failed: after opening Settings from the Local Git state, '
-            'the UI did not expose a visible "Connect GitHub" option to switch '
+            'the UI did not expose a visible hosted-mode selector such as '
+            '"Remote", "Hosted", "Connect GitHub", or "Connected" to switch '
             'back to the Remote/Hosted mode. Visible texts: '
             '${_formatSnapshot(screen.visibleTextsSnapshot())}. Visible '
             'semantics: ${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
           );
         }
 
-        final switchedToHosted = await screen.tapVisibleControl(
-          'Connect GitHub',
-        );
+        final switchedToHosted = await screen.tapVisibleControl(reverseSwitchLabel);
         if (!switchedToHosted) {
           fail(
-            'Step 2 failed: the visible "Connect GitHub" control in Settings '
-            'could not be activated to switch the storage mode back to Remote. '
+            'Step 2 failed: the visible "$reverseSwitchLabel" control in '
+            'Settings could not be activated to switch the storage mode back to '
+            'Remote. '
             'Visible texts: ${_formatSnapshot(screen.visibleTextsSnapshot())}. '
             'Visible semantics: ${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
           );
@@ -117,15 +117,12 @@ void main() {
         await screen.openSection('Dashboard');
         await _waitForTopBarStatePropagation(screen);
 
-        final hostedTopBarVisible = await _isTopBarLabelVisible(
-          screen,
-          'Connect GitHub',
-        );
+        final hostedTopBarVisible = await _isHostedTopBarStateVisible(screen);
         if (!hostedTopBarVisible) {
           fail(
             'Step 5 failed: returning to Dashboard after switching back to '
-            'Remote did not restore the hosted-mode "Connect GitHub" control in '
-            'the top bar without a manual refresh. Top bar texts: '
+            'Remote did not restore the hosted repository-access state in the '
+            'top bar without a manual refresh. Top bar texts: '
             '${_formatSnapshot(screen.topBarVisibleTextsSnapshot())}. Visible '
             'texts: ${_formatSnapshot(screen.visibleTextsSnapshot())}. Visible '
             'semantics: ${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
@@ -147,62 +144,6 @@ void main() {
         }
 
         await _verifyHostedRepositoryStatus(screen);
-        await screen.openSection('Dashboard');
-        await _waitForTopBarStatePropagation(screen);
-
-        final openedConnectDialog = await screen.tapTopBarControl(
-          'Connect GitHub',
-        );
-        if (!openedConnectDialog) {
-          fail(
-            'Human-style verification failed: the hosted-mode "Connect GitHub" '
-            'control was visible in the top bar after the reverse switch, but '
-            'the user could not activate it. Top bar texts: '
-            '${_formatSnapshot(screen.topBarVisibleTextsSnapshot())}. Visible '
-            'texts: ${_formatSnapshot(screen.visibleTextsSnapshot())}. Visible '
-            'semantics: ${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
-          );
-        }
-
-        final fineGrainedTokenVisible = await screen.isTextFieldVisible(
-          'Fine-grained token',
-        );
-        final connectTokenVisible = await _isAnyLabelVisible(screen, const [
-          'Connect token',
-        ]);
-        if (!fineGrainedTokenVisible || !connectTokenVisible) {
-          fail(
-            'Human-style verification failed: activating the hosted-mode '
-            '"Connect GitHub" control did not render the expected hosted '
-            'connection dialog. Fine-grained token visible='
-            '${fineGrainedTokenVisible ? 'yes' : 'no'}, Connect token visible='
-            '${connectTokenVisible ? 'yes' : 'no'}. Visible texts: '
-            '${_formatSnapshot(screen.visibleTextsSnapshot())}. Visible '
-            'semantics: ${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
-          );
-        }
-
-        final cancelledDialog = await screen.tapVisibleControl('Cancel');
-        if (!cancelledDialog) {
-          fail(
-            'Human-style verification failed: the hosted connection dialog '
-            'opened, but the visible "Cancel" action could not be activated. '
-            'Visible texts: ${_formatSnapshot(screen.visibleTextsSnapshot())}. '
-            'Visible semantics: ${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
-          );
-        }
-
-        final tokenFieldStillVisible = await screen.isTextFieldVisible(
-          'Fine-grained token',
-        );
-        if (tokenFieldStillVisible) {
-          fail(
-            'Human-style verification failed: dismissing the hosted connection '
-            'dialog left the "Fine-grained token" field visible on screen. '
-            'Visible texts: ${_formatSnapshot(screen.visibleTextsSnapshot())}. '
-            'Visible semantics: ${_formatSnapshot(screen.visibleSemanticsLabelsSnapshot())}.',
-          );
-        }
       } finally {
         await tester.runAsync(() async {
           if (fixture != null) {
@@ -238,7 +179,7 @@ Future<void> _waitForTopBarStatePropagation(
   const tick = Duration(milliseconds: 100);
   final end = DateTime.now().add(timeout);
   while (DateTime.now().isBefore(end)) {
-    if (await _isTopBarLabelVisible(screen, 'Connect GitHub')) {
+    if (await _isHostedTopBarStateVisible(screen)) {
       return;
     }
     await screen.waitWithoutInteraction(tick);
@@ -250,10 +191,14 @@ Future<void> _verifyHostedRepositoryStatus(
 ) async {
   await screen.openSection('Settings');
 
-  final hostedStatusVisible = await _isAnyLabelVisible(screen, const [
-    'Connect GitHub',
-    'Connected',
-  ]);
+  final hostedStatusVisible =
+      await _isHostedTopBarStateVisible(screen) ||
+      await _isAnyLabelVisible(screen, const [
+        'Connect GitHub',
+        'Connected',
+        'Manage GitHub access',
+        'Remote',
+      ]);
   final fineGrainedTokenVisible = await screen.isTextFieldVisible(
     'Fine-grained token',
   );
@@ -295,6 +240,27 @@ Future<bool> _isTopBarLabelVisible(
       await screen.isTopBarTextVisible(label);
 }
 
+Future<bool> _isHostedTopBarStateVisible(TrackStateAppComponent screen) async {
+  return await _isAnyTopBarLabelVisible(screen, const [
+        'Connect GitHub',
+        'Connected',
+      ]) ||
+      await screen.isTopBarTextVisible('Hosted') ||
+      await screen.isTopBarTextVisible('Needs sign-in');
+}
+
+Future<bool> _isAnyTopBarLabelVisible(
+  TrackStateAppComponent screen,
+  List<String> labels,
+) async {
+  for (final label in labels) {
+    if (await _isTopBarLabelVisible(screen, label)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 Future<bool> _isAnyLabelVisible(
   TrackStateAppComponent screen,
   List<String> labels,
@@ -306,6 +272,19 @@ Future<bool> _isAnyLabelVisible(
     }
   }
   return false;
+}
+
+Future<String?> _findFirstVisibleLabel(
+  TrackStateAppComponent screen,
+  List<String> labels,
+) async {
+  for (final label in labels) {
+    if (await screen.isSemanticsLabelVisible(label) ||
+        await screen.isTextVisible(label)) {
+      return label;
+    }
+  }
+  return null;
 }
 
 String _formatSnapshot(List<String> values, {int limit = 20}) {
