@@ -80,11 +80,15 @@ class _MockGitHubHandler(BaseHTTPRequestHandler):
         self,
         assets: MockReleaseAssets,
         repo: str,
+        latest_status: int,
+        latest_body: bytes | None,
         *args: Any,
         **kwargs: Any,
     ) -> None:
         self.assets = assets
         self.repo = repo
+        self.latest_status = latest_status
+        self.latest_body = latest_body
         super().__init__(*args, **kwargs)
 
     def log_message(self, format: str, *args: Any) -> None:
@@ -97,8 +101,10 @@ class _MockGitHubHandler(BaseHTTPRequestHandler):
         expected_checksum = f"/{self.repo}/releases/download/{self.assets.tag}/{self.assets.checksum_name}"
 
         if path == expected_latest:
-            body = f'{{"tag_name": "{self.assets.tag}"}}'.encode("utf-8")
-            self._send(200, "application/json", body)
+            body = self.latest_body
+            if body is None:
+                body = f'{{"tag_name": "{self.assets.tag}"}}'.encode("utf-8")
+            self._send(self.latest_status, "application/json", body)
             return
 
         if path == expected_archive:
@@ -120,16 +126,31 @@ class _MockGitHubHandler(BaseHTTPRequestHandler):
 
 
 class MockGitHubReleaseServer:
-    def __init__(self, assets: MockReleaseAssets, repo: str = "test/repo") -> None:
+    def __init__(
+        self,
+        assets: MockReleaseAssets,
+        repo: str = "test/repo",
+        latest_status: int = 200,
+        latest_body: bytes | None = None,
+    ) -> None:
         self.assets = assets
         self.repo = repo
+        self.latest_status = latest_status
+        self.latest_body = latest_body
         self.server: HTTPServer | None = None
         self.port: int = 0
         self.thread: threading.Thread | None = None
 
     def __enter__(self) -> "MockGitHubReleaseServer":
         def handler_factory(*args: Any, **kwargs: Any) -> _MockGitHubHandler:
-            return _MockGitHubHandler(self.assets, self.repo, *args, **kwargs)
+            return _MockGitHubHandler(
+                self.assets,
+                self.repo,
+                self.latest_status,
+                self.latest_body,
+                *args,
+                **kwargs,
+            )
 
         self.server = HTTPServer(("127.0.0.1", 0), handler_factory)
         self.port = self.server.server_address[1]
@@ -348,6 +369,8 @@ def run_patched_install_ps1(
     path_prefix: str | None = None,
     timeout: int = 60,
     repo: str = "test/repo",
+    latest_status: int = 200,
+    latest_body: bytes | None = None,
 ) -> tuple[Path, Path, Path, subprocess.CompletedProcess[str]]:
     """Patch install.ps1 and execute it in an isolated environment.
 
@@ -361,7 +384,9 @@ def run_patched_install_ps1(
     temp_dir = tmpdir / "temp"
     temp_dir.mkdir(exist_ok=True)
 
-    with MockGitHubReleaseServer(assets, repo=repo) as server:
+    with MockGitHubReleaseServer(
+        assets, repo=repo, latest_status=latest_status, latest_body=latest_body
+    ) as server:
         patched = tmpdir / "install.ps1"
         patch_install_ps1(install_script, patched, server, local_app_data, path_store)
 

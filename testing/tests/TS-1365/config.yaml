@@ -5,7 +5,15 @@ platform: linux
 dependencies:
   - bash
   - curl
+  - PowerShell Core (pwsh) — optional, for install.ps1 coverage
   - Python 3.12+
   - PyYAML
 notes:
-  - Verifies that install.sh exits non-zero with a clear error message when the GitHub API returns a 403 rate-limit response during latest version resolution, and suggests providing a pinned version.
+  - Verifies that the install scripts exit non-zero with a clear error when the GitHub API returns HTTP 403 during 'latest' release resolution.
+  - Asserts that the error message identifies the API failure and suggests providing a pinned version URL to bypass the rate-limited resolution step.
+runtime_inputs:
+  install_script_path: scripts/install/install.sh
+  optional_script_path: scripts/install/install.ps1
+  platform: linux-x64
+  binary_name: trackstate
+  rate_limit_status: 403

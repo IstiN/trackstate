@@ -1,12 +1,10 @@
-# TS-1365 — Install Script Resilience — handling of GitHub API rate limits during latest resolution
+# TS-1365 — Install Script Resilience to GitHub API Rate Limits
 
-Functional test of `scripts/install/install.sh` error handling when the GitHub API
-rate-limits the `latest` release resolution request.
+Functional test of `scripts/install/install.sh` and `scripts/install/install.ps1` behavior when the GitHub API returns HTTP 403 during `latest` release resolution.
 
-A local mock GitHub Release server returns HTTP 403 for the `/releases/latest`
-endpoint. The test verifies:
+A local mock GitHub Release server is configured to return a `403 Rate Limit Exceeded` response for `/repos/$REPO/releases/latest`. The test verifies that the installer:
 
-- The installer exits with a non-zero status code.
-- The error output mentions the GitHub API or rate limit.
-- The error output suggests providing a pinned version to bypass the rate-limited
-  resolution step.
+- Detects the API failure and exits with a non-zero status.
+- Prints a clear error message identifying the GitHub API / rate-limit problem.
+- Advises the user to provide a pinned version URL so the rate-limited resolution step can be bypassed.
+- Does not install a binary.

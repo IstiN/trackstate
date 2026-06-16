@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import platform
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -11,92 +12,189 @@ from testing.components.services.install_script_test_runtime import (
     MockReleaseAssets,
     patch_install_sh,
     run_install_sh,
+    run_patched_install_ps1,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-INSTALL_SCRIPT = REPO_ROOT / "scripts" / "install" / "install.sh"
+INSTALL_SH = REPO_ROOT / "scripts" / "install" / "install.sh"
+INSTALL_PS1 = REPO_ROOT / "scripts" / "install" / "install.ps1"
+
+RATE_LIMIT_BODY = (
+    '{"message": "API rate limit exceeded", '
+    '"documentation_url": "https://docs.github.com/rest/overview/rate-limits-for-the-rest-api"}'
+).encode("utf-8")
 
 
-class _RateLimitServer(MockGitHubReleaseServer):
-    """Mock server that returns 403 for the /releases/latest endpoint."""
-
-    def __enter__(self) -> "_RateLimitServer":
-        from http.server import BaseHTTPRequestHandler, HTTPServer
-        from testing.components.services.install_script_test_runtime import _MockGitHubHandler
-
-        class RateLimitHandler(_MockGitHubHandler):
-            def do_GET(self) -> None:  # noqa: N802
-                if self.path == f"/repos/{self.repo}/releases/latest":
-                    self._send(403, "application/json", b'{"message":"API rate limit exceeded"}')
-                    return
-                super().do_GET()
-
-        def handler_factory(*args, **kwargs):
-            return RateLimitHandler(self.assets, self.repo, *args, **kwargs)
-
-        self.server = HTTPServer(("127.0.0.1", 0), handler_factory)
-        self.port = self.server.server_address[1]
-        import threading, time
-        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
-        self.thread.start()
-        time.sleep(0.1)
-        return self
+def _contains_any(text: str, markers: list[str]) -> bool:
+    lowered = text.lower()
+    return any(marker.lower() in lowered for marker in markers)
 
 
-class PosixInstallScriptRateLimitResilienceTest(unittest.TestCase):
+class InstallScriptRateLimitResilienceTest(unittest.TestCase):
     def setUp(self) -> None:
         if platform.system() != "Linux":
-            self.skipTest("POSIX install script functional test requires a Linux environment")
+            self.skipTest("Install script functional tests require a Linux environment")
 
-    def test_posix_install_script_handles_github_api_rate_limit(self) -> None:
-        """Verify that install.sh exits non-zero with a clear error when the
-        GitHub API returns a 403 rate-limit response during latest resolution.
+    def test_posix_install_script_fails_gracefully_on_github_api_rate_limit(self) -> None:
+        """Running install.sh without a version hits /releases/latest and receives HTTP 403.
+
+        The script must exit non-zero, identify the API failure, and advise the user to
+        provide a pinned version URL so the rate-limited resolution step can be bypassed.
         """
+        assets = MockReleaseAssets.build(
+            tag="v1.2.3",
+            platform="linux-x64",
+            binary_name="trackstate",
+        )
+
         with tempfile.TemporaryDirectory() as tmpdir_str:
             tmpdir = Path(tmpdir_str)
             home_dir = tmpdir / "home"
             home_dir.mkdir()
+            install_dir = home_dir / ".trackstate" / "bin"
 
-            assets = MockReleaseAssets.build(
-                tag="v1.2.3",
-                platform="linux-x64",
-                binary_name="trackstate",
-            )
-            with _RateLimitServer(assets, repo="test/repo") as server:
+            with MockGitHubReleaseServer(
+                assets,
+                repo="test/repo",
+                latest_status=403,
+                latest_body=RATE_LIMIT_BODY,
+            ) as server:
                 patched = tmpdir / "install.sh"
-                patch_install_sh(INSTALL_SCRIPT, patched, server)
+                patch_install_sh(INSTALL_SH, patched, server)
 
-                base_env = {
+                env = {
                     "HOME": str(home_dir),
                     "SHELL": "/bin/bash",
                     "PATH": os.environ.get("PATH", ""),
                 }
+                result = run_install_sh(patched, timeout=60, env=env)
+                combined_output = (result.stdout or "") + "\n" + (result.stderr or "")
 
-                result = run_install_sh(patched, timeout=60, env=base_env)
-                output = (result.stdout or "") + "\n" + (result.stderr or "")
-
+            with self.subTest("exits non-zero"):
                 self.assertNotEqual(
                     result.returncode,
                     0,
-                    "Expected the installer to fail when GitHub API rate-limits the latest release request.\n"
-                    f"Observed output:\n{output}",
+                    "Expected the installer to exit with a non-zero status when the GitHub API rate limit is reached.\n"
+                    f"Observed output:\n{combined_output}",
                 )
-                output_lower = output.lower()
+
+            with self.subTest("identifies API failure"):
                 self.assertTrue(
-                    any(
-                        marker in output_lower
-                        for marker in ("rate limit", "api", "unable to resolve", "github api")
+                    _contains_any(
+                        combined_output,
+                        [
+                            "Unable to resolve the latest release",
+                            "GitHub API",
+                            "rate limit",
+                            "rate-limit",
+                            "API rate limit exceeded",
+                            "403",
+                        ],
                     ),
-                    "The error message should mention the GitHub API or rate limit failure.\n"
-                    f"Observed output:\n{output}",
+                    "Expected the error output to identify the GitHub API / rate-limit failure.\n"
+                    f"Observed output:\n{combined_output}",
                 )
+
+            with self.subTest("suggests pinned version URL"):
                 self.assertTrue(
-                    any(
-                        marker in output_lower
-                        for marker in ("version", "pinned", "explicit", "--force", "unable to resolve")
+                    _contains_any(
+                        combined_output,
+                        [
+                            "pinned version",
+                            "pinned release",
+                            "specific version",
+                            "releases/download/",
+                            "provide a version",
+                            "pass a version",
+                            "VERSION",
+                        ],
                     ),
-                    "The error message should suggest providing a pinned version to bypass the rate-limited resolution step.\n"
-                    f"Observed output:\n{output}",
+                    "Expected the error output to suggest providing a pinned version URL to bypass rate-limited latest resolution.\n"
+                    f"Observed output:\n{combined_output}",
+                )
+
+            with self.subTest("does not install binary"):
+                self.assertFalse(
+                    install_dir.exists() and (install_dir / "trackstate").exists(),
+                    "The binary must not be installed when latest-version resolution fails.",
+                )
+
+    def test_powershell_install_script_fails_gracefully_on_github_api_rate_limit(self) -> None:
+        """Running install.ps1 without -Version hits /releases/latest and receives HTTP 403.
+
+        The script must exit non-zero, identify the API failure, and advise the user to
+        provide a pinned version URL so the rate-limited resolution step can be bypassed.
+        """
+        if shutil.which("pwsh") is None:
+            self.skipTest("PowerShell Core (pwsh) is not available on this host")
+
+        assets = MockReleaseAssets.build(
+            tag="v1.2.3",
+            platform="windows-x64",
+            binary_name="trackstate.exe",
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir_str:
+            tmpdir = Path(tmpdir_str)
+
+            local_app_data, install_dir, _path_store, result = run_patched_install_ps1(
+                INSTALL_PS1,
+                tmpdir,
+                assets,
+                timeout=60,
+                latest_status=403,
+                latest_body=RATE_LIMIT_BODY,
+            )
+            combined_output = (result.stdout or "") + "\n" + (result.stderr or "")
+
+            with self.subTest("exits non-zero"):
+                self.assertNotEqual(
+                    result.returncode,
+                    0,
+                    "Expected the PowerShell installer to exit with a non-zero status when the GitHub API rate limit is reached.\n"
+                    f"Observed output:\n{combined_output}",
+                )
+
+            with self.subTest("identifies API failure"):
+                self.assertTrue(
+                    _contains_any(
+                        combined_output,
+                        [
+                            "Unable to resolve the latest release",
+                            "GitHub API",
+                            "rate limit",
+                            "rate-limit",
+                            "API rate limit exceeded",
+                            "403",
+                        ],
+                    ),
+                    "Expected the error output to identify the GitHub API / rate-limit failure.\n"
+                    f"Observed output:\n{combined_output}",
+                )
+
+            with self.subTest("suggests pinned version URL"):
+                self.assertTrue(
+                    _contains_any(
+                        combined_output,
+                        [
+                            "pinned version",
+                            "pinned release",
+                            "specific version",
+                            "releases/download/",
+                            "provide a version",
+                            "pass a version",
+                            "VERSION",
+                        ],
+                    ),
+                    "Expected the error output to suggest providing a pinned version URL to bypass rate-limited latest resolution.\n"
+                    f"Observed output:\n{combined_output}",
+                )
+
+            with self.subTest("does not install binary"):
+                target_bin = install_dir / "trackstate.exe"
+                self.assertFalse(
+                    target_bin.exists(),
+                    "The binary must not be installed when latest-version resolution fails.",
                 )
 
 
