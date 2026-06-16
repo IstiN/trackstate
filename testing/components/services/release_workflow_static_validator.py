@@ -8,24 +8,13 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from yaml import Loader, SafeLoader
 
 from testing.core.config.release_workflow_static_config import ReleaseWorkflowStaticConfig
 from testing.core.interfaces.release_workflow_static_validator import (
     ReleaseWorkflowStaticObservation,
     ReleaseWorkflowStaticValidator,
 )
-
-
-class _WorkflowSafeLoader(SafeLoader):
-    pass
-
-
-# Prevent PyYAML from interpreting workflow keys such as 'on:' as booleans.
-_WorkflowSafeLoader.yaml_implicit_resolvers = {
-    key: [(tag, regexp) for tag, regexp in resolvers if tag != "tag:yaml.org,2002:bool"]
-    for key, resolvers in SafeLoader.yaml_implicit_resolvers.items()
-}
+from testing.core.utils.yaml_loader import WorkflowSafeLoader
 
 
 class LocalReleaseWorkflowStaticValidator(ReleaseWorkflowStaticValidator):
@@ -50,7 +39,7 @@ class LocalReleaseWorkflowStaticValidator(ReleaseWorkflowStaticValidator):
         try:
             parsed = yaml.load(
                 config.workflow_path.read_text(encoding="utf-8"),
-                Loader=_WorkflowSafeLoader,
+                Loader=WorkflowSafeLoader,
             ) or {}
         except yaml.YAMLError as exc:
             failures.append(f"Failed to parse workflow YAML: {exc}")
