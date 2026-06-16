@@ -80,7 +80,7 @@ function Resolve-ReleaseTag {
     try {
         $releaseJson = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases/latest" -UseBasicParsing
     } catch {
-        Write-ErrorAndExit "Unable to resolve the latest release from the GitHub API: $_"
+        Write-ErrorAndExit "Unable to resolve the latest release from the GitHub API: $_. To bypass this step, provide a pinned version (e.g., v1.2.3) or use a pinned install URL: https://github.com/$Repo/releases/download/<VERSION>/install.ps1"
     }
 
     if (-not $releaseJson.tag_name) {
