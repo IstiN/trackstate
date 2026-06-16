@@ -10,7 +10,6 @@ from testing.components.services.install_script_test_runtime import (
     MockGitHubReleaseServer,
     MockReleaseAssets,
     detect_profile,
-    install_dir_on_path_env,
     patch_install_sh,
     path_entry_count,
     run_install_sh,
@@ -95,14 +94,6 @@ class PosixInstallScriptLatestAndLocalInstallTest(unittest.TestCase):
                 path_entry_count(profile, install_dir),
                 1,
                 "The shell profile should contain exactly one PATH addition for the install directory.",
-            )
-            self.assertTrue(
-                install_dir_on_path_env(
-                    os.environ.get("PATH", ""),
-                    install_dir,
-                )
-                or path_entry_count(profile, install_dir) >= 1,
-                "The install directory must be added to the user PATH (profile or environment).",
             )
 
 
