@@ -43,6 +43,14 @@ class TrackStateCliCommentCreationTest(unittest.TestCase):
             "command against the disposable Local Git repository.\n"
             f"Requested command: {observation.requested_command_text}",
         )
+        self.assertEqual(
+            observation.second_requested_command,
+            observation.requested_command,
+            "Precondition failed: TS-462 should repeat the exact same ticket comment "
+            "command on step 2.\n"
+            f"Step 1 command: {' '.join(observation.requested_command)}\n"
+            f"Step 2 command: {' '.join(observation.second_requested_command)}",
+        )
         first_payload = self._assert_successful_envelope(
             result=observation.first_result,
             failure_prefix="Step 1 failed",
@@ -125,15 +133,63 @@ class TrackStateCliCommentCreationTest(unittest.TestCase):
             f"Second comment: {second_comment}",
         )
 
-        self._assert_non_empty_revision(
-            payload=first_payload,
-            failure_prefix="Expected result failed after step 1",
+        self.assertNotEqual(
+            observation.initial_head_revision,
+            observation.first_head_revision,
+            "Human-style verification failed: the first comment command did not "
+            "advance repository HEAD even though it reported a successful write.\n"
+            f"Initial HEAD: {observation.initial_head_revision}\n"
+            f"HEAD after step 1: {observation.first_head_revision}\n"
+            f"Repository path: {observation.repository_path}",
         )
-        self._assert_non_empty_revision(
-            payload=second_payload,
-            failure_prefix="Expected result failed after step 2",
+        self.assertNotEqual(
+            observation.first_head_revision,
+            observation.second_head_revision,
+            "Human-style verification failed: the second duplicate comment command "
+            "did not advance repository HEAD even though it reported a successful "
+            "write.\n"
+            f"HEAD after step 1: {observation.first_head_revision}\n"
+            f"HEAD after step 2: {observation.second_head_revision}\n"
+            f"Repository path: {observation.repository_path}",
         )
 
+        for step_number, payload, stdout, expected_revision in (
+            (
+                1,
+                first_payload,
+                observation.first_result.stdout,
+                observation.first_head_revision,
+            ),
+            (
+                2,
+                second_payload,
+                observation.second_result.stdout,
+                observation.second_head_revision,
+            ),
+        ):
+            with self.subTest(step=step_number):
+                revision = self._assert_non_empty_revision(
+                    payload=payload,
+                    failure_prefix=f"Expected result failed after step {step_number}",
+                )
+                self.assertEqual(
+                    revision,
+                    expected_revision,
+                    f"Expected result failed after step {step_number}: the success "
+                    "envelope did not report the repository revision that was actually "
+                    "created by the live comment command.\n"
+                    f"Expected revision: {expected_revision}\n"
+                    f"Observed revision: {revision}\n"
+                    f"Observed payload: {payload}",
+                )
+                self.assertIn(
+                    f'"revision": "{revision}"',
+                    stdout,
+                    f"Human-style verification failed after step {step_number}: the "
+                    "visible CLI stdout did not show the created repository revision.\n"
+                    f"Expected revision: {revision}\n"
+                    f"Observed stdout:\n{stdout}",
+                )
     def _assert_successful_envelope(
         self,
         *,
@@ -250,7 +306,7 @@ class TrackStateCliCommentCreationTest(unittest.TestCase):
         *,
         payload: dict[str, object],
         failure_prefix: str,
-    ) -> None:
+    ) -> str:
         data = payload["data"]
         assert isinstance(data, dict)
         revision = data["revision"]
@@ -269,6 +325,7 @@ class TrackStateCliCommentCreationTest(unittest.TestCase):
             "revision for the created comment.\n"
             f"Observed payload: {payload}",
         )
+        return revision
 
 
 if __name__ == "__main__":

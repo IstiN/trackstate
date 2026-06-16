@@ -33,9 +33,16 @@ migrate_working_dir/
 /build/
 /coverage/
 /cacheBasicJiraClient/
+/cacheBasicGithub/
+/teams.token
+/.codegraph/
+/.dmtools/copilot-sessions/
 /input/
+/node_modules/
 /outputs/
+/playwright-report/
 /test/failures/
+/test-results/
 
 # Symbolication related
 app.*.symbols
@@ -47,3 +54,6 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Repomix snapshots
+snapshots/

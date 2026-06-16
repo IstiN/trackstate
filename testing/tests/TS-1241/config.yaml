@@ -1,0 +1,9 @@
+test_id: TS-1241
+type: web
+framework: playwright
+platform: chromium
+dependencies: []
+notes:
+  - Exercises the deployed hosted tracker at https://istin.github.io/trackstate-setup/ with a stored hosted workspace profile whose writeBranch is a stale commit SHA instead of a branch name.
+  - Forces a concurrent GitHub commit after the Edit issue dialog opens, then verifies the live save flow fetches the latest branch ref and commit SHA before creating the replacement tree.
+  - Uses DEMO-3992 as the production-visible issue fixture and restores the repository files after the run.
