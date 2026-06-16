@@ -141,30 +141,36 @@ def extract_error_snippet(log_text: str) -> tuple[str, str]:
     """
     lines = log_text.splitlines()
 
-    # Look for explicit workflow error annotations
-    for line in reversed(lines):
-        if "::error::" in line:
-            snippet = line.split("::error::", 1)[-1].strip()
-            return snippet, "workflow_error_annotation"
-
-    # Look for JavaScript action returning success:false
+    # 1. JavaScript post-action explicitly reported failure — usually the most
+    # precise summary (e.g. "Git operations failed: ..." or "Could not sync ...").
     for line in reversed(lines):
         if '"success":false' in line and "JavaScript executed successfully" in line:
-            match = re.search(r'"success":false[^\n]*(?:"error":"([^"]+)")?', line)
+            match = re.search(r'"error":"([^"]+)"', line)
             if match and match.group(1):
-                return match.group(1), "js_action_success_false"
+                js_error = match.group(1)
+                if "force-with-lease" in js_error or "stale info" in js_error:
+                    return js_error, "stale_force_with_lease"
+                if "Git operations failed" in js_error or "Could not sync" in js_error:
+                    return js_error, "git_publish_failure"
+                return js_error, "js_action_success_false"
             return "JavaScript action returned success:false", "js_action_success_false"
 
-    # Look for Java exception cause near the end
+    # 2. Java exception cause near the end (legacy DMTools error format).
     for i, line in enumerate(reversed(lines)):
         if "Caused by:" in line:
             start = max(len(lines) - i - 5, 0)
             snippet = " | ".join(lines[start : len(lines) - i + 3])
             if "force-with-lease" in snippet or "stale info" in snippet:
                 return "git push --force-with-lease failed with stale remote info", "stale_force_with_lease"
-            if "Git operations failed" in snippet:
+            if "Git operations failed" in snippet or "Could not sync" in snippet:
                 return "Git operations failed during result publishing", "git_publish_failure"
             return snippet[:500], "java_exception"
+
+    # 3. Explicit workflow error annotation (can be noisy, so use only as fallback).
+    for line in reversed(lines):
+        if "::error::" in line:
+            snippet = line.split("::error::", 1)[-1].strip()
+            return snippet, "workflow_error_annotation"
 
     # Fallback: last non-empty lines
     tail = [ln for ln in lines[-20:] if ln.strip()]
