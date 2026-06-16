@@ -37,6 +37,7 @@ migrate_working_dir/
 /teams.token
 /.codegraph/
 /.dmtools/copilot-sessions/
+/.ai-*.json
 /input/
 /node_modules/
 /outputs/
