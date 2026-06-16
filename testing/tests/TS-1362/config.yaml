@@ -1,0 +1,19 @@
+test_id: TS-1362
+type: cli
+framework: unittest
+platform: linux
+dependencies:
+  - Dart SDK
+  - Flutter dependencies resolved (flutter pub get)
+runtime_inputs:
+  source_entrypoint: bin/trackstate.dart
+  command:
+    - session
+    - --target
+    - local
+    - --path
+    - .
+    - --output
+    - json
+notes:
+  - Compiles the standalone CLI binary and verifies that its JSON output shape and authentication precedence match the Dart VM entrypoint.
