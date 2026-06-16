@@ -22,15 +22,11 @@ runtime_inputs:
       - "| Windows |"
       - trackstate-${release_tag}.sha256
       - "## Install the CLI"
-      - "## Launching unsigned desktop packages"
-      - unsigned and unnotarized
-      - right-click
-      - Open
-      - More info
-      - Run anyway
+      - "### Linux / macOS"
+      - "### Windows (PowerShell)"
+      - "### Windows (Command Prompt)"
       - --title
       - TrackState $release_tag
 notes:
   - Statically validates that the publish-release job requests GitHub-generated release notes and appends a structured compiled-artifacts scaffold.
-  - Verifies the scaffold now includes CLI install instructions and the platform-specific launch guidance for unsigned desktop packages.
   - Does not publish an actual release.

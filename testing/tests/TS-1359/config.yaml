@@ -1,0 +1,19 @@
+test_id: TS-1359
+type: install-script
+framework: unittest
+platform: windows
+dependencies:
+  - PowerShell (pwsh)
+  - Python 3.12+
+  - PyYAML
+notes:
+  - Statically validates that install.ps1 places the binary under %LOCALAPPDATA%, updates the user-level PATH, and does not require UAC elevation. Functional execution requires Windows, so the runtime portion is skipped on non-Windows hosts.
+runtime_inputs:
+  install_script_path: scripts/install/install.ps1
+  expected_markers:
+    - "$env:LOCALAPPDATA\\trackstate\\bin"
+    - '[Environment]::GetEnvironmentVariable("Path", "User")'
+    - "trackstate.exe"
+  forbidden_markers:
+    - "Start-Process"
+    - "runAs"

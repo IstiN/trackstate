@@ -5,26 +5,26 @@ import os
 import unittest
 from pathlib import Path
 
-from testing.core.config.release_workflow_static_config import (
-    ReleaseWorkflowStaticConfig,
+from testing.core.config.release_notes_instructions_config import (
+    ReleaseNotesInstructionsConfig,
 )
-from testing.tests.support.release_workflow_static_validator_factory import (
-    create_release_workflow_static_validator,
+from testing.tests.support.release_notes_instructions_validator_factory import (
+    create_release_notes_instructions_validator,
 )
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
-class ReleaseNoteLaunchGuidanceTest(unittest.TestCase):
+class ReleaseNotesInstructionsTest(unittest.TestCase):
     def setUp(self) -> None:
-        self.config = ReleaseWorkflowStaticConfig.from_file(
+        self.config = ReleaseNotesInstructionsConfig.from_file(
             REPO_ROOT / "testing" / "tests" / "TS-1355" / "config.yaml",
             repository_root=REPO_ROOT,
         )
-        self.validator = create_release_workflow_static_validator(REPO_ROOT)
+        self.validator = create_release_notes_instructions_validator(REPO_ROOT)
 
-    def test_release_body_contains_unsigned_launch_guidance(self) -> None:
+    def test_release_notes_contain_platform_specific_launch_guidance(self) -> None:
         observation = self.validator.validate(self.config)
         self._write_result_if_requested(observation.to_dict())
 
@@ -32,9 +32,18 @@ class ReleaseNoteLaunchGuidanceTest(unittest.TestCase):
             observation.workflow_exists,
             f"Workflow file not found: {observation.workflow_path}",
         )
+        self.assertTrue(
+            observation.publish_release_step_found,
+            "Publish release step not found in workflow.",
+        )
+        self.assertTrue(
+            observation.release_notes_block_found,
+            "Appended release notes block not found.",
+        )
         self.assertFalse(
             observation.failures,
-            "Static validation failed:\n" + "\n".join(observation.failures),
+            "Release note instructions validation failed:\n"
+            + "\n".join(observation.failures),
         )
 
     def _write_result_if_requested(self, payload: dict[str, object]) -> None:

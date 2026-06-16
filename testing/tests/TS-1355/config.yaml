@@ -7,17 +7,19 @@ dependencies:
   - PyYAML
 runtime_inputs:
   workflow_path: .github/workflows/release-on-main.yml
-  required_jobs:
-    - publish-release
-  required_markers_in_job:
-    publish-release:
-      - "## Launching unsigned desktop packages"
-      - unsigned and unnotarized
-      - right-click
-      - Open
-      - More info
-      - Run anyway
+  publish_release_step_name: Publish release
+  unsigned_warning_markers:
+    - unsigned
+    - unnotarized
+  macos_guidance_markers:
+    - right-click
+    - Open
+  windows_guidance_markers:
+    - More info
+    - Run anyway
+  heading_pattern: "^#{2,3}\\s+"
+  heading_max_lines_before_guidance: 3
 notes:
-  - Statically validates that the publish-release job appends a dedicated, semantic-heading section warning that desktop packages are unsigned and unnotarized.
-  - Verifies the section provides macOS-specific instructions (right-click the app and choose Open) and Windows-specific instructions (More info -> Run anyway).
-  - Does not publish an actual release; it proves the release-notes template/workflow contains the required guidance so future releases will expose it.
+  - Statically validates that the publish-release job appends platform-specific launch guidance.
+  - Requires unsigned/unnotarized warning, macOS right-click/Open guidance, and Windows More info/Run anyway guidance.
+  - Requires each guidance block to be introduced by an H2 or H3 Markdown heading for screen-reader navigation.
