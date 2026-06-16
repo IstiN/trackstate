@@ -7,4 +7,6 @@ dependencies:
   - Hosted GitHub access via TRACKSTATE_TOKEN, TS271_VALID_TRACKSTATE_TOKEN, or gh auth token
 notes:
   - Verifies the hosted session command uses the explicit --token value before a valid TRACKSTATE_TOKEN environment variable.
+  - Defaults to the initialized demo repository `IstiN/trackstate-setup` (contains `DEMO/project.json`).
+  - Fails fast with a clear setup message when the configured hosted repository is not initialized as a TrackState project.
   - Falls back to `dart run trackstate session ...` when the `trackstate` executable is not installed on PATH.
