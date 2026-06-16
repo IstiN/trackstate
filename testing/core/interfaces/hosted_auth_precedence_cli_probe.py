@@ -16,6 +16,13 @@ class HostedAuthPrecedenceCliProbe(Protocol):
         self,
     ) -> tuple[HostedAuthPrecedenceTokenResolution, str | None]: ...
 
+    def verify_hosted_repository_has_project_json(
+        self,
+        *,
+        config: HostedAuthPrecedenceCliConfig,
+        environment_token: str,
+    ) -> tuple[bool, str | None]: ...
+
     def hosted_session_with_environment_token(
         self,
         *,
