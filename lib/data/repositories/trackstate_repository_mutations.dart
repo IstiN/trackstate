@@ -391,10 +391,12 @@ mixin _TrackStateRepositoryMutations {
             ref: writeBranch,
             blobPaths: _snapshotBlobPaths,
           )
-        : (await _provider.readAttachment(
-            attachmentPath,
-            ref: writeBranch,
-          )).revision;
+        : existingAttachment.storageBackend == AttachmentStorageMode.githubReleases
+            ? null
+            : (await _provider.readAttachment(
+                attachmentPath,
+                ref: writeBranch,
+              )).revision;
     final metadataRevision = await _existingRevision(
       path: attachmentMetadataPath,
       ref: writeBranch,

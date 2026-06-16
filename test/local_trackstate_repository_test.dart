@@ -369,6 +369,106 @@ void main() {
   );
 
   test(
+    'local release-backed re-upload does not read existing release asset from '
+    'git before delegating to release store',
+    () async {
+      final repo = await _createLocalRepository();
+      addTearDown(() => repo.delete(recursive: true));
+
+      // Reconfigure the fixture for GitHub Releases attachment storage and
+      // seed an existing release-backed attachment without the actual file in
+      // Git. This reproduces TS-1372: the earlier implementation tried to read
+      // the non-existent file from the local Git provider before deciding to
+      // use release storage, so the upload never reached the release lookup.
+      await _writeFile(
+        repo,
+        'DEMO/project.json',
+        '{"key":"DEMO","name":"Local Demo","attachmentStorage":{'
+        '"mode":"github-releases","githubReleases":{'
+        '"tagPrefix":"trackstate-attachments-"}}}\n',
+      );
+      await File('${repo.path}/DEMO/DEMO-1/attachments/design.png')
+          .delete(recursive: true);
+      await _writeFile(
+        repo,
+        'DEMO/DEMO-1/attachments.json',
+        jsonEncode([
+          {
+            'id': 'DEMO/DEMO-1/attachments/logic.drawio',
+            'name': 'logic.drawio',
+            'mediaType': 'application/xml',
+            'sizeBytes': 6,
+            'author': 'local-user',
+            'createdAt': '2026-05-13T07:00:00Z',
+            'storagePath': 'DEMO/DEMO-1/attachments/logic.drawio',
+            'revisionOrOid': 'seeded-asset-1',
+            'storageBackend': 'github-releases',
+            'githubReleaseTag': 'trackstate-attachments-DEMO-1',
+            'githubReleaseAssetName': 'logic.drawio',
+          },
+        ]),
+      );
+      await _git(repo.path, [
+        'remote',
+        'add',
+        'origin',
+        'https://github.com/octo/releases-demo.git',
+      ]);
+      await _git(repo.path, ['add', '.']);
+      await _git(repo.path, [
+        'commit',
+        '-m',
+        'Configure release-backed attachment storage with seeded release asset',
+      ]);
+
+      final hostedProvider = _FakeHostedReleaseTrackStateProvider();
+      final repository = ProviderBackedTrackStateRepository(
+        provider: LocalGitTrackStateProvider(
+          repositoryPath: repo.path,
+          hostedProviderFactory:
+              ({
+                required String repository,
+                required String branch,
+                required String dataRef,
+              }) {
+                hostedProvider.repositoryName = repository;
+                hostedProvider.branch = branch;
+                hostedProvider.dataRefOverride = dataRef;
+                return hostedProvider;
+              },
+        ),
+        usesLocalPersistence: true,
+        supportsGitHubAuth: false,
+      );
+      final snapshot = await repository.loadSnapshot();
+      await repository.connect(
+        const RepositoryConnection(
+          repository: '.',
+          branch: 'main',
+          token: 'env-token',
+        ),
+      );
+
+      final updated = await repository.uploadIssueAttachment(
+        issue: snapshot.issues.single,
+        name: 'logic.drawio',
+        bytes: Uint8List.fromList(utf8.encode('v2-xml')),
+      );
+      final uploaded = updated.attachments.firstWhere(
+        (attachment) => attachment.name == 'logic.drawio',
+      );
+
+      expect(uploaded.storageBackend, AttachmentStorageMode.githubReleases);
+      expect(uploaded.revisionOrOid, 'asset-1');
+      expect(hostedProvider.lastWriteRequest, isNotNull);
+      expect(
+        hostedProvider.lastWriteRequest!.assetName,
+        'logic.drawio',
+      );
+    },
+  );
+
+  test(
     'local repository derives issue history entries from git commits',
     () async {
       final repo = await _createLocalRepository();
