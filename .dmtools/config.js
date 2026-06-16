@@ -399,7 +399,8 @@ module.exports = {
                 autoStartMergeConfigFile: 'agents/story_test_automation_merge.json',
                 autoStartRework: true,
                 autoStartReworkConfigFile: 'agents/story_test_automation_rework.json',
-                maxReviewThreadsBeforeForceApprove: 100
+                maxReviewThreadsBeforeForceApprove: 100,
+                smFallback: true
             }
         },
         bug_test_automation: {
@@ -421,7 +422,8 @@ module.exports = {
                 autoStartMergeConfigFile: 'agents/bug_test_automation_merge.json',
                 autoStartRework: true,
                 autoStartReworkConfigFile: 'agents/bug_test_automation_rework.json',
-                maxReviewThreadsBeforeForceApprove: 100
+                maxReviewThreadsBeforeForceApprove: 100,
+                smFallback: true
             }
         },
         retry_merge: {
