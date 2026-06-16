@@ -29,7 +29,9 @@ class PythonTrackStateCliMultiFieldUpdateFramework(
         *,
         config: TrackStateCliMultiFieldUpdateConfig,
     ) -> TrackStateCliMultiFieldUpdateObservation:
-        with tempfile.TemporaryDirectory(prefix="trackstate-ts-460-") as temp_dir:
+        with tempfile.TemporaryDirectory(
+            prefix="trackstate-cli-multi-field-update-"
+        ) as temp_dir:
             repository_path = Path(temp_dir)
             self._seed_local_repository(repository_path, config=config)
 
@@ -52,9 +54,10 @@ class PythonTrackStateCliMultiFieldUpdateFramework(
                 *field_arguments,
             )
             fallback_reason = (
-                "Pinned execution to the repository-local CLI via `dart run trackstate` "
-                "so TS-460 exercises this checkout against a disposable Local Git "
-                "repository instead of any unrelated `trackstate` binary on PATH."
+                "Pinned execution to the repository-local CLI via `dart run "
+                "trackstate` so the multi-field update automation exercises this "
+                "checkout against a disposable Local Git repository instead of "
+                "any unrelated `trackstate` binary on PATH."
             )
             initial_head_revision = self._git_output(
                 repository_path,
@@ -198,7 +201,7 @@ updated: 2026-05-12T00:00:00Z
 
 # Description
 
-Seeded issue for TS-460.
+Seeded issue for TrackState CLI multi-field update automation.
 """
         self._write_file(
             repository_path / config.project_key / config.issue_key / "main.md",
@@ -233,16 +236,22 @@ Seeded issue for TS-460.
             + "\n",
         )
         self._git(repository_path, "init", "-b", "main")
-        self._git(repository_path, "config", "--local", "user.name", "TS-460 Tester")
+        self._git(
+            repository_path,
+            "config",
+            "--local",
+            "user.name",
+            "TrackState CLI Tester",
+        )
         self._git(
             repository_path,
             "config",
             "--local",
             "user.email",
-            "ts460@example.com",
+            "trackstate-cli@example.com",
         )
         self._git(repository_path, "add", ".")
-        self._git(repository_path, "commit", "-m", "Seed TS-460 fixture")
+        self._git(repository_path, "commit", "-m", "Seed multi-field update fixture")
 
     @staticmethod
     def _write_file(path: Path, content: str) -> None:

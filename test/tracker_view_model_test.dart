@@ -144,10 +144,58 @@ void main() {
   );
 
   test(
+    'view model maps missing hosted bootstrap index failures into recovery instead of generic data-load failure',
+    () async {
+      const missingIndexError = HostedBootstrapIndexValidationException(
+        'Hosted bootstrap requires .trackstate/index/issues.json with summary entries. Regenerate the tracker indexes and retry.',
+      );
+      final viewModel = TrackerViewModel(
+        repository: _StartupRecoveryRepository(
+          loadResults: const [missingIndexError],
+        ),
+      );
+
+      await viewModel.load();
+
+      expect(viewModel.snapshot, isNull);
+      expect(
+        viewModel.startupRecovery?.kind,
+        TrackerStartupRecoveryKind.hostedBootstrapIndex,
+      );
+      expect(viewModel.startupRecovery?.detail, missingIndexError.message);
+      expect(viewModel.message?.kind, isNot(TrackerMessageKind.dataLoadFailed));
+    },
+  );
+
+  test(
+    'view model maps inconsistent hosted bootstrap index failures into recovery instead of generic data-load failure',
+    () async {
+      const inconsistentIndexError = HostedBootstrapIndexValidationException(
+        'Hosted bootstrap index is inconsistent with repository issue paths. Regenerate the tracker indexes and retry.',
+      );
+      final viewModel = TrackerViewModel(
+        repository: _StartupRecoveryRepository(
+          loadResults: const [inconsistentIndexError],
+        ),
+      );
+
+      await viewModel.load();
+
+      expect(viewModel.snapshot, isNull);
+      expect(
+        viewModel.startupRecovery?.kind,
+        TrackerStartupRecoveryKind.hostedBootstrapIndex,
+      );
+      expect(viewModel.startupRecovery?.detail, inconsistentIndexError.message);
+      expect(viewModel.message?.kind, isNot(TrackerMessageKind.dataLoadFailed));
+    },
+  );
+
+  test(
     'view model preserves invalid-token recovery instead of overwriting it with a generic load failure',
     () async {
       final authStore = _TokenTrackingAuthStore(
-        repository: 'trackstate/trackstate',
+        repository: SetupTrackStateRepository.repositoryName,
         token: 'github-token',
       );
       final viewModel = TrackerViewModel(
@@ -164,7 +212,10 @@ void main() {
         TrackerMessageKind.storedGitHubTokenInvalid,
       );
       expect(viewModel.message?.kind, isNot(TrackerMessageKind.dataLoadFailed));
-      expect(authStore.clearedRepositories, contains('trackstate/trackstate'));
+      expect(
+        authStore.clearedRepositories,
+        contains(SetupTrackStateRepository.repositoryName),
+      );
     },
   );
 
@@ -206,6 +257,61 @@ void main() {
       expect(viewModel.hasMoreSearchResults, isFalse);
     },
   );
+
+  test(
+    'active search excludes archived issues from the default results',
+    () async {
+      final viewModel = TrackerViewModel(
+        repository: DemoTrackStateRepository(
+          snapshot: _searchPaginationSnapshot(archivedIssueIndexes: {1}),
+        ),
+      );
+
+      await viewModel.load();
+
+      expect(
+        viewModel.searchResults.any((issue) => issue.key == 'TRACK-1'),
+        isFalse,
+      );
+      expect(viewModel.selectedIssue?.key, 'TRACK-2');
+      expect(viewModel.totalSearchResults, 7);
+    },
+  );
+
+  test('empty JQL query excludes archived issues from active search', () async {
+    final viewModel = TrackerViewModel(
+      repository: DemoTrackStateRepository(
+        snapshot: _searchPaginationSnapshot(archivedIssueIndexes: {1}),
+      ),
+    );
+
+    await viewModel.load();
+    await viewModel.updateQuery('');
+
+    expect(viewModel.totalSearchResults, 7);
+    expect(viewModel.searchResults.length, 7);
+    expect(
+      viewModel.searchResults.any((issue) => issue.key == 'TRACK-1'),
+      isFalse,
+    );
+    expect(viewModel.selectedIssue?.key, 'TRACK-2');
+  });
+
+  test('explicit archived query keeps archived issues discoverable', () async {
+    final viewModel = TrackerViewModel(
+      repository: DemoTrackStateRepository(
+        snapshot: _searchPaginationSnapshot(archivedIssueIndexes: {1}),
+      ),
+    );
+
+    await viewModel.load();
+    await viewModel.updateQuery('archived = true ORDER BY key ASC');
+
+    expect(viewModel.jql, 'archived = true ORDER BY key ASC');
+    expect(viewModel.totalSearchResults, 1);
+    expect(viewModel.searchResults.map((issue) => issue.key), ['TRACK-1']);
+    expect(viewModel.selectedIssue?.key, 'TRACK-1');
+  });
 
   test(
     'view model restores the last valid query after a search failure',
@@ -396,10 +502,16 @@ void main() {
       expect(viewModel.isConnected, isTrue);
       expect(viewModel.connectedUser?.login, 'demo-user');
       expect(authStore.readScopes, [
-        (repository: 'trackstate/trackstate', workspaceId: workspaceId),
+        (
+          repository: SetupTrackStateRepository.repositoryName,
+          workspaceId: workspaceId,
+        ),
       ]);
       expect(repository.connectCount, 2);
-      expect(repository.lastConnection?.repository, 'trackstate/trackstate');
+      expect(
+        repository.lastConnection?.repository,
+        SetupTrackStateRepository.repositoryName,
+      );
       expect(repository.lastConnection?.token, 'legacy-token');
     },
   );
@@ -661,6 +773,60 @@ void main() {
   );
 
   test(
+    'view model keeps the saved attachment replacement when the repository cache is stale',
+    () async {
+      final initialBytes = Uint8List.fromList(
+        utf8.encode('stale attachment bytes'),
+      );
+      final replacementBytes = Uint8List.fromList(
+        utf8.encode('fresh attachment bytes'),
+      );
+      final snapshot = _snapshotWithAttachment(
+        await const DemoTrackStateRepository().loadSnapshot(),
+        initialBytes: initialBytes,
+      );
+      final repository = _MutableEditRepository(
+        snapshot: snapshot,
+        keepAttachmentSnapshotStale: true,
+        initialAttachmentBytes: initialBytes,
+        replacementAttachmentBytes: replacementBytes,
+      );
+      final viewModel = TrackerViewModel(repository: repository);
+
+      await viewModel.load();
+      final issue = viewModel.selectedIssue!;
+
+      final success = await viewModel.uploadIssueAttachment(
+        issue: issue,
+        name: 'design spec.pdf',
+        bytes: replacementBytes,
+      );
+
+      expect(success, isTrue);
+      expect(repository.loadSnapshotCount, 1);
+      expect(viewModel.selectedIssue?.attachments, hasLength(1));
+      expect(
+        viewModel.selectedIssue?.attachments.single.name,
+        'design-spec.pdf',
+      );
+      expect(
+        viewModel.selectedIssue?.attachments.single.sizeBytes,
+        replacementBytes.length,
+      );
+      expect(
+        viewModel.selectedIssue?.attachments.single.revisionOrOid,
+        'mutable-revision-updated',
+      );
+      expect(
+        await repository.downloadAttachment(
+          viewModel.selectedIssue!.attachments.single,
+        ),
+        replacementBytes,
+      );
+    },
+  );
+
+  test(
     'view model saves hosted field edits without reloading the full snapshot',
     () async {
       SharedPreferences.setMockInitialValues({
@@ -735,6 +901,43 @@ void main() {
       expect(success, isTrue);
       expect(repository.loadSnapshotCount, 1);
       expect(viewModel.selectedIssue?.statusId, 'in-review');
+    },
+  );
+
+  test(
+    'view model reports hosted persistence feedback after a successful edit transition',
+    () async {
+      SharedPreferences.setMockInitialValues({
+        'trackstate.githubToken.trackstate.trackstate': 'write-enabled-token',
+      });
+      final repository = _HostedMutableEditRepository();
+      final viewModel = TrackerViewModel(repository: repository);
+
+      await viewModel.load();
+      final issue = viewModel.issues.firstWhere(
+        (candidate) => candidate.key == 'TRACK-12',
+      );
+
+      final success = await viewModel.saveIssueEdits(
+        issue,
+        IssueEditRequest(
+          summary: issue.summary,
+          description: issue.description,
+          priorityId: 'highest',
+          assignee: issue.assignee,
+          labels: issue.labels,
+          components: issue.components,
+          fixVersionIds: issue.fixVersionIds,
+          parentKey: issue.parentKey,
+          epicKey: issue.epicKey,
+          transitionStatusId: 'in-review',
+        ),
+      );
+
+      expect(success, isTrue);
+      expect(viewModel.message?.kind, TrackerMessageKind.githubMoveCommitted);
+      expect(viewModel.message?.issueKey, 'TRACK-12');
+      expect(viewModel.message?.statusLabel, 'In Review');
     },
   );
 
@@ -1009,7 +1212,7 @@ void main() {
   );
 
   test(
-    'view model keeps release-backed hosted sessions upload-attempt ready while release writes remain restricted',
+    'view model keeps release-backed hosted sessions download-only while release writes remain restricted',
     () async {
       SharedPreferences.setMockInitialValues({
         'trackstate.githubToken.trackstate.trackstate': 'release-backed-token',
@@ -1038,7 +1241,7 @@ void main() {
         viewModel.hostedRepositoryAccessMode,
         HostedRepositoryAccessMode.attachmentRestricted,
       );
-      expect(viewModel.canUploadIssueAttachments, isTrue);
+      expect(viewModel.canUploadIssueAttachments, isFalse);
       expect(viewModel.hasAttachmentUploadRestriction, isTrue);
     },
   );
@@ -1268,6 +1471,49 @@ void main() {
       expect(inspection.isLfsTracked, isTrue);
       expect(inspection.requiresLocalGitUpload, isTrue);
       expect(inspection.resolvedName, 'release-notes.pdf');
+    },
+  );
+
+  test(
+    'view model allows hosted LFS duplicate replacements when release uploads are available',
+    () async {
+      SharedPreferences.setMockInitialValues({
+        'trackstate.githubToken.trackstate.trackstate': 'release-backed-token',
+      });
+      const attachmentRestrictedPermission = RepositoryPermission(
+        canRead: true,
+        canWrite: true,
+        isAdmin: false,
+        canCreateBranch: true,
+        canManageAttachments: true,
+        attachmentUploadMode: AttachmentUploadMode.noLfs,
+        supportsReleaseAttachmentWrites: true,
+        canCheckCollaborators: false,
+      );
+      final viewModel = TrackerViewModel(
+        repository: ReactiveIssueDetailTrackStateRepository(
+          permission: attachmentRestrictedPermission,
+          textFixtures: _repositoryPathProjectTextFixtures(),
+          lfsTrackedPaths: {'TRACK-12/attachments/sync-sequence.svg'},
+        ),
+      );
+
+      await viewModel.load();
+      final issue = viewModel.issues.firstWhere(
+        (candidate) => candidate.key == 'TRACK-12',
+      );
+      viewModel.selectIssue(issue);
+      await viewModel.ensureIssueAttachmentsLoaded(issue);
+      final hydratedIssue = viewModel.selectedIssue!;
+      final inspection = await viewModel.inspectIssueAttachmentUpload(
+        hydratedIssue,
+        'sync sequence.svg',
+      );
+
+      expect(inspection.isLfsTracked, isTrue);
+      expect(inspection.existingAttachment, isNotNull);
+      expect(inspection.requiresLocalGitUpload, isFalse);
+      expect(inspection.resolvedName, 'sync-sequence.svg');
     },
   );
 
@@ -1545,6 +1791,61 @@ void main() {
   );
 
   test(
+    'view model normalizes hosted transition result enums before board grouping',
+    () async {
+      final initialSnapshot = await const DemoTrackStateRepository()
+          .loadSnapshot();
+      final repository = _MutableEditRepository(snapshot: initialSnapshot);
+      final service = _RecordingEditIssueMutationService(
+        repository,
+        returnStaleTransitionEnum: true,
+      );
+      final viewModel = TrackerViewModel(
+        repository: repository,
+        issueMutationService: service,
+      );
+
+      await viewModel.load();
+      final issue = viewModel.issues.firstWhere(
+        (candidate) => candidate.key == 'TRACK-12',
+      );
+
+      final success = await viewModel.saveIssueEdits(
+        issue,
+        IssueEditRequest(
+          summary: issue.summary,
+          description: issue.description,
+          priorityId: 'highest',
+          assignee: issue.assignee,
+          labels: issue.labels,
+          components: issue.components,
+          fixVersionIds: issue.fixVersionIds,
+          parentKey: issue.parentKey,
+          epicKey: issue.epicKey,
+          transitionStatusId: 'done',
+          resolutionId: 'done',
+        ),
+      );
+
+      expect(success, isTrue);
+      expect(viewModel.selectedIssue?.statusId, 'done');
+      expect(viewModel.selectedIssue?.status, IssueStatus.done);
+      expect(viewModel.selectedIssue?.priorityId, 'highest');
+      expect(viewModel.selectedIssue?.priority, IssuePriority.highest);
+      expect(
+        viewModel.issuesByStatus[IssueStatus.done]!.map((issue) => issue.key),
+        contains('TRACK-12'),
+      );
+      expect(
+        viewModel.issuesByStatus[IssueStatus.inReview]!.map(
+          (issue) => issue.key,
+        ),
+        isNot(contains('TRACK-12')),
+      );
+    },
+  );
+
+  test(
     'view model keeps the selected issue hydrated after hosted same-key status reloads',
     () async {
       final initialSnapshot = await const DemoTrackStateRepository()
@@ -1800,6 +2101,40 @@ TrackerSnapshot _snapshotWithResolutions(
   );
 }
 
+TrackerSnapshot _snapshotWithAttachment(
+  TrackerSnapshot snapshot, {
+  required Uint8List initialBytes,
+}) {
+  final issue = snapshot.issues.firstWhere(
+    (candidate) => candidate.key == 'TRACK-12',
+  );
+  final storagePath =
+      '${issue.storagePath.substring(0, issue.storagePath.lastIndexOf('/'))}/attachments/design-spec.pdf';
+  final attachment = IssueAttachment(
+    id: storagePath,
+    name: 'design-spec.pdf',
+    mediaType: 'application/pdf',
+    sizeBytes: initialBytes.length,
+    author: 'mutable-user',
+    createdAt: '2026-05-30T05:45:32Z',
+    storagePath: storagePath,
+    revisionOrOid: 'mutable-revision-initial',
+  );
+  final updatedIssue = issue.copyWith(
+    hasAttachmentsLoaded: true,
+    attachments: [attachment],
+  );
+  return TrackerSnapshot(
+    project: snapshot.project,
+    issues: [
+      for (final candidate in snapshot.issues)
+        if (candidate.key == issue.key) updatedIssue else candidate,
+    ],
+    repositoryIndex: snapshot.repositoryIndex,
+    loadWarnings: snapshot.loadWarnings,
+  );
+}
+
 Map<String, String> _repositoryPathProjectTextFixtures() => const {
   'project.json': '''
 {
@@ -1995,7 +2330,11 @@ class _LegacyRepositoryFallbackAuthStore implements TrackStateAuthStore {
   @override
   Future<String?> readToken({String? repository, String? workspaceId}) async {
     readScopes.add((repository: repository, workspaceId: workspaceId));
-    if (repository == this.repository && workspaceId == this.workspaceId) {
+    final usesDefaultHostedRepository =
+        repository == SetupTrackStateRepository.repositoryName &&
+        this.repository == 'trackstate/trackstate';
+    if ((repository == this.repository || usesDefaultHostedRepository) &&
+        workspaceId == this.workspaceId) {
       return token;
     }
     return null;
@@ -2207,6 +2546,9 @@ class _MutableEditRepository implements TrackStateRepository {
     required TrackerSnapshot snapshot,
     this.usesLocalPersistence = false,
     this.reloadReturnsSummaryOnly = false,
+    this.keepAttachmentSnapshotStale = false,
+    this.initialAttachmentBytes = const <int>[],
+    this.replacementAttachmentBytes = const <int>[],
   }) : _snapshot = snapshot;
 
   TrackerSnapshot _snapshot;
@@ -2215,6 +2557,9 @@ class _MutableEditRepository implements TrackStateRepository {
   int loadSnapshotCount = 0;
 
   final bool reloadReturnsSummaryOnly;
+  final bool keepAttachmentSnapshotStale;
+  final List<int> initialAttachmentBytes;
+  final List<int> replacementAttachmentBytes;
 
   @override
   final bool usesLocalPersistence;
@@ -2331,7 +2676,11 @@ class _MutableEditRepository implements TrackStateRepository {
 
   @override
   Future<Uint8List> downloadAttachment(IssueAttachment attachment) async =>
-      Uint8List(0);
+      Uint8List.fromList(
+        attachment.revisionOrOid == 'mutable-revision-updated'
+            ? replacementAttachmentBytes
+            : initialAttachmentBytes,
+      );
 
   @override
   Future<List<IssueHistoryEntry>> loadIssueHistory(
@@ -2346,24 +2695,43 @@ class _MutableEditRepository implements TrackStateRepository {
     String? sourceName,
   }) async {
     final sanitizedName = sanitizeAttachmentName(name);
+    final storagePath =
+        '${issue.storagePath.substring(0, issue.storagePath.lastIndexOf('/'))}/attachments/$sanitizedName';
     final updated = issue.copyWith(
       hasAttachmentsLoaded: true,
       attachments: [
-        ...issue.attachments,
-        IssueAttachment(
-          id: '${issue.storagePath}/$sanitizedName',
-          name: sanitizedName,
-          mediaType: 'application/pdf',
-          sizeBytes: bytes.length,
-          author: 'mutable-user',
-          createdAt: 'just now',
-          storagePath:
-              '${issue.storagePath.substring(0, issue.storagePath.lastIndexOf('/'))}/attachments/$sanitizedName',
-          revisionOrOid: 'mutable-revision',
-        ),
+        for (final attachment in issue.attachments)
+          if (attachment.storagePath == storagePath)
+            IssueAttachment(
+              id: storagePath,
+              name: sanitizedName,
+              mediaType: attachment.mediaType,
+              sizeBytes: bytes.length,
+              author: 'mutable-user',
+              createdAt: 'just now',
+              storagePath: storagePath,
+              revisionOrOid: 'mutable-revision-updated',
+            )
+          else
+            attachment,
+        if (!issue.attachments.any(
+          (attachment) => attachment.storagePath == storagePath,
+        ))
+          IssueAttachment(
+            id: storagePath,
+            name: sanitizedName,
+            mediaType: 'application/pdf',
+            sizeBytes: bytes.length,
+            author: 'mutable-user',
+            createdAt: 'just now',
+            storagePath: storagePath,
+            revisionOrOid: 'mutable-revision-updated',
+          ),
       ],
     );
-    applyIssue(updated);
+    if (!keepAttachmentSnapshotStale) {
+      applyIssue(updated);
+    }
     return updated;
   }
 
@@ -2670,10 +3038,12 @@ class _RecordingEditIssueMutationService extends IssueMutationService {
       TrackStateConfigEntry(id: 'in-review', name: 'In Review'),
       TrackStateConfigEntry(id: 'done', name: 'Done'),
     ],
+    this.returnStaleTransitionEnum = false,
   }) : super(repository: const DemoTrackStateRepository());
 
   final _MutableEditRepository _repository;
   final List<TrackStateConfigEntry> transitions;
+  final bool returnStaleTransitionEnum;
   Map<String, Object?> updatedFields = const {};
   String? reassignedParentKey;
   String? reassignedEpicKey;
@@ -2747,7 +3117,7 @@ class _RecordingEditIssueMutationService extends IssueMutationService {
     };
     final updated = _copyIssue(
       issue,
-      status: nextStatus,
+      status: returnStaleTransitionEnum ? issue.status : nextStatus,
       statusId: status,
       resolutionId: resolution,
     );
@@ -2891,7 +3261,9 @@ TrackerSnapshot _hostedBootstrapSnapshot(TrackerSnapshot snapshot) {
   );
 }
 
-TrackerSnapshot _searchPaginationSnapshot() {
+TrackerSnapshot _searchPaginationSnapshot({
+  Set<int> archivedIssueIndexes = const <int>{},
+}) {
   final issues = [
     for (var index = 1; index <= 8; index += 1)
       TrackStateIssue(
@@ -2922,7 +3294,7 @@ TrackerSnapshot _searchPaginationSnapshot() {
         comments: const [],
         links: const [],
         attachments: const [],
-        isArchived: false,
+        isArchived: archivedIssueIndexes.contains(index),
         hasDetailLoaded: false,
         hasCommentsLoaded: false,
         hasAttachmentsLoaded: false,

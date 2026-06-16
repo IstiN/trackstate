@@ -65,31 +65,25 @@ AUTH_PROBE_START_WAIT_SECONDS = 60
 STARTUP_RENDER_WAIT_SECONDS = 60
 OBSERVATION_TIMEOUT_SECONDS = SIMULATED_PROBE_DELAY_SECONDS + POST_RELEASE_STABILITY_SECONDS + 20
 POLL_INTERVAL_SECONDS = 0.5
-LINKED_BUGS = ["TS-996", "TS-992", "TS-971"]
+LINKED_BUGS = ["TS-1211", "TS-1152", "TS-1145", "TS-1045"]
 LINKED_BUG_NOTES = (
-    "Reviewed TS-996, TS-992, and TS-971. Their fixes require the startup GitHub "
-    "`/user` probe to begin normally, the shell to remain interactive once the "
-    "11-second timeout fallback is available, and the late probe resolution to "
-    "avoid resetting visible hosted-workspace state. This test therefore waits "
-    "past the timeout and continues observing through the delayed release."
-)
-REWORK_SUMMARY = (
-    "Removed the Step 2 early-pass shortcut so the timeout assertion stays "
-    "bound to the recorded post-timeout shell observation while preserving the "
-    "delayed startup probe stability coverage."
+    "Reviewed TS-1211, TS-1152, TS-1145, and TS-1045 from "
+    "`input/TS-990/linked_bugs.md`. Those fixes require the hosted shell to "
+    "reach `shell_ready` within the shared 11-second timeout window even while "
+    "startup probes are still pending, and they require late `/user` probe "
+    "resolution to leave the visible TopBar workspace trigger and branding "
+    "stable. This test therefore waits past the timeout while the delayed "
+    "GitHub `/user` probe is still pending and keeps observing until the late "
+    "resolution finishes."
 )
 REWORK_FIXES = (
-    "Removed the Step 2 shortcut that could pass from the initial startup surface "
-    "without proving the post-timeout `shell_ready=true` condition.",
-    "Kept Step 2 tied to the timeout-window observation while preserving the "
-    "linked TS-996 / TS-992 / TS-971 delayed-probe timing checks.",
-    "Updated review-thread replies so the current PR feedback is answered with the "
-    "exact Step 2 fix and rerun result.",
+    "Resolved the `main` merge conflict in `testing/tests/TS-990/test_ts_990.py`.",
+    "Preserved the approved timeout-window assertion so Step 2 still depends on the recorded post-timeout shell snapshot while the delayed `/user` probe is pending.",
+    "Reran the live delayed-probe stability scenario with the user-visible workspace trigger, branding, route, and navigation checks intact.",
 )
 REWORK_RESPONSE_SUMMARY = (
-    "Removed the Step 2 early-pass shortcut, kept the timeout assertion bound to "
-    "the recorded post-timeout observation, and updated the review reply for the "
-    "current thread."
+    "Resolved the `main` merge conflict in TS-990 and reran the live delayed-"
+    "probe stability scenario with the approved timeout-window assertion intact."
 )
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
@@ -482,28 +476,32 @@ def main() -> None:
                 _record_human_verification(
                     result,
                     check=(
-                        "Viewed the hosted shell as soon as the app rendered and confirmed "
-                        "the user-facing navigation, branding, and workspace trigger were "
-                        "visible before the delayed probe finished."
+                        "Viewed the hosted shell after the timeout window while the delayed "
+                        "probe was still pending and confirmed the user-facing navigation, "
+                        "branding, and workspace trigger were visible where a user would "
+                        "see them."
                     ),
                     observed=(
-                        f"initial_body_excerpt={_snippet(str(startup_surface.get('body_text', '')))!r}; "
-                        f"initial_trigger_label={(result.get('initial_trigger_observation') or {}).get('semantic_label')!r}; "
-                        f"initial_shell_interactive={initial_shell_interactive!r}; "
-                        f"auth_probe_started_after_start_seconds={auth_probe_started_after_start_seconds!r}"
+                        f"visible_navigation_labels={timeout_window['shell_observation']['visible_navigation_labels']!r}; "
+                        f"branding_visible={timeout_window['branding_visible']!r}; "
+                        f"workspace_trigger={(timeout_window['trigger'] or {}).get('semantic_label')!r}; "
+                        f"auth_pending={timeout_window['auth_pending']!r}; "
+                        f"shell_ready_after_start_seconds={timeout_window['shell_ready_after_start_seconds']!r}"
                     ),
                 )
                 _record_human_verification(
                     result,
                     check=(
                         "Kept watching the live page through the delayed probe release and "
-                        "checked whether the hosted-workspace state stayed the same from the "
-                        "user's perspective."
+                        "confirmed the same route, branding, and hosted-workspace trigger "
+                        "state stayed visible without a reset."
                     ),
                     observed=(
+                        f"timeout_route={_route_signature(timeout_window)!r}; "
                         f"final_route={_route_signature(final_window)!r}; "
-                        f"initial_trigger_signature={_trigger_signature({'trigger': result.get('initial_trigger_observation')})!r}; "
-                        f"stable_trigger_signature={_trigger_signature(final_window)!r}; "
+                        f"timeout_trigger_signature={_trigger_signature(timeout_window)!r}; "
+                        f"final_trigger_signature={_trigger_signature(final_window)!r}; "
+                        f"final_branding_visible={final_window['branding_visible']!r}; "
                         f"shell_ready_after_start_seconds={final_window['shell_ready_after_start_seconds']!r}; "
                         f"auth_probe_released_after_start_seconds={release_after_start_seconds!r}; "
                         f"stability_sample_count={len(stability_samples)!r}"
@@ -948,9 +946,6 @@ def _build_pr_body(result: dict[str, Any], *, passed: bool) -> str:
     lines = [
         f"## {TICKET_KEY} passed" if passed else f"## {TICKET_KEY} failed",
         "",
-        "## Rework summary",
-        *[f"- {item}" for item in REWORK_FIXES],
-        "",
         f"**Test case:** {TEST_CASE_TITLE}",
         f"**Environment:** `{result.get('app_url')}` · {result.get('browser')} · {result.get('os')}",
         f"**Viewport:** `{DESKTOP_VIEWPORT['width']}x{DESKTOP_VIEWPORT['height']}`",
@@ -958,6 +953,9 @@ def _build_pr_body(result: dict[str, Any], *, passed: bool) -> str:
         f"**Linked bug review:** {LINKED_BUG_NOTES}",
         f"**Startup probe setup:** delayed GitHub `/user` probe by `{SIMULATED_PROBE_DELAY_SECONDS}` seconds",
         f"**Timeout check:** interactive shell stays available after the `{SYNC_TIMEOUT_SECONDS}`-second window and through late probe resolution",
+        "",
+        "## Implementation notes",
+        *[f"- {item}" for item in REWORK_FIXES],
         "",
         "## What was automated",
         "- Opened the deployed TrackState app in Chromium with a stored GitHub token and preloaded workspace state.",

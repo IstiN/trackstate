@@ -1,14 +1,24 @@
 from __future__ import annotations
 
 from contextlib import AbstractContextManager
+from datetime import datetime, timezone
 import json
+import tempfile
 from typing import Any, Sequence
 
 try:
-    from playwright.sync_api import Browser, BrowserContext, Page, Route, sync_playwright
+    from playwright.sync_api import (
+        Browser,
+        BrowserContext,
+        Page,
+        Request,
+        Response,
+        Route,
+        sync_playwright,
+    )
     from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 except ModuleNotFoundError:  # pragma: no cover - exercised in no-Playwright unit envs
-    Browser = BrowserContext = Page = Route = Any
+    Browser = BrowserContext = Page = Request = Response = Route = Any
 
     class PlaywrightTimeoutError(Exception):
         pass
@@ -26,10 +36,20 @@ from testing.core.interfaces.web_app_session import (
     WebAppTimeoutError,
 )
 
+_CHROMIUM_FOREGROUND_TIMING_ARGS = [
+    "--disable-background-timer-throttling",
+    "--disable-renderer-backgrounding",
+    "--disable-backgrounding-occluded-windows",
+]
+
 
 class PlaywrightWebAppSession(WebAppSession):
     def __init__(self, page: Page) -> None:
         self._page = page
+        self._network_recorders: dict[str, dict[str, Any]] = {}
+        self._page.on("request", self._handle_page_request)
+        self._page.on("requestfinished", self._handle_page_request_finished)
+        self._page.on("requestfailed", self._handle_page_request_failed)
 
     def set_viewport_size(self, *, width: int, height: int) -> None:
         self._page.set_viewport_size({"width": width, "height": height})
@@ -445,8 +465,7 @@ class PlaywrightWebAppSession(WebAppSession):
                             return value;
                         }
                     }
-                    const text = normalize(element.textContent);
-                    return text || null;
+                    return null;
                 };
                 const derivedOwnedLabelFor = (element) => {
                     if (!(element instanceof Element)) {
@@ -522,6 +541,23 @@ class PlaywrightWebAppSession(WebAppSession):
             outer_html=str(payload["outerHtml"]),
         )
 
+    def wait_for_active_element_change(
+        self,
+        previous_outer_html: str,
+        *,
+        timeout_ms: int = 2_000,
+    ) -> FocusedElementObservation:
+        try:
+            self._page.wait_for_function(
+                "(prevHtml) => !document.activeElement "
+                "|| document.activeElement.outerHTML.slice(0, 400) !== prevHtml",
+                arg=previous_outer_html,
+                timeout=timeout_ms,
+            )
+        except PlaywrightTimeoutError:
+            pass
+        return self.active_element()
+
     def wait_for_download_after_keypress(
         self,
         key: str,
@@ -537,6 +573,29 @@ class PlaywrightWebAppSession(WebAppSession):
                 f'Timed out waiting for a download after pressing "{key}".',
             ) from error
         return download.suggested_filename
+
+    def save_download_after_keypress(
+        self,
+        key: str,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> str:
+        try:
+            with self._page.expect_download(timeout=timeout_ms) as download_info:
+                self._page.keyboard.press(key)
+            download = download_info.value
+            destination = tempfile.NamedTemporaryFile(
+                prefix="trackstate-download-",
+                suffix=f"-{download.suggested_filename}",
+                delete=False,
+            )
+            destination.close()
+            download.save_as(destination.name)
+            return destination.name
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                f'Timed out waiting for a saved download after pressing "{key}".',
+            ) from error
 
     def wait_for_download_after_click(
         self,
@@ -557,6 +616,33 @@ class PlaywrightWebAppSession(WebAppSession):
                 f'Timed out waiting for a download after clicking selector "{selector}".',
             ) from error
         return download.suggested_filename
+
+    def save_download_after_click(
+        self,
+        selector: str,
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> str:
+        try:
+            locator = self._locator(selector, has_text=has_text, index=index)
+            locator.wait_for(state="visible", timeout=timeout_ms)
+            with self._page.expect_download(timeout=timeout_ms) as download_info:
+                locator.click(timeout=timeout_ms)
+            download = download_info.value
+            destination = tempfile.NamedTemporaryFile(
+                prefix="trackstate-download-",
+                suffix=f"-{download.suggested_filename}",
+                delete=False,
+            )
+            destination.close()
+            download.save_as(destination.name)
+            return destination.name
+        except PlaywrightTimeoutError as error:
+            raise WebAppTimeoutError(
+                f'Timed out waiting for a saved download after clicking selector "{selector}".',
+            ) from error
 
     def wait_for_new_page_after_keypress(
         self,
@@ -754,6 +840,24 @@ class PlaywrightWebAppSession(WebAppSession):
     def mouse_move(self, x: float, y: float) -> None:
         self._page.mouse.move(x, y)
 
+    def start_network_recording(self, *, name: str, url_fragment: str) -> None:
+        self._network_recorders[name] = {
+            "url_fragment": url_fragment.lower(),
+            "next_id": 1,
+            "entries": [],
+            "request_ids": {},
+        }
+
+    def read_network_log(self, *, name: str) -> list[dict[str, object]]:
+        recorder = self._network_recorders.get(name)
+        if recorder is None:
+            return []
+        return [
+            dict(entry)
+            for entry in recorder.get("entries", [])
+            if isinstance(entry, dict)
+        ]
+
     def _locator(
         self,
         selector: str,
@@ -764,18 +868,149 @@ class PlaywrightWebAppSession(WebAppSession):
         locator = self._page.locator(selector, has_text=has_text)
         return locator.nth(index)
 
+    def _handle_page_request(self, request: Request) -> None:
+        request_url = str(getattr(request, "url", ""))
+        request_method = str(getattr(request, "method", "GET")).upper()
+        request_body = self._request_post_data(request)
+        for name, recorder in self._matching_network_recorders(request_url):
+            request_id = f"{name}-{recorder['next_id']}"
+            recorder["next_id"] += 1
+            recorder["request_ids"][id(request)] = request_id
+            self._append_network_entry(
+                recorder,
+                {
+                    "phase": "request",
+                    "transport": "playwright",
+                    "requestId": request_id,
+                    "method": request_method,
+                    "url": request_url,
+                    "bodyText": request_body,
+                },
+            )
+
+    def _handle_page_request_finished(self, request: Request) -> None:
+        request_url = str(getattr(request, "url", ""))
+        request_method = str(getattr(request, "method", "GET")).upper()
+        for _, recorder in self._matching_network_recorders(request_url):
+            request_id = recorder["request_ids"].pop(id(request), None)
+            if not request_id:
+                continue
+            response = request.response()
+            response_status = None if response is None else int(response.status)
+            response_text = self._response_text(response)
+            self._append_network_entry(
+                recorder,
+                {
+                    "phase": "response",
+                    "transport": "playwright",
+                    "requestId": request_id,
+                    "method": request_method,
+                    "url": request_url,
+                    "status": response_status,
+                    "responseText": response_text,
+                },
+            )
+
+    def _handle_page_request_failed(self, request: Request) -> None:
+        request_url = str(getattr(request, "url", ""))
+        request_method = str(getattr(request, "method", "GET")).upper()
+        for _, recorder in self._matching_network_recorders(request_url):
+            request_id = recorder["request_ids"].pop(id(request), None)
+            if not request_id:
+                continue
+            self._append_network_entry(
+                recorder,
+                {
+                    "phase": "error",
+                    "transport": "playwright",
+                    "requestId": request_id,
+                    "method": request_method,
+                    "url": request_url,
+                    "errorText": self._request_failure_text(request),
+                },
+            )
+
+    def _matching_network_recorders(
+        self,
+        request_url: str,
+    ) -> list[tuple[str, dict[str, Any]]]:
+        lowered_url = request_url.lower()
+        return [
+            (name, recorder)
+            for name, recorder in self._network_recorders.items()
+            if str(recorder.get("url_fragment", "")) in lowered_url
+        ]
+
+    def _append_network_entry(
+        self,
+        recorder: dict[str, Any],
+        entry: dict[str, object],
+    ) -> None:
+        entries = recorder.setdefault("entries", [])
+        assert isinstance(entries, list)
+        entries.append(
+            {
+                **entry,
+                "order": len(entries) + 1,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+
+    def _request_post_data(self, request: Request) -> str:
+        post_data = getattr(request, "post_data", None)
+        try:
+            payload = post_data() if callable(post_data) else post_data
+        except Exception as error:  # pragma: no cover - defensive Playwright fallback
+            return f"[[unreadable request body: {error}]]"
+        if payload is None:
+            return ""
+        return str(payload)
+
+    def _response_text(self, response: Response | None) -> str | None:
+        if response is None:
+            return None
+        try:
+            return response.text()
+        except Exception as error:  # pragma: no cover - defensive Playwright fallback
+            return f"[[unreadable response body: {error}]]"
+
+    def _request_failure_text(self, request: Request) -> str | None:
+        failure = getattr(request, "failure", None)
+        try:
+            payload = failure() if callable(failure) else failure
+        except Exception as error:  # pragma: no cover - defensive Playwright fallback
+            return f"[[unreadable request failure: {error}]]"
+        if payload is None:
+            return None
+        return str(payload)
+
 
 class PlaywrightWebAppRuntime(AbstractContextManager[PlaywrightWebAppSession]):
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        viewport_width: int = 1440,
+        viewport_height: int = 960,
+    ) -> None:
         self._playwright = None
         self._browser: Browser | None = None
         self._context: BrowserContext | None = None
         self._page: Page | None = None
+        self._viewport_width = viewport_width
+        self._viewport_height = viewport_height
 
     def __enter__(self) -> PlaywrightWebAppSession:
         self._playwright = sync_playwright().start()
-        self._browser = self._playwright.chromium.launch(headless=True)
-        self._context = self._browser.new_context(viewport={"width": 1440, "height": 960})
+        self._browser = self._playwright.chromium.launch(
+            headless=True,
+            args=_CHROMIUM_FOREGROUND_TIMING_ARGS,
+        )
+        self._context = self._browser.new_context(
+            viewport={
+                "width": self._viewport_width,
+                "height": self._viewport_height,
+            },
+        )
         self._page = self._context.new_page()
         return PlaywrightWebAppSession(self._page)
 
@@ -792,24 +1027,43 @@ class PlaywrightWebAppRuntime(AbstractContextManager[PlaywrightWebAppSession]):
 class PlaywrightStoredTokenWebAppRuntime(
     AbstractContextManager[PlaywrightWebAppSession],
 ):
-    def __init__(self, *, repository: str, token: str) -> None:
+    def __init__(
+        self,
+        *,
+        repository: str,
+        token: str,
+        viewport_width: int = 1440,
+        viewport_height: int = 960,
+    ) -> None:
         self._repository = repository
         self._token = token
         self._playwright = None
         self._browser: Browser | None = None
         self._context: BrowserContext | None = None
         self._page: Page | None = None
+        self._viewport_width = viewport_width
+        self._viewport_height = viewport_height
 
     def __enter__(self) -> PlaywrightWebAppSession:
         self._playwright = sync_playwright().start()
-        self._browser = self._playwright.chromium.launch(headless=True)
-        self._context = self._browser.new_context(viewport={"width": 1440, "height": 960})
-        self._context.route("https://api.github.com/**", self._handle_github_api_route)
-        storage_keys = sorted(
-            {
-                self._repository.replace("/", "."),
-                self._repository.lower().replace("/", "."),
+        self._browser = self._playwright.chromium.launch(
+            headless=True,
+            args=_CHROMIUM_FOREGROUND_TIMING_ARGS,
+        )
+        self._context = self._browser.new_context(
+            viewport={
+                "width": self._viewport_width,
+                "height": self._viewport_height,
             },
+        )
+        self._context.route("https://api.github.com/**", self._handle_github_api_route)
+        storage_keys = tuple(
+            sorted(
+                {
+                    self._repository.replace("/", "."),
+                    self._repository.lower().replace("/", "."),
+                },
+            ),
         )
         self._context.add_init_script(
             script=(

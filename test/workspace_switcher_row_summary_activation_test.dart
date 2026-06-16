@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
+import 'package:trackstate/ui/features/tracker/views/trackstate_app_helpers.dart';
 
 void main() {
   test(

@@ -23,13 +23,6 @@ class PythonHostedTrackStateSessionCliFramework(HostedTrackStateSessionCliProbe)
         branch: str = "main",
         provider: str = "github",
     ) -> CliCommandResult:
-        executable = shutil.which("trackstate")
-        if executable is None:
-            raise AssertionError(
-                "Precondition failed: TS-409 requires the installed `trackstate` CLI "
-                "to be available on PATH for the hosted session parity check."
-            )
-
         token = (
             os.environ.get("TRACKSTATE_TOKEN")
             or os.environ.get("GH_TOKEN")
@@ -41,8 +34,7 @@ class PythonHostedTrackStateSessionCliFramework(HostedTrackStateSessionCliProbe)
         if token:
             env.setdefault("TRACKSTATE_TOKEN", token)
 
-        command = (
-            executable,
+        command_suffix = (
             "session",
             "--target",
             "hosted",
@@ -54,7 +46,7 @@ class PythonHostedTrackStateSessionCliFramework(HostedTrackStateSessionCliProbe)
             branch,
         )
         completed = subprocess.run(
-            command,
+            self._resolve_command() + command_suffix,
             cwd=self._repository_root,
             env=env,
             capture_output=True,
@@ -69,9 +61,19 @@ class PythonHostedTrackStateSessionCliFramework(HostedTrackStateSessionCliProbe)
             except json.JSONDecodeError:
                 payload = None
         return CliCommandResult(
-            command=command,
+            command=tuple(completed.args),
             exit_code=completed.returncode,
             stdout=completed.stdout,
             stderr=completed.stderr,
             json_payload=payload,
+        )
+
+    def _resolve_command(self) -> tuple[str, ...]:
+        executable = shutil.which("trackstate")
+        if executable is not None:
+            return (executable,)
+
+        raise AssertionError(
+            "Precondition failed: TS-409 requires the installed `trackstate` CLI "
+            "on PATH so Step 5 validates the packaged `trackstate session` surface."
         )

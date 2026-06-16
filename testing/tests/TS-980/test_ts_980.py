@@ -46,7 +46,19 @@ DEFAULT_BRANCH = "main"
 LOCAL_TARGET = "/tmp/trackstate-ts980-workspace"
 LOCAL_DISPLAY_NAME = "Restorable local workspace"
 HOSTED_DISPLAY_NAME = "Hosted setup workspace"
-LINKED_BUGS = ["TS-994", "TS-993", "TS-976", "TS-972"]
+LINKED_BUGS = [
+    "TS-1258",
+    "TS-1233",
+    "TS-1209",
+    "TS-1207",
+    "TS-1154",
+    "TS-1143",
+    "TS-1142",
+    "TS-994",
+    "TS-993",
+    "TS-976",
+    "TS-972",
+]
 SHELL_NAVIGATION_LABELS = ("Dashboard", "Board", "JQL Search", "Hierarchy", "Settings")
 STARTUP_TRIGGER_WAIT_SECONDS = 60
 POST_RELOAD_RESTORE_WAIT_SECONDS = 45
@@ -383,7 +395,7 @@ def main() -> None:
                     ),
                     observed=(
                         f"trigger_after_restore={json.dumps(trigger_after_restore, ensure_ascii=True)}; "
-                        f"local_row_after_restore={json.dumps(_row_payload(local_row_after), ensure_ascii=True) if local_row_after else 'null'}"
+                        f"local_row_after_restore={json.dumps(local_row_after, ensure_ascii=True) if local_row_after else 'null'}"
                     ),
                 )
 

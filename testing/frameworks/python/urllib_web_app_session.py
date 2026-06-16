@@ -342,6 +342,17 @@ class UrllibWebAppSession(WebAppSession):
             "Active-element inspection is not supported by the urllib web session fallback."
         )
 
+    def wait_for_active_element_change(
+        self,
+        previous_outer_html: str,
+        *,
+        timeout_ms: int = 2_000,
+    ) -> FocusedElementObservation:
+        del previous_outer_html, timeout_ms
+        raise NotImplementedError(
+            "Active-element change waits are not supported by the urllib web session fallback."
+        )
+
     def wait_for_download_after_keypress(
         self,
         key: str,
@@ -351,6 +362,17 @@ class UrllibWebAppSession(WebAppSession):
         del key, timeout_ms
         raise NotImplementedError(
             "Download capture is not supported by the urllib web session fallback."
+        )
+
+    def save_download_after_keypress(
+        self,
+        key: str,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> str:
+        del key, timeout_ms
+        raise NotImplementedError(
+            "Saved download capture is not supported by the urllib web session fallback."
         )
 
     def wait_for_download_after_click(
@@ -365,6 +387,27 @@ class UrllibWebAppSession(WebAppSession):
         raise NotImplementedError(
             "Download capture is not supported by the urllib web session fallback."
         )
+
+    def save_download_after_click(
+        self,
+        selector: str,
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> str:
+        del selector, has_text, index, timeout_ms
+        raise NotImplementedError(
+            "Saved download capture is not supported by the urllib web session fallback."
+        )
+
+    def start_network_recording(self, *, name: str, url_fragment: str) -> None:
+        del name, url_fragment
+        return None
+
+    def read_network_log(self, *, name: str) -> list[dict[str, object]]:
+        del name
+        return []
 
     def screenshot(self, path: str, *, full_page: bool = True) -> None:
         del path, full_page
