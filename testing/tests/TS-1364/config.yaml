@@ -1,0 +1,11 @@
+test_id: TS-1364
+type: install-script
+framework: unittest
+platform: linux
+dependencies:
+  - bash
+  - curl
+  - Python 3.12+
+  - PyYAML
+notes:
+  - Verifies that install.sh respects a custom INSTALL_DIR override for custom installation locations and does not create the default ~/.trackstate/bin directory.

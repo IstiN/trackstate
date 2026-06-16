@@ -1,0 +1,11 @@
+test_id: TS-1365
+type: install-script
+framework: unittest
+platform: linux
+dependencies:
+  - bash
+  - curl
+  - Python 3.12+
+  - PyYAML
+notes:
+  - Verifies that install.sh exits non-zero with a clear error message when the GitHub API returns a 403 rate-limit response during latest version resolution, and suggests providing a pinned version.
