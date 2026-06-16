@@ -7,6 +7,9 @@
 #   irm https://github.com/__REPO_PLACEHOLDER__/releases/download/v1.2.3/install.ps1 -OutFile install.ps1
 #   .\install.ps1 -Version v1.2.3
 #
+#   .\install.ps1 -Force
+#   .\install.ps1 -Version v1.2.3 -Force
+#
 # The script installs the TrackState CLI into a user-local directory and
 # appends that directory to the user-level PATH when it is not already present.
 # No administrator privileges are required.
