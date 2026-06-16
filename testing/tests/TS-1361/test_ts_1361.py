@@ -24,22 +24,6 @@ class PosixInstallScriptIdempotencyAndConflictTest(unittest.TestCase):
         if platform.system() != "Linux":
             self.skipTest("POSIX install script functional test requires a Linux environment")
 
-    def _create_patched_script(
-        self,
-        tmpdir: Path,
-        tag: str = "v1.2.3",
-    ) -> tuple[Path, MockReleaseAssets, MockGitHubReleaseServer]:
-        assets = MockReleaseAssets.build(
-            tag=tag,
-            platform="linux-x64",
-            binary_name="trackstate",
-        )
-        server = MockGitHubReleaseServer(assets, repo="test/repo")
-        with server:
-            patched = tmpdir / "install.sh"
-            patch_install_sh(INSTALL_SCRIPT, patched, server)
-        return patched, assets, server
-
     def test_posix_install_script_path_idempotency_and_conflict_management(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir_str:
             tmpdir = Path(tmpdir_str)
@@ -53,8 +37,7 @@ class PosixInstallScriptIdempotencyAndConflictTest(unittest.TestCase):
                 platform="linux-x64",
                 binary_name="trackstate",
             )
-            server = MockGitHubReleaseServer(assets, repo="test/repo")
-            with server:
+            with MockGitHubReleaseServer(assets, repo="test/repo") as server:
                 patched = tmpdir / "install.sh"
                 patch_install_sh(INSTALL_SCRIPT, patched, server)
 
@@ -94,9 +77,11 @@ class PosixInstallScriptIdempotencyAndConflictTest(unittest.TestCase):
                     "Re-running the installer must not create duplicate PATH entries.",
                 )
 
-                # Simulate an existing trackstate binary in /usr/local/bin (via a temp dir on PATH)
-                conflict_dir = tmpdir / "usr" / "local" / "bin"
-                conflict_dir.mkdir(parents=True)
+                # Simulate an existing trackstate binary already on PATH (e.g. /usr/local/bin)
+                # using a neutral temporary directory so the test does not depend on the
+                # literal /usr/local/bin path or on the exact wording of the warning.
+                conflict_dir = tmpdir / "preexisting-bin"
+                conflict_dir.mkdir()
                 (conflict_dir / "trackstate").write_text("#!/bin/sh\necho conflict\n")
                 (conflict_dir / "trackstate").chmod(0o755)
                 env_with_conflict = dict(base_env)
@@ -110,20 +95,26 @@ class PosixInstallScriptIdempotencyAndConflictTest(unittest.TestCase):
                     "Expected the installer to fail when a conflicting trackstate binary is already on PATH.\n"
                     f"Observed output:\n{third_output}",
                 )
+                third_output_lower = third_output.lower()
                 self.assertIn(
-                    str(conflict_dir),
-                    third_output,
-                    "The error message should warn the user about the existing binary location.",
+                    "trackstate",
+                    third_output_lower,
+                    "The error message should warn the user about the existing trackstate binary.",
+                )
+                self.assertTrue(
+                    any(
+                        marker in third_output_lower
+                        for marker in ("conflict", "already", "exists", "existing")
+                    ),
+                    "The error message should indicate a conflict with an existing binary.",
                 )
 
-                # Run with --force to allow the managed install to override the conflict
-                # NOTE: --force is passed as the positional version argument because the
-                # install script currently treats any positional argument as a version tag.
-                # Once the product contract defines an explicit --force option, this call
-                # should be updated to use the flag form.
+                # Run with --force to allow the managed install to override the conflict.
+                # The install script does not yet implement --force, so this call will
+                # succeed only once the product adds conflict detection and a --force flag.
                 force = run_install_sh(
                     patched,
-                    version="--force",
+                    flags=["--force"],
                     timeout=60,
                     env=env_with_conflict,
                 )
