@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import '../../domain/models/workspace_profile_models.dart';
 import '../providers/local/local_git_trackstate_provider.dart';
 import '../repositories/local_trackstate_repository.dart';
 import 'local_workspace_onboarding_service.dart';
@@ -18,7 +19,7 @@ class LocalGitWorkspaceOnboardingService
 
   @override
   Future<LocalWorkspaceInspection> inspectFolder(String folderPath) async {
-    final normalizedPath = _normalizePath(folderPath);
+    final normalizedPath = normalizeLocalPath(folderPath);
     if (normalizedPath.isEmpty) {
       return const LocalWorkspaceInspection(
         folderPath: '',
@@ -95,7 +96,7 @@ class LocalGitWorkspaceOnboardingService
       );
     }
 
-    final normalizedTopLevel = _normalizePath(repositoryTopLevel);
+    final normalizedTopLevel = normalizeLocalPath(repositoryTopLevel);
     if (!await _pathsReferToSameLocation(normalizedTopLevel, normalizedPath)) {
       return LocalWorkspaceInspection(
         folderPath: normalizedPath,
@@ -233,7 +234,7 @@ class LocalGitWorkspaceOnboardingService
       );
     }
 
-    final normalizedFolderPath = _normalizePath(inspection.folderPath);
+    final normalizedFolderPath = normalizeLocalPath(inspection.folderPath);
     final normalizedWriteBranch = writeBranch.trim();
     final normalizedWorkspaceName = workspaceName.trim();
     if (normalizedFolderPath.isEmpty ||
@@ -456,7 +457,7 @@ TrackState initialized this workspace successfully. Start by editing this issue 
         recursive: true,
         followLinks: false,
       )) {
-        final normalizedPath = _normalizePath(entity.path);
+        final normalizedPath = normalizeLocalPath(entity.path);
         if (normalizedPath.endsWith('/project.json') ||
             normalizedPath.contains('/.trackstate/') ||
             normalizedPath.endsWith('/config/statuses.json') ||
@@ -532,27 +533,21 @@ Future<bool> _pathsReferToSameLocation(String left, String right) async {
 }
 
 Future<String> _canonicalizeExistingPath(String path) async {
-  final normalized = _normalizePath(path);
+  final normalized = normalizeLocalPath(path);
   if (normalized.isEmpty) {
     return normalized;
   }
   try {
-    return _normalizePath(await Directory(normalized).resolveSymbolicLinks());
+    return normalizeLocalPath(await Directory(normalized).resolveSymbolicLinks());
   } on FileSystemException {
     return normalized;
   }
 }
 
-String _normalizePath(String path) {
-  var normalized = path.replaceAll('\\', '/').trim();
-  while (normalized.length > 1 && normalized.endsWith('/')) {
-    normalized = normalized.substring(0, normalized.length - 1);
-  }
-  return normalized;
-}
+
 
 String _defaultWorkspaceName(String folderPath) {
-  final normalized = _normalizePath(folderPath);
+  final normalized = normalizeLocalPath(folderPath);
   final segments = normalized.split('/');
   for (var index = segments.length - 1; index >= 0; index -= 1) {
     final candidate = segments[index].trim();

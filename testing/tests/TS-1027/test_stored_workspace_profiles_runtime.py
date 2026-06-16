@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from testing.tests.support.delayed_auth_workspace_profiles_runtime import (
@@ -13,6 +15,7 @@ from testing.tests.support.stored_workspace_profiles_runtime import (
     StoredWorkspaceProfilesRuntime,
     WorkspaceProfilesRuntime,
     _build_preload_script,
+    _workspace_token_storage_keys,
 )
 from testing.core.config.live_setup_test_config import LiveSetupTestConfig
 
@@ -84,6 +87,50 @@ class StoredWorkspaceProfilesRuntimeRegressionTest(unittest.TestCase):
                 ],
             },
         )
+        self.assertEqual(runtime._viewport_width, 1440)
+        self.assertEqual(runtime._viewport_height, 960)
+
+    def test_live_tracker_factory_preserves_custom_viewport_for_stored_token_runtime(
+        self,
+    ) -> None:
+        config = LiveSetupTestConfig(
+            app_url="https://example.test/trackstate/",
+            repository="IstiN/trackstate-setup",
+            ref="main",
+        )
+
+        context = create_live_tracker_app_with_stored_token(
+            config,
+            token="token",
+            viewport_width=1280,
+            viewport_height=720,
+        )
+        runtime = context._runtime_factory()
+
+        self.assertIsInstance(runtime, StoredWorkspaceProfilesRuntime)
+        self.assertEqual(runtime._viewport_width, 1280)
+        self.assertEqual(runtime._viewport_height, 720)
+
+    def test_live_tracker_factory_preserves_custom_viewport_for_stored_token_runtime(
+        self,
+    ) -> None:
+        config = LiveSetupTestConfig(
+            app_url="https://example.test/trackstate/",
+            repository="IstiN/trackstate-setup",
+            ref="main",
+        )
+
+        context = create_live_tracker_app_with_stored_token(
+            config,
+            token="token",
+            viewport_width=1024,
+            viewport_height=768,
+        )
+        runtime = context._runtime_factory()
+
+        self.assertIsInstance(runtime, StoredWorkspaceProfilesRuntime)
+        self.assertEqual(runtime._viewport_width, 1024)
+        self.assertEqual(runtime._viewport_height, 768)
 
     def test_workspace_profiles_runtime_applies_preload_script_to_existing_page(self) -> None:
         runtime = WorkspaceProfilesRuntime(
@@ -146,6 +193,87 @@ class StoredWorkspaceProfilesRuntimeRegressionTest(unittest.TestCase):
             "Stored workspace preload must be injected into the current page or "
             "browser tests miss saved workspace state during the first load.",
         )
+
+    def test_workspace_token_storage_keys_default_to_all_workspace_profiles(self) -> None:
+        keys = _workspace_token_storage_keys(
+            {
+                "activeWorkspaceId": "local:/tmp/demo@main",
+                "profiles": [
+                    {"id": "local:/tmp/demo@main"},
+                    {"id": "hosted:istin/trackstate-setup@main"},
+                ],
+            },
+        )
+
+        self.assertEqual(
+            keys,
+            [
+                "trackstate.githubToken.workspace.local%3A%2Ftmp%2Fdemo%40main",
+                "flutter.trackstate.githubToken.workspace.local%3A%2Ftmp%2Fdemo%40main",
+                "trackstate.githubToken.workspace.hosted%3Aistin%2Ftrackstate-setup%40main",
+                "flutter.trackstate.githubToken.workspace.hosted%3Aistin%2Ftrackstate-setup%40main",
+            ],
+            "When callers omit workspace_token_profile_ids, the shared runtime "
+            "must preserve the legacy default of seeding every saved workspace "
+            "token key so startup restore tests still exercise the real auth path.",
+        )
+
+    def test_preload_script_seeds_restorable_local_workspace_fixture_for_existing_path(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as workspace_dir:
+            workspace_path = Path(workspace_dir)
+            project_dir = workspace_path / "DEMO" / "config"
+            project_dir.mkdir(parents=True, exist_ok=True)
+            (workspace_path / "project.json").write_text(
+                '{"key":"DEMO","name":"Demo","repository":"local/demo","branch":"main"}\n',
+                encoding="utf-8",
+            )
+            (project_dir / "statuses.json").write_text("[]\n", encoding="utf-8")
+
+            script = _build_preload_script(
+                {
+                    "activeWorkspaceId": f"local:{workspace_dir}@main",
+                    "profiles": [
+                        {
+                            "id": f"local:{workspace_dir}@main",
+                            "targetType": "local",
+                            "target": workspace_dir,
+                            "defaultBranch": "main",
+                            "writeBranch": "main",
+                        },
+                    ],
+                },
+            )
+
+        self.assertIn("localWorkspaceFixtures", script)
+        self.assertIn("__trackstateStoredWorkspaceRuntimeFixtureHandles", script)
+        self.assertIn("IDBObjectStore.prototype.get", script)
+        self.assertIn(workspace_dir, script)
+
+    def test_preload_script_skips_local_workspace_fixture_when_restore_is_disabled(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as workspace_dir:
+            script = _build_preload_script(
+                {
+                    "activeWorkspaceId": f"local:{workspace_dir}@main",
+                    "profiles": [
+                        {
+                            "id": f"local:{workspace_dir}@main",
+                            "targetType": "local",
+                            "target": workspace_dir,
+                            "defaultBranch": "main",
+                            "writeBranch": "main",
+                        },
+                    ],
+                },
+                restore_local_workspace_handles=False,
+            )
+
+        self.assertNotIn("localWorkspaceFixtures", script)
+        self.assertNotIn("__trackstateStoredWorkspaceRuntimeFixtureHandles", script)
+        self.assertNotIn("IDBObjectStore.prototype.get", script)
 
     def test_delayed_auth_runtime_wait_polls_page_until_probe_event_arrives(self) -> None:
         runtime = DelayedAuthWorkspaceProfilesRuntime(

@@ -30,7 +30,9 @@ class PythonTrackStateCliCommentCreationFramework(
         *,
         config: TrackStateCliCommentCreationConfig,
     ) -> TrackStateCliCommentCreationObservation:
-        with tempfile.TemporaryDirectory(prefix="trackstate-ts-462-") as temp_dir:
+        with tempfile.TemporaryDirectory(
+            prefix="trackstate-cli-comment-creation-"
+        ) as temp_dir:
             repository_path = Path(temp_dir)
             self._seed_local_repository(repository_path, config=config)
             initial_head_revision = self._git_output(
@@ -38,36 +40,43 @@ class PythonTrackStateCliCommentCreationFramework(
                 "rev-parse",
                 "HEAD",
             ).strip()
-            requested_command = (
-                *config.requested_command_prefix,
-                "--path",
-                str(repository_path),
-                "--key",
-                config.issue_key,
-                "--body",
-                config.comment_body,
+            requested_commands = tuple(
+                (
+                    *config.requested_command_prefix,
+                    "--path",
+                    str(repository_path),
+                    "--key",
+                    config.issue_key,
+                    "--body",
+                    comment_body,
+                )
+                for comment_body in config.comment_bodies
             )
-            executed_command = (
-                *config.fallback_command_prefix,
-                "--path",
-                str(repository_path),
-                "--key",
-                config.issue_key,
-                "--body",
-                config.comment_body,
+            executed_commands = tuple(
+                (
+                    *config.fallback_command_prefix,
+                    "--path",
+                    str(repository_path),
+                    "--key",
+                    config.issue_key,
+                    "--body",
+                    comment_body,
+                )
+                for comment_body in config.comment_bodies
             )
             fallback_reason = (
                 "Pinned execution to the repository-local CLI via `dart run trackstate` "
-                "so TS-462 exercises this checkout against a disposable Local Git "
+                "so this regression exercises the current checkout against a "
+                "disposable Local Git "
                 "repository instead of any unrelated `trackstate` binary on PATH."
             )
-            first_result = self._run(executed_command)
+            first_result = self._run(executed_commands[0])
             first_head_revision = self._git_output(
                 repository_path,
                 "rev-parse",
                 "HEAD",
             ).strip()
-            second_result = self._run(executed_command)
+            second_result = self._run(executed_commands[1])
             second_head_revision = self._git_output(
                 repository_path,
                 "rev-parse",
@@ -82,8 +91,8 @@ class PythonTrackStateCliCommentCreationFramework(
                 for path in sorted(comment_directory.glob("*.md"))
             )
             return TrackStateCliCommentCreationObservation(
-                requested_command=requested_command,
-                executed_command=executed_command,
+                requested_commands=requested_commands,  # type: ignore[arg-type]
+                executed_commands=executed_commands,  # type: ignore[arg-type]
                 fallback_reason=fallback_reason,
                 repository_path=str(repository_path),
                 initial_head_revision=initial_head_revision,
@@ -155,7 +164,7 @@ key: {config.issue_key}
 project: {config.project_key}
 issueType: story
 status: todo
-summary: "TS-462 fixture"
+summary: "CLI comment fixture"
 assignee: ts462-user
 reporter: ts462-user
 updated: 2026-05-12T00:00:00Z
@@ -163,7 +172,7 @@ updated: 2026-05-12T00:00:00Z
 
 # Description
 
-Seeded issue for TS-462.
+Seeded issue for CLI comment regression coverage.
 """,
         )
         self._git(repository_path, "init", "-b", "main")

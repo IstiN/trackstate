@@ -43,6 +43,7 @@ CUSTOM_FIELD_TYPE = "option"
 CUSTOM_FIELD_OPTIONS = ("Production", "Staging", "Development")
 CUSTOM_FIELD_OPTIONS_TEXT = ", ".join(CUSTOM_FIELD_OPTIONS)
 CUSTOM_FIELD_ISSUE_TYPES = {"Bug"}
+POST_SAVE_PERSISTENCE_WAIT_MS = 60_000
 
 
 @dataclass(frozen=True)
@@ -294,10 +295,10 @@ def main() -> None:
                 try:
                     settings_page.open_add_field_editor()
                     settings_page.select_field_type(CUSTOM_FIELD_TYPE)
+                    settings_page.set_applicable_issue_types(CUSTOM_FIELD_ISSUE_TYPES)
                     settings_page.fill_editor_input("ID", CUSTOM_FIELD_ID)
                     settings_page.fill_editor_input("Name", CUSTOM_FIELD_NAME)
                     settings_page.fill_editor_input("Options", CUSTOM_FIELD_OPTIONS_TEXT)
-                    settings_page.set_applicable_issue_types(CUSTOM_FIELD_ISSUE_TYPES)
                     environment_editor_draft = settings_page.read_editor_observation()
                     result["environment_editor_before_save"] = _editor_payload(
                         environment_editor_draft,
@@ -309,14 +310,15 @@ def main() -> None:
                             "creating the Environment field before saving settings"
                         ),
                     )
+                    _record_human_verification(
+                        result,
+                        check=(
+                            "Filled the live Add field form with the visible Environment "
+                            "metadata before saving."
+                        ),
+                        observed=environment_editor_draft.body_text,
+                    )
                     settings_page.save_field_editor(field_name=CUSTOM_FIELD_NAME)
-                    environment_row_before_save = settings_page.field_row_observation(
-                        CUSTOM_FIELD_NAME,
-                    )
-                    result["environment_row_before_save_settings"] = _row_payload(
-                        environment_row_before_save,
-                    )
-                    _assert_custom_field_row(environment_row_before_save)
                     settings_page.save_settings()
                     refreshed_fields_text = _reopen_fields_tab(
                         tracker_page=tracker_page,
@@ -329,8 +331,12 @@ def main() -> None:
                     result["fields_tab_body_text_after_environment_save"] = (
                         refreshed_fields_text
                     )
-                    environment_row = settings_page.field_row_observation(
+                    result["visible_field_rows_after_environment_save"] = (
+                        settings_page.visible_field_rows()
+                    )
+                    environment_row = settings_page.wait_for_field_row(
                         CUSTOM_FIELD_NAME,
+                        timeout_ms=POST_SAVE_PERSISTENCE_WAIT_MS,
                     )
                     result["environment_row"] = _row_payload(environment_row)
                     _assert_custom_field_row(environment_row)
@@ -339,6 +345,16 @@ def main() -> None:
                     writes_product_bug_report = True
                     failure = str(error)
                     scenario_failures.append(failure)
+                    if "environment_editor_before_save" in result:
+                        _record_human_verification(
+                            result,
+                            check=(
+                                "Viewed the live Add field editor immediately before save "
+                                "and confirmed the entered Environment metadata was visible "
+                                "to the user."
+                            ),
+                            observed=str(result["environment_editor_before_save"]),
+                        )
                     _record_step(
                         result,
                         step=6,
@@ -591,13 +607,13 @@ def _restore_field_snapshot(
 ) -> None:
     settings_page.open_add_field_editor()
     settings_page.select_field_type(snapshot.field_type)
+    settings_page.set_applicable_issue_types(set(snapshot.selected_issue_types))
     settings_page.fill_editor_input("ID", snapshot.field_id)
     settings_page.fill_editor_input("Name", snapshot.field_name_value)
     if snapshot.options_value:
         settings_page.fill_editor_input("Options", snapshot.options_value)
     if snapshot.default_value:
         settings_page.fill_editor_input("Default value", snapshot.default_value)
-    settings_page.set_applicable_issue_types(set(snapshot.selected_issue_types))
     settings_page.save_field_editor(field_name=snapshot.field_name)
 
 
@@ -962,7 +978,17 @@ def _jira_comment(payload: dict[str, object]) -> str:
     lines.extend(_wiki_section("Observed result", _observed_lines(payload)))
     lines.extend(_wiki_section("Environment", _environment_lines(payload)))
     if payload.get("error"):
-        lines.extend(_wiki_section("Exact assertion failure", ["{code}", str(payload["error"]), "", str(payload.get("traceback", "")), "{code}"]))
+        lines.extend(
+            [
+                "*Exact assertion failure*",
+                "{code}",
+                str(payload["error"]),
+                "",
+                str(payload.get("traceback", "")),
+                "{code}",
+                "",
+            ],
+        )
     return "\n".join(lines).rstrip() + "\n"
 
 

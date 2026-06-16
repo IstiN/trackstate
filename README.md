@@ -42,11 +42,47 @@ dart run trackstate jira_execute_request --target local --method GET --request-p
 
 `jira_execute_request` returns raw Jira-compatible JSON on success for a documented allowlist of safe read paths (`/rest/api/2|3/search`, `/rest/api/2|3/issue/{key}`, and `/rest/api/2|3/issue/{key}/comment`). Unsupported or unsafe request shapes fail explicitly in the standard error envelope.
 
+## Install the compiled CLI
+
+Each release publishes install scripts and pre-built CLI binaries. Pick the command for your platform:
+
+### Linux / macOS
+
+```bash
+curl -fsSL https://github.com/IstiN/trackstate/releases/latest/download/install.sh | bash
+```
+
+Install a pinned version by passing the tag:
+
+```bash
+curl -fsSL https://github.com/IstiN/trackstate/releases/download/v1.2.3/install.sh | bash -s -- v1.2.3
+```
+
+### Windows (PowerShell)
+
+```powershell
+irm https://github.com/IstiN/trackstate/releases/latest/download/install.ps1 -OutFile install.ps1
+.\install.ps1
+```
+
+### Windows (Command Prompt)
+
+```cmd
+curl -fsSL https://github.com/IstiN/trackstate/releases/latest/download/install.cmd -o install.cmd
+install.cmd
+```
+
+The installer places the `trackstate` binary in a user-local directory and updates your PATH. No administrator privileges are required.
+
 ## GitHub artifacts
 
 `.github/workflows/unit-tests.yml` runs Flutter required checks on pull requests. `.github/workflows/flutter-ci.yml` builds the GitHub Pages web app, uploads the `trackstate-web` artifact, and deploys Pages from `main`.
 
-`.github/workflows/build-native.yml` is the dedicated Apple release workflow. It runs only for semantic version tags (`v*`) or manual recovery dispatches, verifies the TrackState macOS runner contract before scheduling release work, and publishes the zipped macOS app bundle, CLI archive, and SHA256 manifest to the source repository release. Runner ownership, labels, and toolchain requirements are documented in [`docs/macos-release-runner.md`](docs/macos-release-runner.md).
+`.github/workflows/release-on-main.yml` orchestrates semantic releases from `main`. It resolves the next `vX.Y.Z` version, runs the required Flutter validation, fans out Linux, Windows, and macOS release builds, and publishes a single GitHub release with desktop and CLI archives plus a unified SHA256 checksum.
+
+`.github/workflows/build-macos-reusable.yml` encapsulates the macOS runner verification, desktop app build, CLI compilation, ARM64-only thinning, packaging, and artifact upload so it can be reused by the main release orchestration and by manual recovery dispatches.
+
+`.github/workflows/build-native.yml` is the legacy manual recovery wrapper for macOS releases. It no longer triggers on tags; it runs only via `workflow_dispatch`, resolves a semantic tag, calls `.github/workflows/build-macos-reusable.yml`, and publishes the resulting macOS assets to a GitHub release. `.github/workflows/repair-historical-apple-releases.yml` continues to watch successful `main` validation runs and re-dispatches `build-native.yml` for `v0.0.98` when the published Apple Silicon archive still contains a universal binary. Runner ownership, labels, and toolchain requirements are documented in [`docs/macos-release-runner.md`](docs/macos-release-runner.md).
 
 ## Fork-and-run setup repository
 

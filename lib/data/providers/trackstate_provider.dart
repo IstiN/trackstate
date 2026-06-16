@@ -189,10 +189,15 @@ class ProviderSession {
 }
 
 class RepositoryTreeEntry {
-  const RepositoryTreeEntry({required this.path, required this.type});
+  const RepositoryTreeEntry({
+    required this.path,
+    required this.type,
+    this.revision,
+  });
 
   final String path;
   final String type;
+  final String? revision;
 }
 
 class RepositorySyncState {
@@ -267,8 +272,8 @@ class RepositoryTextFile {
   final String? revision;
 }
 
-class RepositoryWriteRequest {
-  const RepositoryWriteRequest({
+class RepositoryChangeRequest {
+  const RepositoryChangeRequest({
     required this.path,
     required this.content,
     required this.message,
@@ -281,6 +286,16 @@ class RepositoryWriteRequest {
   final String message;
   final String branch;
   final String? expectedRevision;
+}
+
+class RepositoryWriteRequest extends RepositoryChangeRequest {
+  const RepositoryWriteRequest({
+    required super.path,
+    required super.content,
+    required super.message,
+    required super.branch,
+    super.expectedRevision,
+  });
 }
 
 void validateRepositoryTextWrite(RepositoryWriteRequest request) {
@@ -387,20 +402,14 @@ class RepositoryWriteResult {
   final String? revision;
 }
 
-class RepositoryCommitRequest {
+class RepositoryCommitRequest extends RepositoryChangeRequest {
   const RepositoryCommitRequest({
-    required this.path,
-    required this.content,
-    required this.message,
-    required this.branch,
-    this.expectedRevision,
+    required super.path,
+    required super.content,
+    required super.message,
+    required super.branch,
+    super.expectedRevision,
   });
-
-  final String path;
-  final String content;
-  final String message;
-  final String branch;
-  final String? expectedRevision;
 }
 
 class RepositoryCommitResult {
@@ -544,6 +553,7 @@ class RepositoryAttachmentWriteRequest {
     required this.message,
     required this.branch,
     this.expectedRevision,
+    this.allowLfsTrackedWrite = false,
   });
 
   final String path;
@@ -551,6 +561,7 @@ class RepositoryAttachmentWriteRequest {
   final String message;
   final String branch;
   final String? expectedRevision;
+  final bool allowLfsTrackedWrite;
 }
 
 class RepositoryAttachmentWriteResult {

@@ -59,6 +59,18 @@ class StartupRecoveryStateWindowObservation:
         return self.samples[-1]
 
 
+@dataclass(frozen=True)
+class StartupRecoveryShellReadyObservation:
+    body_text: str
+    location_href: str
+    location_hash: str
+    location_pathname: str
+    visible_navigation_labels: tuple[str, ...]
+    visible_button_labels: tuple[str, ...]
+    workspace_switcher_visible: bool
+    add_workspace_visible: bool
+
+
 class LiveStartupRecoveryPage:
     _required_navigation_labels = (
         "Dashboard",
@@ -67,6 +79,7 @@ class LiveStartupRecoveryPage:
         "Hierarchy",
         "Settings",
     )
+    _shell_ready_markers = ("Workspace switcher", "Add workspace")
     _settings_heading = "Project settings administration"
     _topbar_title = "Project Settings"
     _button_selector = 'flt-semantics[role="button"]'
@@ -81,11 +94,112 @@ class LiveStartupRecoveryPage:
     def open_route(self, route: str) -> str:
         return self._tracker_page.open_route(route)
 
+    def wait_for_shell_ready(
+        self,
+        *,
+        timeout_ms: int = 120_000,
+    ) -> StartupRecoveryShellReadyObservation:
+        self._session.wait_for_function(
+            r"""
+            ({ requiredNavigationLabels, shellReadyMarkers }) => {
+              const normalize = (value) => (value ?? '').replace(/\s+/g, ' ').trim();
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
+              const bodyText = document.body?.innerText ?? '';
+              const visibleButtonLabels = Array.from(
+                document.querySelectorAll('flt-semantics[role="button"]'),
+              )
+                .filter(isVisible)
+                .map((candidate) => normalize(candidate.innerText))
+                .filter((label) => label.length > 0);
+              return requiredNavigationLabels.every((label) => bodyText.includes(label))
+                && shellReadyMarkers.some(
+                  (marker) => bodyText.includes(marker) || visibleButtonLabels.includes(marker),
+                );
+            }
+            """,
+            arg={
+                "requiredNavigationLabels": list(self._required_navigation_labels),
+                "shellReadyMarkers": list(self._shell_ready_markers),
+            },
+            timeout_ms=timeout_ms,
+        )
+        return self.observe_shell_ready()
+
+    def observe_shell_ready(self) -> StartupRecoveryShellReadyObservation:
+        payload = self._session.evaluate(
+            r"""
+            (requiredNavigationLabels) => {
+              const normalize = (value) => (value ?? '').replace(/\s+/g, ' ').trim();
+              const isVisible = (element) => {
+                if (!element) {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                const style = window.getComputedStyle(element);
+                return rect.width > 0
+                  && rect.height > 0
+                  && style.visibility !== 'hidden'
+                  && style.display !== 'none';
+              };
+              const bodyText = document.body?.innerText ?? '';
+              const visibleButtonLabels = Array.from(
+                document.querySelectorAll('flt-semantics[role="button"]'),
+              )
+                .filter(isVisible)
+                .map((candidate) => normalize(candidate.innerText))
+                .filter((label) => label.length > 0);
+              return {
+                bodyText,
+                locationHref: window.location.href,
+                locationHash: window.location.hash,
+                locationPathname: window.location.pathname,
+                visibleNavigationLabels: requiredNavigationLabels.filter(
+                  (label) => bodyText.includes(label),
+                ),
+                visibleButtonLabels,
+                workspaceSwitcherVisible: bodyText.includes('Workspace switcher')
+                  || visibleButtonLabels.includes('Workspace switcher'),
+                addWorkspaceVisible: bodyText.includes('Add workspace')
+                  || visibleButtonLabels.includes('Add workspace'),
+              };
+            }
+            """,
+            arg=list(self._required_navigation_labels),
+        )
+        if not isinstance(payload, dict):
+            raise AssertionError(
+                "The startup recovery page did not expose a readable shell-ready snapshot.\n"
+                f"Observed body text:\n{self.current_body_text()}",
+            )
+        return StartupRecoveryShellReadyObservation(
+            body_text=str(payload["bodyText"]),
+            location_href=str(payload["locationHref"]),
+            location_hash=str(payload["locationHash"]),
+            location_pathname=str(payload["locationPathname"]),
+            visible_navigation_labels=tuple(
+                str(item) for item in payload["visibleNavigationLabels"]
+            ),
+            visible_button_labels=tuple(str(item) for item in payload["visibleButtonLabels"]),
+            workspace_switcher_visible=bool(payload["workspaceSwitcherVisible"]),
+            add_workspace_visible=bool(payload["addWorkspaceVisible"]),
+        )
+
     def wait_for_shell_routed_to_settings(
         self,
         *,
         timeout_ms: int = 120_000,
         require_retry_action: bool = True,
+        require_settings_heading: bool = True,
         required_body_fragments: tuple[str, ...] = (),
     ) -> StartupRecoveryShellObservation:
         self._session.wait_for_function(
@@ -95,6 +209,7 @@ class LiveStartupRecoveryPage:
               settingsHeading,
               topbarTitle,
               requireRetryAction,
+              requireSettingsHeading,
               requiredBodyFragments,
             }) => {
               const normalize = (value) => (value ?? '').replace(/\s+/g, ' ').trim();
@@ -122,7 +237,7 @@ class LiveStartupRecoveryPage:
                 .map((candidate) => normalize(candidate.innerText))
                 .filter((label) => label.length > 0);
               return requiredNavigationLabels.every((label) => bodyText.includes(label))
-                && bodyText.includes(settingsHeading)
+                && (!requireSettingsHeading || bodyText.includes(settingsHeading))
                 && bodyText.includes(topbarTitle)
                 && (!requireRetryAction || visibleButtonLabels.includes('Retry'))
                 && requiredBodyFragments.every((fragment) => bodyText.includes(fragment))
@@ -134,6 +249,7 @@ class LiveStartupRecoveryPage:
                 "settingsHeading": self._settings_heading,
                 "topbarTitle": self._topbar_title,
                 "requireRetryAction": require_retry_action,
+                "requireSettingsHeading": require_settings_heading,
                 "requiredBodyFragments": list(required_body_fragments),
             },
             timeout_ms=timeout_ms,

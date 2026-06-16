@@ -1,7 +1,8 @@
 # TS-334
 
 Validates that the production-visible **Create issue** desktop surface stays
-flush with the right viewport edge on a `1440x960` desktop viewport.
+flush with the right viewport edge on the default `1440x900` desktop viewport
+for a ticket that specifies a `1440px`-wide desktop case.
 
 The automation:
 1. opens the real Create issue surface from the widget runtime
@@ -20,7 +21,7 @@ flutter test testing/tests/TS-334/test_ts_334.dart
 
 ```text
 Pass: the Create issue desktop surface stays right-docked and its right edge is
-flush with the 1440px viewport.
+flush with the 1440px-wide default desktop viewport.
 
 Fail: the Create issue form loses visible user-facing content, stops rendering
 as a side sheet, or leaves a non-zero right inset instead of docking to the
