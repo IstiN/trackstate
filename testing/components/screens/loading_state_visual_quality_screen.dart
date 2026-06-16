@@ -4,6 +4,7 @@ import 'package:trackstate/ui/core/trackstate_theme.dart';
 
 import '../../core/interfaces/loading_state_visual_quality_screen.dart';
 import '../../core/interfaces/trackstate_app_component.dart';
+import '../../fixtures/repositories/ts453_bootstrap_loading_repository.dart';
 import 'loading_state_visual_quality_robot.dart';
 
 class LoadingStateVisualQualityScreen
@@ -61,13 +62,33 @@ class LoadingStateVisualQualityScreen
   }
 
   @override
+  Color resolveNavigationBackground(String label, Set<WidgetState> states) {
+    return _robot.resolveNavigationBackground(label, states);
+  }
+
+  @override
   Color navigationTextColor(String label) => _robot.navigationTextColor(label);
 
   @override
   Color loadingBannerTextColor() => _robot.loadingBannerTextColor();
 
   @override
+  Color loadingBannerBackgroundColor() => _robot.loadingBannerBackgroundColor();
+
+  @override
   Color firstLoadingPillTextColor() => _robot.firstLoadingPillTextColor();
+
+  @override
+  Color firstLoadingPillBackgroundColor() =>
+      _robot.firstLoadingPillBackgroundColor();
+
+  @override
+  Color loadingIndicatorForegroundColor() =>
+      _robot.loadingIndicatorForegroundColor();
+
+  @override
+  Color loadingIndicatorBackgroundColor() =>
+      _robot.loadingIndicatorBackgroundColor();
 
   @override
   Color topBarPlaceholderTextColor() => _robot.topBarPlaceholderTextColor();
@@ -77,6 +98,9 @@ class LoadingStateVisualQualityScreen
 
   @override
   void dispose() {
+    if (_repository case final CancellableLoadingStateRepository repository) {
+      repository.cancelPendingLoadingWork();
+    }
     _app.resetView();
   }
 }

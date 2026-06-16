@@ -1,11 +1,12 @@
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:trackstate/data/providers/trackstate_provider.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
 import '../../components/screens/read_only_issue_detail_screen_component.dart';
-import '../../core/fakes/read_only_trackstate_repository.dart';
+import '../../core/fakes/reactive_issue_detail_trackstate_repository.dart';
 import '../../core/interfaces/read_only_issue_detail_harness.dart';
 import '../../core/interfaces/read_only_issue_detail_screen.dart';
 import 'widget_test_driver.dart';
@@ -46,7 +47,16 @@ Future<ReadOnlyIssueDetailScreenHandle> launchReadOnlyIssueDetailWidgetScreen(
 ) {
   return launchIssueDetailWidgetScreen(
     tester,
-    repository: ReadOnlyTrackStateRepository(),
+    repository: ReactiveIssueDetailTrackStateRepository(
+      permission: const RepositoryPermission(
+        canRead: true,
+        canWrite: false,
+        isAdmin: false,
+        canCreateBranch: false,
+        canManageAttachments: false,
+        canCheckCollaborators: false,
+      ),
+    ),
     tokenValue: 'read-only-token',
   );
 }
@@ -56,7 +66,7 @@ Future<ReadOnlyIssueDetailScreenHandle> launchWritableIssueDetailWidgetScreen(
 ) {
   return launchIssueDetailWidgetScreen(
     tester,
-    repository: WritableTrackStateRepository(),
+    repository: ReactiveIssueDetailTrackStateRepository(),
     tokenValue: 'write-enabled-token',
   );
 }

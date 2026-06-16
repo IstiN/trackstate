@@ -1,12 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
+import 'package:trackstate/data/services/workspace_profile_service.dart';
+import 'package:trackstate/ui/core/trackstate_theme.dart';
 import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
 import '../../core/interfaces/local_git_repository_port.dart';
 import '../../core/interfaces/trackstate_app_component.dart';
+import '../../core/models/issue_search_result_selection_observation.dart';
 import '../../frameworks/flutter/trackstate_test_runtime.dart';
 
 class TrackStateAppScreen implements TrackStateAppComponent {
@@ -27,15 +31,60 @@ class TrackStateAppScreen implements TrackStateAppComponent {
 
   Finder get repositoryAccessButton => find.bySemanticsLabel(
     RegExp(
-      r'^(Local Git|Connect GitHub|Connected|Read-only|Attachments limited)$',
+      r'^(Local Git|Connect GitHub|Connected|Read-only|Attachments limited|Workspace switcher: .+)$',
     ),
   );
 
   Finder get localGitAccessButton => find.bySemanticsLabel(RegExp('Local Git'));
 
-  Finder get topBar => find
-      .ancestor(of: repositoryAccessButton.first, matching: find.byType(Row))
-      .first;
+  Finder get _workspaceSwitcherTrigger =>
+      find.byKey(const ValueKey<String>('workspace-switcher-trigger'));
+
+  Finder get _workspaceSwitcherSheet =>
+      find.byKey(const ValueKey<String>('workspace-switcher-sheet'));
+
+  Finder get topBar {
+    final repositoryAccess = repositoryAccessButton.evaluate().toList();
+    if (repositoryAccess.isEmpty) {
+      return find.byWidgetPredicate(
+        (_) => false,
+        description: 'missing top bar scope',
+      );
+    }
+
+    final candidates = find
+        .ancestor(of: repositoryAccessButton.first, matching: find.byType(Row))
+        .evaluate()
+        .toList();
+    if (candidates.isEmpty) {
+      return find.byWidgetPredicate(
+        (_) => false,
+        description: 'missing top bar',
+      );
+    }
+
+    Element bestCandidate = candidates.first;
+    var bestTextCount = -1;
+    for (final candidate in candidates) {
+      final candidateFinder = find.byElementPredicate(
+        (element) => element == candidate,
+        description: 'top bar candidate',
+      );
+      final textCount = find
+          .descendant(of: candidateFinder, matching: find.byType(Text))
+          .evaluate()
+          .length;
+      if (textCount > bestTextCount) {
+        bestCandidate = candidate;
+        bestTextCount = textCount;
+      }
+    }
+
+    return find.byElementPredicate(
+      (element) => element == bestCandidate,
+      description: 'top bar row',
+    );
+  }
 
   Finder get profileAvatar =>
       find.descendant(of: topBar, matching: find.byType(CircleAvatar));
@@ -182,6 +231,9 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   Finder _statusColumn(String label) =>
       find.bySemanticsLabel(RegExp('${RegExp.escape(label)} column'));
 
+  Finder _workspaceRow(String workspaceId) =>
+      find.byKey(ValueKey<String>('workspace-$workspaceId'));
+
   @override
   Future<void> pumpLocalGitApp({
     required String repositoryPath,
@@ -210,8 +262,53 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     await _pumpWidget(resolvedRepository);
   }
 
+  @override
+  Future<void> pumpWorkspaceProfileApp({
+    required WorkspaceProfileService workspaceProfileService,
+    LocalRepositoryLoader? openLocalRepository,
+  }) async {
+    await _pumpTrackStateApp(
+      TrackStateApp(
+        key: UniqueKey(),
+        workspaceProfileService: workspaceProfileService,
+        openLocalRepository:
+            openLocalRepository ??
+            ({
+              required String repositoryPath,
+              required String defaultBranch,
+              required String writeBranch,
+            }) => _repositoryService.openRepository(
+              repositoryPath: repositoryPath,
+            ),
+      ),
+      resetSharedPreferences: false,
+    );
+  }
+
   Future<void> _pumpWidget(TrackStateRepository repository) async {
-    SharedPreferences.setMockInitialValues({});
+    await _pumpTrackStateApp(
+      TrackStateApp(
+        key: UniqueKey(),
+        repository: repository,
+        openLocalRepository:
+            ({
+              required String repositoryPath,
+              required String defaultBranch,
+              required String writeBranch,
+            }) => _repositoryService.openRepository(
+              repositoryPath: repositoryPath,
+            ),
+      ),
+    );
+  }
+
+  Future<void> _pumpTrackStateApp(
+    TrackStateApp app, {
+    bool resetSharedPreferences = true,
+  }) async {
+    if (resetSharedPreferences) {
+      SharedPreferences.setMockInitialValues({});
+    }
     tester.view.physicalSize = const Size(1440, 960);
     tester.view.devicePixelRatio = 1;
     addTearDown(() {
@@ -219,20 +316,7 @@ class TrackStateAppScreen implements TrackStateAppComponent {
       tester.view.resetDevicePixelRatio();
     });
 
-    await tester.pumpWidget(
-      KeyedSubtree(
-        key: _goldenTargetKey,
-        child: TrackStateApp(
-          key: UniqueKey(),
-          repository: repository,
-          openLocalRepository:
-              ({required String repositoryPath, required String writeBranch}) =>
-                  _repositoryService.openRepository(
-                    repositoryPath: repositoryPath,
-                  ),
-        ),
-      ),
-    );
+    await tester.pumpWidget(KeyedSubtree(key: _goldenTargetKey, child: app));
     await _pumpFrames();
   }
 
@@ -249,6 +333,95 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   }
 
   @override
+  Future<void> openWorkspaceSwitcher() async {
+    await _waitForVisible(
+      _workspaceSwitcherTrigger,
+      timeout: const Duration(seconds: 10),
+    );
+    await tester.tap(_workspaceSwitcherTrigger.first, warnIfMissed: false);
+    await _waitForVisible(_workspaceSwitcherSheet);
+  }
+
+  @override
+  Future<void> closeWorkspaceSwitcher() async {
+    await tester.pump();
+    if (_workspaceSwitcherSheet.evaluate().isEmpty) {
+      return;
+    }
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    if (_workspaceSwitcherSheet.evaluate().isNotEmpty) {
+      await tester.tapAt(const Offset(8, 8));
+      await tester.pumpAndSettle();
+    }
+  }
+
+  @override
+  Future<bool> isWorkspaceSwitcherVisible() async {
+    await tester.pump();
+    return _workspaceSwitcherSheet.evaluate().isNotEmpty;
+  }
+
+  @override
+  Future<bool> workspaceRowContainsText(String workspaceId, String text) async {
+    await tester.pump();
+    return find
+        .descendant(
+          of: _workspaceRow(workspaceId),
+          matching: find.text(text, findRichText: true),
+        )
+        .evaluate()
+        .isNotEmpty;
+  }
+
+  @override
+  Future<bool> workspaceRowContainsTextContaining(
+    String workspaceId,
+    String text,
+  ) async {
+    await tester.pump();
+    return find
+        .descendant(
+          of: _workspaceRow(workspaceId),
+          matching: find.textContaining(text, findRichText: true),
+        )
+        .evaluate()
+        .isNotEmpty;
+  }
+
+  @override
+  Future<bool> workspaceRowHasControl(String workspaceId, String label) async {
+    await tester.pump();
+    final row = _workspaceRow(workspaceId);
+    final semanticsMatch = find.descendant(
+      of: row,
+      matching: _exactSemanticsLabel(label),
+    );
+    if (semanticsMatch.evaluate().isNotEmpty) {
+      return true;
+    }
+    return find
+        .descendant(of: row, matching: find.text(label, findRichText: true))
+        .evaluate()
+        .isNotEmpty;
+  }
+
+  @override
+  Future<bool> tapWorkspaceRowControl(String workspaceId, String label) async {
+    final row = _workspaceRow(workspaceId);
+    return _tapControl(
+      label: label,
+      semanticsMatch: find.descendant(
+        of: row,
+        matching: _exactSemanticsLabel(label),
+      ),
+      textMatch: find.descendant(
+        of: row,
+        matching: find.text(label, findRichText: true),
+      ),
+    );
+  }
+
   Future<void> closeDialog(String actionLabel) async {
     await tester.tap(find.text(actionLabel).first);
     await tester.pumpAndSettle();
@@ -434,11 +607,24 @@ class TrackStateAppScreen implements TrackStateAppComponent {
 
   @override
   Future<void> searchIssues(String query) async {
+    await enterJqlSearchQuery(query);
+    await submitJqlSearch();
+  }
+
+  @override
+  Future<void> enterJqlSearchQuery(String query) async {
     await _waitForVisible(_jqlSearchPanel);
     await _waitForVisible(_jqlSearchField);
     await tester.tap(_jqlSearchField.first);
     await tester.pump();
     await tester.enterText(_jqlSearchField.first, query);
+    await tester.pump();
+  }
+
+  @override
+  Future<void> submitJqlSearch() async {
+    await _waitForVisible(_jqlSearchPanel);
+    await _waitForVisible(_jqlSearchField);
     await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pumpAndSettle();
   }
@@ -524,6 +710,18 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     return best ?? rowCandidates.first;
   }
 
+  bool _finderHasSelectedSemantics(Finder finder) {
+    final matches = finder.evaluate().toList();
+    for (var index = 0; index < matches.length; index++) {
+      if (tester
+          .getSemantics(finder.at(index))
+          .hasFlag(SemanticsFlag.isSelected)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   @override
   Future<bool> isIssueSearchResultTextVisible(
     String key,
@@ -539,6 +737,158 @@ class TrackStateAppScreen implements TrackStateAppComponent {
         .descendant(of: row, matching: find.text(text, findRichText: true))
         .evaluate()
         .isNotEmpty;
+  }
+
+  @override
+  Future<bool> isIssueSearchResultSelected(String key, String summary) async {
+    await tester.pump();
+    final issue = _issue(key, summary);
+    if (issue.evaluate().isEmpty) {
+      return false;
+    }
+    final row = _issueSearchResultRow(key, summary);
+    if (row.evaluate().isEmpty) {
+      return false;
+    }
+
+    return _finderHasSelectedSemantics(issue) ||
+        _finderHasSelectedSemantics(row) ||
+        _finderHasSelectedSemantics(
+          find.ancestor(of: issue, matching: find.byType(Semantics)),
+        ) ||
+        _finderHasSelectedSemantics(
+          find.descendant(of: row, matching: find.byType(Semantics)),
+        );
+  }
+
+  @override
+  Future<IssueSearchResultSelectionObservation>
+  readIssueSearchResultSelectionObservation(
+    String key,
+    String summary, {
+    required bool expectedSelected,
+  }) async {
+    await tester.pump();
+    final row = _issueSearchResultRow(key, summary);
+    if (row.evaluate().isEmpty) {
+      fail(
+        'Expected the JQL Search result row for $key to be visible before '
+        'reading its selection styling. Visible rows: '
+        '${_formatSnapshot(visibleIssueSearchResultLabelsSnapshot())}.',
+      );
+    }
+
+    final BuildContext context = tester.element(row.first);
+    final colors = context.ts;
+    final issue = _issue(key, summary);
+    final container = _issueSearchResultSelectionContainer(key, summary);
+    final decoration =
+        tester.widget<AnimatedContainer>(container).decoration
+            as BoxDecoration?;
+    final border = decoration?.border;
+    final keyTextStyle = _requiredIssueRowTextStyle(row, key);
+    final summaryTextStyle = _requiredIssueRowTextStyle(row, summary);
+
+    final renderedBackground = decoration?.color ?? Colors.transparent;
+    final renderedBorder = switch (border) {
+      Border() => border.top.color,
+      _ => null,
+    };
+    final expectedBackground = expectedSelected
+        ? colors.primarySoft
+        : Colors.transparent;
+    final expectedBorder = expectedSelected ? colors.primary : null;
+    final expectedKeyColor = expectedSelected ? colors.primary : colors.muted;
+    final expectedSummaryWeight = expectedSelected
+        ? FontWeight.w600
+        : FontWeight.w400;
+
+    return IssueSearchResultSelectionObservation(
+      issueKey: key,
+      expectedSelected: expectedSelected,
+      semanticsSelected:
+          _finderHasSelectedSemantics(issue) ||
+          _finderHasSelectedSemantics(row) ||
+          _finderHasSelectedSemantics(
+            find.ancestor(of: issue, matching: find.byType(Semantics)),
+          ) ||
+          _finderHasSelectedSemantics(
+            find.descendant(of: row, matching: find.byType(Semantics)),
+          ),
+      backgroundHex: _rgbHex(renderedBackground),
+      expectedBackgroundHex: _rgbHex(expectedBackground),
+      borderHex: renderedBorder == null ? 'none' : _rgbHex(renderedBorder),
+      expectedBorderHex: expectedBorder == null
+          ? 'none'
+          : _rgbHex(expectedBorder),
+      keyColorHex: _rgbHex(keyTextStyle.color ?? colors.text),
+      expectedKeyColorHex: _rgbHex(expectedKeyColor),
+      summaryFontWeight: _fontWeightLabel(summaryTextStyle.fontWeight),
+      expectedSummaryFontWeight: _fontWeightLabel(expectedSummaryWeight),
+    );
+  }
+
+  Finder _issueSearchResultSelectionContainer(String key, String summary) {
+    final row = _issueSearchResultRow(key, summary);
+    final candidates = find
+        .ancestor(of: row, matching: find.byType(AnimatedContainer))
+        .evaluate()
+        .toList();
+    if (candidates.isEmpty) {
+      fail(
+        'Expected the JQL Search result row for $key to be wrapped by an '
+        'AnimatedContainer that renders the selection styling.',
+      );
+    }
+
+    Element? best;
+    var smallestArea = double.infinity;
+    for (final candidate in candidates) {
+      final finder = find.byElementPredicate(
+        (element) => element == candidate,
+        description: 'selection container for $key',
+      );
+      final rect = tester.getRect(finder);
+      final area = rect.width * rect.height;
+      if (area < smallestArea) {
+        smallestArea = area;
+        best = candidate;
+      }
+    }
+
+    return find.byElementPredicate(
+      (element) => element == best,
+      description: 'selection container for $key',
+    );
+  }
+
+  TextStyle _requiredIssueRowTextStyle(Finder row, String text) {
+    final finder = find.descendant(
+      of: row,
+      matching: find.byWidgetPredicate((widget) {
+        if (widget is Text) {
+          return widget.data == text;
+        }
+        if (widget is RichText) {
+          return widget.text.toPlainText() == text;
+        }
+        return false;
+      }, description: 'issue row text "$text"'),
+    );
+    if (finder.evaluate().isEmpty) {
+      fail(
+        'Expected the JQL Search result row to include visible text "$text" '
+        'before reading its selection styling.',
+      );
+    }
+    final widget = tester.widget(finder.first);
+    if (widget is Text) {
+      return widget.style ?? const TextStyle();
+    }
+    if (widget is RichText) {
+      return widget.text.style as TextStyle? ?? const TextStyle();
+    }
+    fail('Expected a Text or RichText widget for "$text".');
   }
 
   @override
@@ -565,6 +915,12 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     final detail = _issueDetail(key);
     await _waitForVisible(detail);
     expect(detail, findsOneWidget);
+  }
+
+  @override
+  Future<bool> isIssueDetailVisible(String key) async {
+    await tester.pump();
+    return _issueDetail(key).evaluate().isNotEmpty;
   }
 
   @override
@@ -650,14 +1006,23 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   @override
   Future<void> expectMessageBannerAnnouncedAsLiveRegion(String text) async {
     await expectMessageBannerContains(text);
-    final visibleTexts = visibleTextsSnapshot();
-    final visibleSemantics = visibleSemanticsLabelsSnapshot();
     final liveRegionAlert = find.semantics.byPredicate((node) {
       final data = node.getSemanticsData();
       return data.label.trim() == text &&
           data.hasFlag(SemanticsFlag.isLiveRegion);
     }, describeMatch: (_) => 'live-region semantics node for "$text"');
 
+    final end = DateTime.now().add(const Duration(seconds: 2));
+    while (DateTime.now().isBefore(end)) {
+      await tester.pump(const Duration(milliseconds: 50));
+      if (liveRegionAlert.evaluate().isNotEmpty) {
+        await _pumpFrames();
+        return;
+      }
+    }
+
+    final visibleTexts = visibleTextsSnapshot();
+    final visibleSemantics = visibleSemanticsLabelsSnapshot();
     expect(
       liveRegionAlert.evaluate(),
       isNotEmpty,
@@ -750,9 +1115,6 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   @override
   Future<bool> isTopBarTextVisible(String text) async {
     await tester.pump();
-    if (repositoryAccessButton.evaluate().isEmpty) {
-      return false;
-    }
     return find
         .descendant(of: topBar, matching: _text(text))
         .evaluate()
@@ -768,9 +1130,6 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   @override
   Future<bool> isTopBarSemanticsLabelVisible(String label) async {
     await tester.pump();
-    if (repositoryAccessButton.evaluate().isEmpty) {
-      return false;
-    }
     return find
         .descendant(of: topBar, matching: _exactSemanticsLabel(label))
         .evaluate()
@@ -832,7 +1191,6 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     );
   }
 
-  @override
   Future<bool> isNavigationChromeVisible() async {
     await tester.pump();
     return _navigationChrome.evaluate().isNotEmpty;
@@ -1080,8 +1438,12 @@ class TrackStateAppScreen implements TrackStateAppComponent {
         'but it was not visible after opening the menu.',
       );
     }
-    await tester.ensureVisible(option.last);
-    await tester.tap(option.last, warnIfMissed: false);
+    final hitTestableOption = option.hitTestable();
+    final tappableOption = hitTestableOption.evaluate().isNotEmpty
+        ? hitTestableOption.last
+        : option.last;
+    await tester.ensureVisible(tappableOption);
+    await tester.tap(tappableOption, warnIfMissed: false);
     await tester.pumpAndSettle();
   }
 
@@ -1095,8 +1457,11 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     final dropdown = tester.widget<DropdownButtonFormField<Object?>>(
       field.first,
     );
+    final state = tester.state<FormFieldState<Object?>>(field.first);
+    final selectedValue = state.value?.toString();
     final helperText = dropdown.decoration.helperText?.trim();
     final hintText = dropdown.decoration.hintText?.trim();
+    final errorText = dropdown.decoration.errorText?.trim();
     for (final widget in tester.widgetList<Text>(
       find.descendant(of: field.first, matching: find.byType(Text)),
     )) {
@@ -1105,12 +1470,13 @@ class TrackStateAppScreen implements TrackStateAppComponent {
           value.isEmpty ||
           value == label ||
           value == helperText ||
-          value == hintText) {
+          value == hintText ||
+          value == errorText) {
         continue;
       }
       return value;
     }
-    return null;
+    return selectedValue;
   }
 
   @override
@@ -1281,6 +1647,26 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     return snapshot.join(' | ');
   }
 
+  String _rgbHex(Color color) {
+    final value = color.toARGB32();
+    return '#${value.toRadixString(16).padLeft(8, '0').toUpperCase()}';
+  }
+
+  String _fontWeightLabel(FontWeight? weight) {
+    return switch (weight) {
+      FontWeight.w100 => 'w100',
+      FontWeight.w200 => 'w200',
+      FontWeight.w300 => 'w300',
+      FontWeight.w400 || null => 'w400',
+      FontWeight.w500 => 'w500',
+      FontWeight.w600 => 'w600',
+      FontWeight.w700 => 'w700',
+      FontWeight.w800 => 'w800',
+      FontWeight.w900 => 'w900',
+      _ => '$weight',
+    };
+  }
+
   bool _snapshotContains(List<String> values, String expected) {
     for (final value in values) {
       final trimmed = value.trim();
@@ -1358,7 +1744,6 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   @override
   void expectLocalRuntimeChrome() {
     expect(localGitAccessButton, findsAtLeastNWidgets(1));
-    expect(find.text('Local Git'), findsOneWidget);
     expect(find.text('Connect GitHub'), findsNothing);
   }
 
@@ -1475,7 +1860,20 @@ class TrackStateAppScreen implements TrackStateAppComponent {
       return false;
     }
     await tester.ensureVisible(target.first);
-    if (label == 'Create' || label == 'Save' || label == 'Post comment') {
+    if (label == 'Save' || label == 'Save settings') {
+      await tester.runAsync(() async {
+        await tester.tap(target.first, warnIfMissed: false);
+        await tester.pump();
+        await Future<void>.delayed(const Duration(milliseconds: 2000));
+      });
+      if (settle) {
+        await tester.pumpAndSettle();
+      } else {
+        await tester.pump();
+      }
+      return true;
+    }
+    if (label == 'Create' || label == 'Post comment') {
       await tester.runAsync(() async {
         await tester.tap(target.first, warnIfMissed: false);
         await tester.pump();

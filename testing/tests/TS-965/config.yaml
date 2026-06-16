@@ -1,0 +1,43 @@
+test_id: TS-965
+type: ci
+framework: gh-cli
+platform: github-actions
+dependencies:
+  - gh CLI authenticated with push access to IstiN/trackstate and GitHub Actions
+  - Playwright browser automation for GitHub Actions run-page verification
+  - network access to GitHub REST APIs, pull requests, and workflow logs
+runtime_inputs:
+  repository: IstiN/trackstate
+  base_branch: main
+  target_workflow_name: Flutter Required Checks
+  target_workflow_path: .github/workflows/unit-tests.yml
+  probe_path: lib/ts965_alpha_blended_probe.dart
+  probe_render_host_path: lib/main.dart
+  branch_prefix: ts965-alpha-blended-contrast
+  commit_message: "TS-965 probe: verify alpha-blended contrast failure reaches CI"
+  pull_request_title: "TS-965 disposable probe: alpha-blended contrast failure"
+  pull_request_body: "Disposable PR created by TS-965 automation to verify that the live accessibility workflow fails when alpha-blended text drops below WCAG AA after flattening against its background."
+  expected_accessibility_markers:
+    - accessibility
+    - axe-core
+    - contrast
+    - wcag
+  contrast_evidence_markers:
+    - color-contrast
+    - contrast ratio
+    - below 4.5
+    - 4.5:1
+    - meetsGuideline(textContrastGuideline)
+  semantic_evidence_markers:
+    - semantics
+    - label
+  accessibility_job_markers:
+    - Accessibility checks
+    - accessibility
+  poll_interval_seconds: 5
+  run_timeout_seconds: 900
+  pull_request_timeout_seconds: 180
+  ui_timeout_seconds: 60
+notes:
+  - Uses a dedicated disposable probe instead of the shared TS-908 failure probe so the live scenario isolates alpha-blended contrast rather than bundling a semantics defect.
+  - The test independently computes the flattened contrast ratio from the current production theme before asserting that the live CI surface fails.
