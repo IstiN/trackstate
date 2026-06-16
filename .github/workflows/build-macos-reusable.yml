@@ -162,6 +162,38 @@ jobs:
           submodules: true
           token: ${{ secrets.PAT_TOKEN || github.token }}
 
+      - name: Inject incompatible Flutter validation probe
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          probe_dir="$RUNNER_TEMP/ts707-probe/bin"
+          mkdir -p "$probe_dir"
+
+          original_flutter="$(command -v flutter)"
+          if [[ -z "$original_flutter" ]]; then
+            echo "::error::TS-707 probe could not locate the runner's Flutter binary before validation."
+            exit 1
+          fi
+
+          printf '%s\n' "$original_flutter" > "$probe_dir/flutter.real"
+          cat > "$probe_dir/flutter" <<'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+
+          script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+          real_flutter="$(cat "$script_dir/flutter.real")"
+
+          if [[ "${1:-}" == "--version" ]]; then
+            echo "Flutter 3.30.0 • channel stable • https://github.com/flutter/flutter.git"
+            exit 0
+          fi
+
+          exec "$real_flutter" "$@"
+          EOF
+          chmod +x "$probe_dir/flutter"
+          echo "$probe_dir" >> "$GITHUB_PATH"
+
       - name: Verify runner toolchain
         shell: bash
         run: ./tool/check_macos_release_runner.sh
