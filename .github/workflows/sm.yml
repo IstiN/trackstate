@@ -1,11 +1,14 @@
 name: SM Agent
 
-run-name: "SM Agent : ${{ github.event_name == 'schedule' && 'scheduled' || 'manual' }}"
+run-name: "SM Agent : ${{ github.event_name == 'schedule' && 'scheduled' || github.event_name == 'workflow_run' && format('after {0}', github.event.workflow_run.display_title) || 'manual' }}"
 
 on:
   schedule:
     - cron: "*/10 * * * *"
   workflow_dispatch:
+  workflow_run:
+    workflows: ["AI Teammate"]
+    types: [completed]
 
 permissions:
   contents: write
@@ -14,6 +17,12 @@ permissions:
 
 jobs:
   sm-agent:
+    # Filter out cancelled AI Teammate runs (only react to success/failure).
+    # Scheduled and manual triggers always run.
+    if: >-
+      github.event_name != 'workflow_run' ||
+      github.event.workflow_run.conclusion == 'success' ||
+      github.event.workflow_run.conclusion == 'failure'
     runs-on: ubuntu-latest
     concurrency:
       group: sm-agent
@@ -29,7 +38,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: true
-          token: ${{ secrets.PAT_TOKEN }}
+          token: ${{ secrets.PAT_TOKEN || github.token }}
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -37,9 +46,9 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Install DMTools CLI v1.7.180
+      - name: Install DMTools CLI v1.7.211
         run: |
-          curl -fsSL https://raw.githubusercontent.com/epam/dm.ai/v1.7.180/install.sh | bash -s v1.7.180
+          curl -fsSL https://raw.githubusercontent.com/epam/dm.ai/v1.7.211/install.sh | bash -s v1.7.211
 
       - name: Add DMTools to PATH
         run: echo "$HOME/.dmtools/bin" >> "$GITHUB_PATH"

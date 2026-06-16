@@ -1,0 +1,48 @@
+test_id: TS-970
+type: ci
+framework: gh-cli
+platform: github-actions
+dependencies:
+  - gh CLI authenticated with push access to IstiN/trackstate and GitHub Actions
+  - network access to GitHub REST APIs, pull requests, and workflow logs
+runtime_inputs:
+  repository: IstiN/trackstate
+  base_branch: main
+  target_workflow_name: Flutter Required Checks
+  target_workflow_path: .github/workflows/unit-tests.yml
+  probe_path: .github/workflows/unit-tests.yml
+  probe_render_host_path: .github/workflows/unit-tests.yml
+  branch_prefix: ts970-required-checks-contract
+  commit_message: "TS-970 probe: verify Flutter Required Checks fails when accessibility contract validation fails"
+  pull_request_title: "TS-970 disposable probe: verify Flutter Required Checks depends on accessibility contract validation"
+  pull_request_body: "Disposable PR created by TS-970 automation to remove the mandatory `log-validation` step from the accessibility job and verify that the live `Flutter Required Checks` aggregate status fails and blocks merge."
+  expected_accessibility_markers:
+    - Flutter checks
+    - Flutter Required Checks
+    - log-validation
+    - workflow
+  contrast_evidence_markers:
+    - log-validation
+    - missing
+    - contributor-visible
+    - unit-tests.yml
+    - workflow configuration
+  semantic_evidence_markers:
+    - log-validation
+    - Flutter Required Checks
+    - unit-tests.yml
+  accessibility_job_markers:
+    - Flutter checks
+    - flutter-checks
+    - Accessibility checks
+    - accessibility
+  downstream_job_markers:
+    - Deploy preview
+    - deploy-preview
+    - publish
+  poll_interval_seconds: 5
+  run_timeout_seconds: 900
+  pull_request_timeout_seconds: 180
+notes:
+  - Creates a disposable pull request that changes only .github/workflows/unit-tests.yml to remove the log-validation step from the accessibility job.
+  - Expects the live Flutter Required Checks aggregate status to fail because of the accessibility contract violation and keep the PR blocked from merge.

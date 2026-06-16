@@ -89,6 +89,11 @@ class LiveJqlSearchPage:
         query: str,
         expected_count_summaries: tuple[str, ...] | None = None,
     ) -> LiveJqlSearchObservation:
+        if expected_count_summaries is not None:
+            return self.search_with_verified_result_change(
+                query=query,
+                expected_count_summaries=expected_count_summaries,
+            )
         field_selector, field_index = self._submit_query(query)
         self._wait_for_count_summary(expected_count_summaries=expected_count_summaries)
         return self._observe(
@@ -104,16 +109,27 @@ class LiveJqlSearchPage:
         expected_count_summaries: tuple[str, ...] | None = None,
     ) -> LiveJqlSearchObservation:
         self.open()
-        field_selector = self._wait_for_search_field()
+        field_selector, field_index = self._wait_for_search_field()
         self._establish_distinct_pre_submit_state(
             field_selector=field_selector,
+            field_index=field_index,
             expected_count_summaries=expected_count_summaries,
         )
-        self._session.fill(field_selector, query, timeout_ms=30_000)
-        self._session.press(field_selector, "Enter", timeout_ms=30_000)
+        self._replace_query_text(
+            field_selector,
+            query,
+            index=field_index,
+        )
+        self._session.press(
+            field_selector,
+            "Enter",
+            index=field_index,
+            timeout_ms=30_000,
+        )
         return self._wait_for_submitted_result(
             query=query,
             field_selector=field_selector,
+            field_index=field_index,
             expected_count_summaries=expected_count_summaries,
         )
 
@@ -126,22 +142,10 @@ class LiveJqlSearchPage:
     def _submit_query(self, query: str) -> tuple[str, int]:
         self.open()
         field_selector, field_index = self._wait_for_search_field()
-        self._session.focus(
-            field_selector,
-            index=field_index,
-            timeout_ms=30_000,
-        )
-        self._session.fill(
+        self._replace_query_text(
             field_selector,
             query,
             index=field_index,
-            timeout_ms=30_000,
-        )
-        self._session.wait_for_input_value(
-            field_selector,
-            query,
-            index=field_index,
-            timeout_ms=30_000,
         )
         self._session.press(
             field_selector,
@@ -159,6 +163,7 @@ class LiveJqlSearchPage:
         field_index: int,
     ) -> LiveJqlSearchObservation:
         body_text = self.current_body_text()
+        issue_result_labels = self._issue_result_labels()
         return LiveJqlSearchObservation(
             query=query,
             visible_query=self._session.read_value(
@@ -168,8 +173,8 @@ class LiveJqlSearchPage:
             ),
             body_text=body_text,
             count_summary=self._count_summary(body_text),
-            issue_result_count=self._session.count(self._issue_button_selector),
-            issue_result_labels=self._issue_result_labels(),
+            issue_result_count=len(issue_result_labels),
+            issue_result_labels=issue_result_labels,
         )
 
     def _wait_for_search_field(self) -> tuple[str, int]:
@@ -217,6 +222,7 @@ class LiveJqlSearchPage:
         *,
         query: str,
         field_selector: str,
+        field_index: int,
         expected_count_summaries: tuple[str, ...] | None = None,
     ) -> LiveJqlSearchObservation:
         try:
@@ -224,11 +230,12 @@ class LiveJqlSearchPage:
                 """
                 ({
                     fieldSelector,
+                    fieldIndex,
                     issueSelector,
                     submittedQuery,
                     expectedCountSummaries,
                 }) => {
-                    const field = document.querySelector(fieldSelector);
+                    const field = Array.from(document.querySelectorAll(fieldSelector))[fieldIndex] ?? null;
                     if (!field || !("value" in field)) {
                         return null;
                     }
@@ -238,6 +245,9 @@ class LiveJqlSearchPage:
                     const bodyText = document.body?.innerText ?? "";
                     const countMatch = bodyText.match(/\\b(?:No issues|\\d+ issues?)\\b/);
                     const countSummary = countMatch ? countMatch[0] : null;
+                    if (countSummary === null) {
+                        return null;
+                    }
                     const issueLabels = Array.from(document.querySelectorAll(issueSelector))
                         .map((element) => (element.getAttribute("aria-label") ?? "").trim())
                         .filter((label) => label.length > 0);
@@ -257,6 +267,7 @@ class LiveJqlSearchPage:
                 """,
                 arg={
                     "fieldSelector": field_selector,
+                    "fieldIndex": field_index,
                     "issueSelector": self._issue_button_selector,
                     "submittedQuery": query,
                     "expectedCountSummaries": list(expected_count_summaries)
@@ -266,7 +277,11 @@ class LiveJqlSearchPage:
                 timeout_ms=60_000,
             )
         except WebAppTimeoutError as error:
-            latest_observation = self._observe(query=query, field_selector=field_selector)
+            latest_observation = self._observe(
+                query=query,
+                field_selector=field_selector,
+                field_index=field_index,
+            )
             raise AssertionError(
                 "Step 4 failed: the live JQL Search panel never reached a post-submit "
                 "state for the submitted query.\n"
@@ -277,12 +292,17 @@ class LiveJqlSearchPage:
                 f"Latest visible issue labels: {list(latest_observation.issue_labels)}\n"
                 f"Latest body text:\n{latest_observation.body_text}",
             ) from error
-        return self._observe(query=query, field_selector=field_selector)
+        return self._observe(
+            query=query,
+            field_selector=field_selector,
+            field_index=field_index,
+        )
 
     def _establish_distinct_pre_submit_state(
         self,
         *,
         field_selector: str,
+        field_index: int,
         expected_count_summaries: tuple[str, ...] | None,
     ) -> None:
         if expected_count_summaries is None:
@@ -292,8 +312,17 @@ class LiveJqlSearchPage:
             return
 
         sync_query = self._synchronization_query(expected_count_summaries)
-        self._session.fill(field_selector, sync_query, timeout_ms=30_000)
-        self._session.press(field_selector, "Enter", timeout_ms=30_000)
+        self._replace_query_text(
+            field_selector,
+            sync_query,
+            index=field_index,
+        )
+        self._session.press(
+            field_selector,
+            "Enter",
+            index=field_index,
+            timeout_ms=30_000,
+        )
         self._wait_for_non_matching_count_summary(
             excluded_count_summaries=expected_count_summaries,
         )
@@ -335,6 +364,77 @@ class LiveJqlSearchPage:
         if "No issues" in expected_count_summaries:
             return ""
         return "__ts327_sync_no_match__"
+
+    def _replace_query_text(
+        self,
+        field_selector: str,
+        query: str,
+        *,
+        index: int,
+    ) -> None:
+        self._session.click(
+            field_selector,
+            index=index,
+            timeout_ms=30_000,
+        )
+        self._session.fill(
+            field_selector,
+            query,
+            index=index,
+            timeout_ms=30_000,
+        )
+        try:
+            self._session.wait_for_input_value(
+                field_selector,
+                query,
+                index=index,
+                timeout_ms=5_000,
+            )
+            return
+        except WebAppTimeoutError:
+            pass
+
+        for shortcut in ("Meta+A", "Control+A"):
+            self._session.click(
+                field_selector,
+                index=index,
+                timeout_ms=30_000,
+            )
+            self._session.press(
+                field_selector,
+                shortcut,
+                index=index,
+                timeout_ms=30_000,
+            )
+            self._session.press(
+                field_selector,
+                "Backspace",
+                index=index,
+                timeout_ms=30_000,
+            )
+            self._session.fill(
+                field_selector,
+                query,
+                index=index,
+                timeout_ms=30_000,
+            )
+            try:
+                self._session.wait_for_input_value(
+                    field_selector,
+                    query,
+                    index=index,
+                    timeout_ms=5_000,
+                )
+                return
+            except WebAppTimeoutError:
+                continue
+
+        self._session.wait_for_input_value(
+            field_selector,
+            query,
+            index=index,
+            timeout_ms=30_000,
+        )
 
     @staticmethod
     def _count_summary(body_text: str) -> str | None:

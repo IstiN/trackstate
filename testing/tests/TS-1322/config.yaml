@@ -1,0 +1,11 @@
+test_id: TS-1322
+type: web
+framework: playwright
+platform: chrome
+dependencies:
+  - Playwright for Python with Chromium installed
+  - GH_TOKEN or GITHUB_TOKEN with access to IstiN/trackstate-setup
+  - Network access to the hosted TrackState demo and GitHub API
+notes:
+  - Seeds DEMO/DEMO-1/DEMO-2/attachments/design_doc.pdf with known initial bytes before opening the live app.
+  - Replaces that attachment through the Attachments tab and verifies the visible row plus the downloaded file bytes.
