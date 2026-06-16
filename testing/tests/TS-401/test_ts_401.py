@@ -1,0 +1,803 @@
+from __future__ import annotations
+
+import json
+import os
+import re
+import sys
+import traceback
+from datetime import datetime, timezone
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from testing.components.pages.live_jql_search_page import LiveJqlSearchPage
+from testing.components.pages.live_multi_view_refresh_page import (
+    EditControlObservation,
+    LiveMultiViewRefreshPage,
+)
+from testing.components.services.live_setup_repository_service import (
+    LiveHostedIssueFixture,
+    LiveSetupRepositoryService,
+)
+from testing.core.config.live_setup_test_config import load_live_setup_test_config
+from testing.tests.support.live_tracker_app_factory import (
+    create_live_tracker_app_with_stored_token,
+)
+
+TICKET_KEY = "TS-401"
+OUTPUTS_DIR = REPO_ROOT / "outputs"
+SCREENSHOT_PATH = OUTPUTS_DIR / "ts401_failure.png"
+SUCCESS_SCREENSHOT_PATH = OUTPUTS_DIR / "ts401_success.png"
+TARGET_STATUS_LABEL = "Done"
+TARGET_PRIORITY_LABEL = "Highest"
+EXPECTED_BOARD_COLUMN = "Done"
+SETUP_STATUS_LABEL = "In Progress"
+KNOWN_STATUS_LABELS = (
+    TARGET_STATUS_LABEL,
+    "To Do",
+    SETUP_STATUS_LABEL,
+    "In Review",
+)
+KNOWN_PRIORITY_LABELS = (
+    TARGET_PRIORITY_LABEL,
+    "Medium",
+    "High",
+    "Low",
+)
+PREFERRED_ISSUE_KEYS = (
+    "DEMO-3993",
+    "DEMO-3992",
+    "DEMO-3994",
+    "DEMO-3995",
+    "DEMO-3996",
+    "DEMO-3997",
+    "DEMO-5",
+)
+NON_EPIC_ISSUE_TYPES = {"story", "task", "bug", "sub-task", "subtask"}
+MAX_SETUP_TRANSITIONS = 3
+
+
+def main() -> None:
+    OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
+
+    config = load_live_setup_test_config()
+    service = LiveSetupRepositoryService(config=config)
+    token = service.token
+    if not token:
+        raise RuntimeError(
+            "TS-401 requires GH_TOKEN or GITHUB_TOKEN to open the hosted live app.",
+        )
+
+    user = service.fetch_authenticated_user()
+
+    result: dict[str, object] = {
+        "status": "failed",
+        "ticket": TICKET_KEY,
+        "app_url": config.app_url,
+        "repository": service.repository,
+        "repository_ref": service.ref,
+        "expected_status": TARGET_STATUS_LABEL,
+        "expected_priority": TARGET_PRIORITY_LABEL,
+        "steps": [],
+    }
+
+    try:
+        pre_reset_fixture = _reset_live_issue_fixture_for_fresh_edit(
+            service=service,
+            visible_issue_keys=PREFERRED_ISSUE_KEYS,
+        )
+        result["pre_reset_issue_key"] = pre_reset_fixture.key
+        result["pre_reset_issue_path"] = pre_reset_fixture.path
+
+        with create_live_tracker_app_with_stored_token(
+            config,
+            token=token,
+            viewport_width=2200,
+            viewport_height=1100,
+        ) as tracker_page:
+            page = LiveMultiViewRefreshPage(tracker_page)
+            try:
+                runtime = tracker_page.open()
+                result["runtime_state"] = runtime.kind
+                result["runtime_body_text"] = runtime.body_text
+                if runtime.kind != "ready":
+                    raise AssertionError(
+                        "Step 1 failed: the deployed app did not reach the hosted tracker "
+                        "shell before the multi-view edit scenario began.\n"
+                        f"Observed body text:\n{runtime.body_text}",
+                    )
+                _record_step(
+                    result,
+                    step=1,
+                    status="passed",
+                    action="Open the hosted tracker.",
+                    observed=runtime.body_text,
+                )
+
+                page.ensure_connected(
+                    token=token,
+                    repository=service.repository,
+                    user_login=user.login,
+                )
+                page.dismiss_connection_banner()
+                _record_step(
+                    result,
+                    step=2,
+                    status="passed",
+                    action="Confirm the hosted session is connected with GitHub write access.",
+                    observed=page.current_body_text(),
+                )
+
+                visible_board_issues = page.visible_board_issues()
+                result["visible_board_issues"] = [
+                    {
+                        "key": issue.key,
+                        "summary": issue.summary,
+                        "label": issue.label,
+                    }
+                    for issue in visible_board_issues
+                ]
+                try:
+                    issue_fixture = _select_issue_fixture(
+                        service=service,
+                        visible_issue_keys=tuple(issue.key for issue in visible_board_issues),
+                    )
+                except AssertionError as exhausted_error:
+                    result["initial_fixture_selection_error"] = str(exhausted_error)
+                    reset_fixture = _reset_live_issue_fixture_for_fresh_edit(
+                        service=service,
+                        visible_issue_keys=tuple(issue.key for issue in visible_board_issues),
+                    )
+                    result["reset_issue_key"] = reset_fixture.key
+                    result["reset_issue_path"] = reset_fixture.path
+
+                    runtime = tracker_page.open()
+                    result["runtime_state_after_fixture_reset"] = runtime.kind
+                    result["runtime_body_text_after_fixture_reset"] = runtime.body_text
+                    if runtime.kind != "ready":
+                        raise AssertionError(
+                            "Step 1 failed: the deployed app did not reload after TS-401 "
+                            "reset its live fixture.\n"
+                            f"Observed body text:\n{runtime.body_text}",
+                        )
+                    page.ensure_connected(
+                        token=token,
+                        repository=service.repository,
+                        user_login=user.login,
+                    )
+                    page.dismiss_connection_banner()
+                    visible_board_issues = page.visible_board_issues()
+                    result["visible_board_issues_after_fixture_reset"] = [
+                        {
+                            "key": issue.key,
+                            "summary": issue.summary,
+                            "label": issue.label,
+                        }
+                        for issue in visible_board_issues
+                    ]
+                    issue_fixture = _select_issue_fixture(
+                        service=service,
+                        visible_issue_keys=tuple(issue.key for issue in visible_board_issues),
+                    )
+                result["issue_key"] = issue_fixture.key
+                result["issue_summary"] = issue_fixture.summary
+
+                try:
+                    dialog_text = page.open_edit_dialog_from_board_card(
+                        issue_key=issue_fixture.key,
+                        issue_summary=issue_fixture.summary,
+                    )
+                except Exception as board_open_error:
+                    result["board_card_edit_open_error"] = (
+                        f"{type(board_open_error).__name__}: {board_open_error}"
+                    )
+                    try:
+                        page.close_edit_dialog()
+                    except Exception as close_error:
+                        result["board_card_edit_close_error"] = (
+                            f"{type(close_error).__name__}: {close_error}"
+                        )
+                    search_page = LiveJqlSearchPage(tracker_page)
+                    fallback_search = search_page.search(query=issue_fixture.key)
+                    result["board_card_edit_fallback_search"] = {
+                        "query": fallback_search.query,
+                        "visible_query": fallback_search.visible_query,
+                        "count_summary": fallback_search.count_summary,
+                        "issue_result_labels": list(fallback_search.issue_labels),
+                        "body_text": fallback_search.body_text,
+                    }
+                    page.open_issue_from_current_section(
+                        issue_key=issue_fixture.key,
+                        issue_summary=issue_fixture.summary,
+                    )
+                    dialog_text = page.open_edit_dialog_from_current_issue_detail(
+                        issue_key=issue_fixture.key,
+                    )
+                result["edit_dialog_text"] = dialog_text
+                initial_status_control = page.status_control()
+                initial_priority_control = page.priority_control()
+                result["status_control_before_edit"] = _control_payload(
+                    initial_status_control,
+                )
+                result["priority_control_before_edit"] = _control_payload(
+                    initial_priority_control,
+                )
+                _assert_issue_starts_outside_target_state(
+                    issue_key=issue_fixture.key,
+                    initial_status_control=initial_status_control,
+                    initial_priority_control=initial_priority_control,
+                )
+                _record_step(
+                    result,
+                    step=3,
+                    status="passed",
+                    action=(
+                        f"Open the Edit issue surface for the selected Board-visible issue "
+                        f"{issue_fixture.key}."
+                    ),
+                    observed=dialog_text,
+                )
+
+                initial_status = _extract_label(
+                    dialog_text,
+                    labels=KNOWN_STATUS_LABELS,
+                    field_name="current status",
+                )
+                initial_priority = _extract_label(
+                    initial_priority_control.text,
+                    labels=KNOWN_PRIORITY_LABELS,
+                    field_name="priority",
+                )
+                result["initial_status"] = initial_status
+                result["initial_priority"] = initial_priority
+                current_status = initial_status
+                current_priority = initial_priority
+
+                available_status_transitions = _workflow_transitions(
+                    page.available_status_transitions(),
+                )
+                result["available_status_transitions_before_edit"] = list(
+                    available_status_transitions,
+                )
+                setup_transitions = _stage_issue_until_done_is_available(
+                    page=page,
+                    issue_fixture=issue_fixture,
+                    current_priority=current_priority,
+                    initial_status=current_status,
+                    available_status_transitions=available_status_transitions,
+                    result=result,
+                )
+                if setup_transitions:
+                    current_status = setup_transitions[-1]["to_status"]
+                    dialog_text = page.current_body_text()
+                    result["edit_dialog_text_after_setup"] = dialog_text
+                    available_status_transitions = _workflow_transitions(
+                        page.available_status_transitions(),
+                    )
+                    result["available_status_transitions_after_setup"] = list(
+                        available_status_transitions,
+                    )
+
+                updated_priority_control = page.change_priority(TARGET_PRIORITY_LABEL)
+                result["priority_control_after_edit"] = _control_payload(
+                    updated_priority_control,
+                )
+                current_priority = TARGET_PRIORITY_LABEL
+                _record_step(
+                    result,
+                    step=4,
+                    status="passed",
+                    action="Change Priority to Highest in the live Edit issue dialog.",
+                    observed=page.current_body_text(),
+                )
+
+                updated_status_control = page.change_status_transition(
+                    TARGET_STATUS_LABEL,
+                )
+                result["status_control_after_edit"] = _control_payload(
+                    updated_status_control,
+                )
+                current_status = TARGET_STATUS_LABEL
+                _record_step(
+                    result,
+                    step=5,
+                    status="passed",
+                    action="Change Status to Done in the live Edit issue dialog.",
+                    observed=page.current_body_text(),
+                )
+
+                post_save_detail_text = page.save_issue_edits(
+                    issue_key=issue_fixture.key,
+                    expected_status=TARGET_STATUS_LABEL,
+                )
+                result["post_save_detail_text"] = post_save_detail_text
+                _record_step(
+                    result,
+                    step=6,
+                    status="passed",
+                    action="Click Save and wait for the user-visible success banner.",
+                    observed=post_save_detail_text,
+                )
+
+                post_save_failures: list[str] = []
+
+                search_page = LiveJqlSearchPage(tracker_page)
+                post_save_search_observation = search_page.search(query=issue_fixture.key)
+                result["post_save_jql_search_observation"] = {
+                    "query": post_save_search_observation.query,
+                    "visible_query": post_save_search_observation.visible_query,
+                    "count_summary": post_save_search_observation.count_summary,
+                    "issue_result_labels": list(post_save_search_observation.issue_labels),
+                    "body_text": post_save_search_observation.body_text,
+                }
+                if (
+                    post_save_search_observation.count_summary != "1 issue"
+                    or (
+                        f"Open {issue_fixture.key} "
+                        f"{_normalized_issue_summary(issue_fixture.summary)}"
+                    )
+                    not in post_save_search_observation.issue_labels
+                ):
+                    raise AssertionError(
+                        "Step 7 precondition failed: JQL Search did not visibly refresh down "
+                        f"to the edited {issue_fixture.key} issue after saving.\n"
+                        f"Observed count summary: {post_save_search_observation.count_summary}\n"
+                        "Observed result labels: "
+                        f"{list(post_save_search_observation.issue_labels)}\n"
+                        f"Observed JQL Search text:\n{post_save_search_observation.body_text}",
+                    )
+                page.open_issue_from_current_section(
+                    issue_key=issue_fixture.key,
+                    issue_summary=issue_fixture.summary,
+                )
+
+                try:
+                    detail_projection_text = page.wait_for_issue_detail_state(
+                        issue_key=issue_fixture.key,
+                        issue_summary=issue_fixture.summary,
+                        expected_status=TARGET_STATUS_LABEL,
+                        expected_priority=TARGET_PRIORITY_LABEL,
+                        step_number=7,
+                    )
+                except AssertionError as error:
+                    result["detail_projection_error"] = str(error)
+                    _record_step(
+                        result,
+                        step=7,
+                        status="failed",
+                        action="Verify the issue detail refreshes to Done and Highest after save.",
+                        observed=str(error),
+                    )
+                    post_save_failures.append(str(error))
+                else:
+                    result["detail_projection_text"] = detail_projection_text
+                    _record_step(
+                        result,
+                        step=7,
+                        status="passed",
+                        action="Verify the issue detail refreshes to Done and Highest after save.",
+                        observed=detail_projection_text,
+                    )
+
+                try:
+                    board_projection_text = page.wait_for_board_projection(
+                        issue_key=issue_fixture.key,
+                        issue_summary=issue_fixture.summary,
+                        expected_column=EXPECTED_BOARD_COLUMN,
+                        expected_priority=TARGET_PRIORITY_LABEL,
+                    )
+                except AssertionError as error:
+                    result["board_projection_error"] = str(error)
+                    _record_step(
+                        result,
+                        step=8,
+                        status="failed",
+                        action=(
+                            f"Verify Board refreshes {issue_fixture.key} into Done with Highest "
+                            "priority."
+                        ),
+                        observed=str(error),
+                    )
+                    post_save_failures.append(str(error))
+                else:
+                    result["board_projection_text"] = board_projection_text
+                    _record_step(
+                        result,
+                        step=8,
+                        status="passed",
+                        action=(
+                            f"Verify Board refreshes {issue_fixture.key} into Done with Highest "
+                            "priority."
+                        ),
+                        observed=board_projection_text,
+                    )
+
+                try:
+                    hierarchy_projection_text = page.wait_for_hierarchy_projection(
+                        issue_key=issue_fixture.key,
+                        issue_summary=issue_fixture.summary,
+                        expected_status=TARGET_STATUS_LABEL,
+                        expected_priority=TARGET_PRIORITY_LABEL,
+                    )
+                except AssertionError as error:
+                    result["hierarchy_projection_error"] = str(error)
+                    _record_step(
+                        result,
+                        step=9,
+                        status="failed",
+                        action="Verify the visible Hierarchy row refreshes to Done and Highest.",
+                        observed=str(error),
+                    )
+                    post_save_failures.append(str(error))
+                else:
+                    result["hierarchy_projection_text"] = hierarchy_projection_text
+                    _record_step(
+                        result,
+                        step=9,
+                        status="passed",
+                        action="Verify the visible Hierarchy row refreshes to Done and Highest.",
+                        observed=hierarchy_projection_text,
+                    )
+
+                try:
+                    search_observation = search_page.search(query=issue_fixture.key)
+                    result["jql_search_observation"] = {
+                        "query": search_observation.query,
+                        "visible_query": search_observation.visible_query,
+                        "count_summary": search_observation.count_summary,
+                        "issue_result_labels": list(search_observation.issue_labels),
+                        "body_text": search_observation.body_text,
+                    }
+                    if (
+                        search_observation.count_summary != "1 issue"
+                        or (
+                            f"Open {issue_fixture.key} "
+                            f"{_normalized_issue_summary(issue_fixture.summary)}"
+                        )
+                        not in search_observation.issue_labels
+                    ):
+                        raise AssertionError(
+                            "Step 10 failed: JQL Search did not visibly refresh down to the "
+                            f"edited {issue_fixture.key} issue after saving.\n"
+                            f"Observed count summary: {search_observation.count_summary}\n"
+                            f"Observed result labels: {list(search_observation.issue_labels)}\n"
+                            f"Observed JQL Search text:\n{search_observation.body_text}",
+                        )
+                    jql_projection_text = page.wait_for_jql_search_projection(
+                        issue_key=issue_fixture.key,
+                        issue_summary=issue_fixture.summary,
+                        expected_status=TARGET_STATUS_LABEL,
+                        expected_priority=TARGET_PRIORITY_LABEL,
+                        expected_count_summary="1 issue",
+                    )
+                except AssertionError as error:
+                    result["jql_projection_error"] = str(error)
+                    _record_step(
+                        result,
+                        step=10,
+                        status="failed",
+                        action="Verify the visible JQL Search result row refreshes to Done and Highest.",
+                        observed=str(error),
+                    )
+                    post_save_failures.append(str(error))
+                else:
+                    result["jql_projection_text"] = jql_projection_text
+                    _record_step(
+                        result,
+                        step=10,
+                        status="passed",
+                        action="Verify the visible JQL Search result row refreshes to Done and Highest.",
+                        observed=jql_projection_text,
+                    )
+
+                if post_save_failures:
+                    raise AssertionError("\n\n".join(post_save_failures))
+
+                page.screenshot(str(SUCCESS_SCREENSHOT_PATH))
+                result["screenshot"] = str(SUCCESS_SCREENSHOT_PATH)
+            except Exception:
+                page.screenshot(str(SCREENSHOT_PATH))
+                result["screenshot"] = str(SCREENSHOT_PATH)
+                raise
+    except AssertionError as error:
+        result["error"] = str(error)
+        result["traceback"] = traceback.format_exc()
+        _write_result_if_requested(result)
+        print(json.dumps(result, indent=2))
+        raise
+    except Exception as error:
+        result["error"] = f"{type(error).__name__}: {error}"
+        result["traceback"] = traceback.format_exc()
+        _write_result_if_requested(result)
+        print(json.dumps(result, indent=2))
+        raise
+    else:
+        result["status"] = "passed"
+        result["summary"] = (
+            f"Verified the live hosted edit flow for {issue_fixture.key} end-to-end: Priority "
+            "changed to Highest, Status changed to Done, and the refreshed issue "
+            "state was observed from issue detail, Board, Hierarchy, and JQL Search."
+        )
+        _write_result_if_requested(result)
+        print(json.dumps(result, indent=2))
+
+
+def _select_issue_fixture(
+    *,
+    service: LiveSetupRepositoryService,
+    visible_issue_keys: tuple[str, ...],
+) -> LiveHostedIssueFixture:
+    if not visible_issue_keys:
+        raise AssertionError(
+            "Precondition failed: the live Board view did not expose any visible issue cards "
+            "that TS-401 could edit and re-check across Board, Hierarchy, and JQL Search.",
+        )
+    fixtures = [
+        service.fetch_issue_fixture(path)
+        for path in service.list_issue_paths("DEMO")
+    ]
+    visible_issue_key_set = set(visible_issue_keys)
+    candidates = [
+        fixture
+        for fixture in fixtures
+        if fixture.issue_type.lower() in NON_EPIC_ISSUE_TYPES
+        and fixture.status.lower() != "done"
+        and fixture.priority.lower() != "highest"
+        and fixture.key in visible_issue_key_set
+        and (fixture.path.count("/") > 1 or fixture.key == "DEMO-5")
+    ]
+    for issue_key in PREFERRED_ISSUE_KEYS:
+        preferred = next((fixture for fixture in candidates if fixture.key == issue_key), None)
+        if preferred is not None:
+            return preferred
+    if candidates:
+        return candidates[0]
+    raise AssertionError(
+        "Precondition failed: none of the currently visible Board issues exposed a non-epic "
+        "issue that still requires a fresh Highest/Done edit for TS-401.\n"
+        f"Visible Board issue keys: {sorted(visible_issue_key_set)}",
+    )
+
+
+def _reset_live_issue_fixture_for_fresh_edit(
+    *,
+    service: LiveSetupRepositoryService,
+    visible_issue_keys: tuple[str, ...],
+) -> LiveHostedIssueFixture:
+    visible_issue_key_set = set(visible_issue_keys)
+    fixtures = [
+        service.fetch_issue_fixture(path)
+        for path in service.list_issue_paths("DEMO")
+    ]
+    reset_candidates = [
+        fixture
+        for fixture in fixtures
+        if fixture.issue_type.lower() in NON_EPIC_ISSUE_TYPES
+        and fixture.key in visible_issue_key_set
+        and (fixture.path.count("/") > 1 or fixture.key == "DEMO-5")
+    ]
+    target = None
+    for issue_key in PREFERRED_ISSUE_KEYS:
+        target = next((fixture for fixture in reset_candidates if fixture.key == issue_key), None)
+        if target is not None:
+            break
+    if target is None and reset_candidates:
+        target = reset_candidates[0]
+    if target is None:
+        raise AssertionError(
+            "Precondition failed: TS-401 could not find a visible non-epic issue to reset "
+            "for a fresh live edit scenario.\n"
+            f"Visible Board issue keys: {sorted(visible_issue_key_set)}",
+        )
+
+    main_path = f"{target.path}/main.md"
+    main_markdown = service.fetch_repo_text(main_path)
+    reset_markdown = _replace_front_matter_value(
+        _replace_front_matter_value(
+            _replace_front_matter_value(
+                _replace_front_matter_value(
+                    main_markdown,
+                    key="status",
+                    value="in-review",
+                ),
+                key="priority",
+                value="medium",
+            ),
+            key="resolution",
+            value="null",
+        ),
+        key="updated",
+        value=json.dumps(datetime.now(timezone.utc).isoformat(timespec="milliseconds")),
+    )
+    service.write_repo_text(
+        main_path,
+        content=reset_markdown,
+        message=f"TS-401 reset {target.key} live edit fixture",
+    )
+    return service.fetch_issue_fixture(target.path)
+
+
+def _replace_front_matter_value(markdown: str, *, key: str, value: str) -> str:
+    pattern = re.compile(rf"^({re.escape(key)}:\s*).*$", flags=re.MULTILINE)
+    updated, count = pattern.subn(rf"\g<1>{value}", markdown, count=1)
+    if count == 0:
+        raise AssertionError(
+            f"Precondition failed: TS-401 could not reset front matter field {key!r}.",
+        )
+    return updated
+
+
+def _stage_issue_until_done_is_available(
+    *,
+    page: LiveMultiViewRefreshPage,
+    issue_fixture: LiveHostedIssueFixture,
+    current_priority: str,
+    initial_status: str,
+    available_status_transitions: tuple[str, ...],
+    result: dict[str, object],
+) -> list[dict[str, str]]:
+    current_status = initial_status
+    transitions = available_status_transitions
+    setup_transitions: list[dict[str, str]] = []
+
+    while TARGET_STATUS_LABEL not in transitions:
+        if not transitions:
+            raise AssertionError(
+                "Precondition failed: the live Edit issue surface did not expose any visible "
+                f"workflow transition from {current_status}, so TS-401 could not stage "
+                f"{issue_fixture.key} to a state where Done becomes available.\n"
+                f"Observed body text:\n{page.current_body_text()}",
+            )
+        if len(transitions) != 1:
+            raise AssertionError(
+                "Precondition failed: the live workflow exposed multiple setup transitions "
+                f"from {current_status}, but TS-401 has no ticket-backed rule for which path "
+                f"should be taken before the final Done edit.\n"
+                f"Visible transitions: {list(transitions)}\n"
+                f"Observed body text:\n{page.current_body_text()}",
+            )
+        if len(setup_transitions) >= MAX_SETUP_TRANSITIONS:
+            raise AssertionError(
+                "Precondition failed: TS-401 exceeded the allowed number of setup workflow "
+                f"transitions while trying to expose {TARGET_STATUS_LABEL}.\n"
+                f"Completed setup transitions: {setup_transitions}\n"
+                f"Latest visible transitions: {list(transitions)}",
+            )
+
+        setup_target = transitions[0]
+        setup_status_control = page.change_status_transition(setup_target)
+        setup_detail_text = page.save_issue_edits(
+            issue_key=issue_fixture.key,
+            expected_status=setup_target,
+        )
+        setup_transitions.append(
+            {
+                "from_status": current_status,
+                "to_status": setup_target,
+                "status_control_text": setup_status_control.text,
+                "detail_text": setup_detail_text,
+            },
+        )
+        current_status = setup_target
+        result["setup_transitions"] = setup_transitions
+        _record_step(
+            result,
+            step=3,
+            status="passed",
+            action=(
+                f"Use the live workflow to move {issue_fixture.key} from {setup_transitions[-1]['from_status']} "
+                f"to {setup_target} so the final Done transition becomes available."
+            ),
+            observed=setup_detail_text,
+        )
+
+        dialog_text = page.open_edit_dialog_for_issue(
+            issue_key=issue_fixture.key,
+            issue_summary=issue_fixture.summary,
+        )
+        result["latest_setup_dialog_text"] = dialog_text
+        transitions = _workflow_transitions(page.available_status_transitions())
+
+    return setup_transitions
+
+
+def _workflow_transitions(options: tuple[str, ...]) -> tuple[str, ...]:
+    known = set(KNOWN_STATUS_LABELS)
+    return tuple(option for option in options if option in known)
+
+
+def _normalized_issue_summary(issue_summary: str) -> str:
+    stripped = issue_summary.strip()
+    if re.fullmatch(r'"[^"]+"', stripped):
+        return stripped[1:-1]
+    return stripped
+
+
+def _record_step(
+    result: dict[str, object],
+    *,
+    step: int,
+    status: str,
+    action: str,
+    observed: str,
+) -> None:
+    steps = result.setdefault("steps", [])
+    assert isinstance(steps, list)
+    steps.append(
+        {
+            "step": step,
+            "status": status,
+            "action": action,
+            "observed": observed,
+        },
+    )
+
+
+def _control_payload(control: EditControlObservation) -> dict[str, object]:
+    return {
+        "label": control.label,
+        "text": control.text,
+        "tabindex": control.tabindex,
+        "expanded": control.expanded,
+    }
+
+
+def _assert_issue_starts_outside_target_state(
+    *,
+    issue_key: str,
+    initial_status_control: EditControlObservation,
+    initial_priority_control: EditControlObservation,
+) -> None:
+    already_target_fields: list[str] = []
+    if initial_priority_control.contains(TARGET_PRIORITY_LABEL):
+        already_target_fields.append(
+            f"Priority = {TARGET_PRIORITY_LABEL} ({initial_priority_control.text})",
+        )
+    if initial_status_control.contains(TARGET_STATUS_LABEL):
+        already_target_fields.append(
+            f"Status = {TARGET_STATUS_LABEL} ({initial_status_control.text})",
+        )
+    if not already_target_fields:
+        return
+    raise AssertionError(
+        "Step 3 failed: the live edit dialog already opened with "
+        f"{issue_key} in the target state, so TS-401 cannot prove that a fresh edit "
+        "caused the downstream refresh.\n"
+        f"Already-target fields: {', '.join(already_target_fields)}\n"
+        f"Observed initial status label: {initial_status_control.label}\n"
+        f"Observed initial status text: {initial_status_control.text}\n"
+        f"Observed initial priority label: {initial_priority_control.label}\n"
+        f"Observed initial priority text: {initial_priority_control.text}",
+    )
+
+
+def _extract_label(
+    text: str,
+    *,
+    labels: tuple[str, ...],
+    field_name: str,
+) -> str:
+    for label in labels:
+        if label in text:
+            return label
+    raise AssertionError(
+        f"Human-style verification failed: the visible {field_name} could not be "
+        f"identified from the live text.\nObserved text:\n{text}",
+    )
+
+
+def _write_result_if_requested(payload: dict[str, object]) -> None:
+    configured_path = os.environ.get("TS401_RESULT_PATH")
+    result_path = (
+        Path(configured_path)
+        if configured_path
+        else REPO_ROOT / "outputs" / "ts401_result.json"
+    )
+    result_path.parent.mkdir(parents=True, exist_ok=True)
+    result_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+
+
+if __name__ == "__main__":
+    main()

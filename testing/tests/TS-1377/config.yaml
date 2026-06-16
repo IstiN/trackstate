@@ -1,0 +1,17 @@
+test_id: TS-1377
+type: install-script
+framework: unittest
+platform: windows
+dependencies:
+  - PowerShell (pwsh)
+  - Python 3.12+
+  - PyYAML
+notes:
+  - Executes scripts/install/install.ps1 against a local mock GitHub release server in an isolated temporary environment.
+  - Verifies that the -Force switch bypasses the PATH conflict check, extracts trackstate.exe to the managed install directory, updates the user PATH, and exits with code 0.
+  - Regression coverage for bug TS-1375.
+runtime_inputs:
+  install_script_path: scripts/install/install.ps1
+  platform: windows-x64
+  binary_name: trackstate.exe
+  install_dir_relative: trackstate\bin
