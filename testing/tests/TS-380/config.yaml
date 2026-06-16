@@ -1,0 +1,24 @@
+test_id: TS-380
+type: cli
+framework: unittest
+platform: linux
+dependencies:
+  - Dart SDK (dart executable on PATH)
+  - Python 3.12+
+  - PyYAML
+runtime_inputs:
+  dart_bin: dart
+  command: trackstate read fields
+  expected_schema:
+    - id
+    - name
+    - custom
+    - orderable
+    - navigable
+    - searchable
+    - clauseNames
+    - schema
+notes:
+  - Verifies that the TrackState CLI read fields command returns a flat array of field objects with the Jira-standard schema.
+  - The test initializes a temporary TrackState repository and runs the CLI command against it.
+  - Validates JSON structure, field object keys, and schema sub-object keys.
