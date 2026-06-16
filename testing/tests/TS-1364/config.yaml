@@ -1,0 +1,25 @@
+test_id: TS-1364
+type: install-script
+framework: unittest
+platform: linux
+dependencies:
+  - bash
+  - curl
+  - PowerShell (pwsh)
+  - Python 3.12+
+  - PyYAML
+notes:
+  - Verifies that the POSIX, PowerShell, and Command Prompt install scripts support a custom installation directory via --install-dir / -InstallDir.
+  - Functional tests exercise install.sh on Linux and install.ps1 through pwsh; install.cmd is validated by static analysis because cmd.exe is not available on Linux runners.
+  - The production install scripts currently do not implement the custom-path flag, so the test is expected to fail until the feature is added.
+runtime_inputs:
+  install_script_paths:
+    - scripts/install/install.sh
+    - scripts/install/install.ps1
+    - scripts/install/install.cmd
+  platform: linux-x64 / windows-x64
+  binary_names:
+    - trackstate
+    - trackstate.exe
+  custom_install_dir_relative: custom/trackstate-bin
+  default_install_dir_relative: .trackstate/bin
