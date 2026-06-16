@@ -42,6 +42,23 @@ mixin _TrackStateRepositoryMutations {
     Map<String, String?>? blobRevisions,
   });
 
+  /// Returns the revision of an existing attachment stored in the repository
+  /// (i.e. not release-backed), or null when the attachment is release-backed.
+  Future<String?> _existingRepositoryAttachmentRevision({
+    required IssueAttachment existingAttachment,
+    required String attachmentPath,
+    required String writeBranch,
+  }) async {
+    if (existingAttachment.storageBackend ==
+        AttachmentStorageMode.githubReleases) {
+      return null;
+    }
+    return (await _provider.readAttachment(
+      attachmentPath,
+      ref: writeBranch,
+    )).revision;
+  }
+
   Future<TrackStateIssue> createIssue({
     required String summary,
     String description = '',
@@ -391,12 +408,11 @@ mixin _TrackStateRepositoryMutations {
             ref: writeBranch,
             blobPaths: _snapshotBlobPaths,
           )
-        : existingAttachment.storageBackend == AttachmentStorageMode.githubReleases
-            ? null
-            : (await _provider.readAttachment(
-                attachmentPath,
-                ref: writeBranch,
-              )).revision;
+        : await _existingRepositoryAttachmentRevision(
+            existingAttachment: existingAttachment,
+            attachmentPath: attachmentPath,
+            writeBranch: writeBranch,
+          );
     final metadataRevision = await _existingRevision(
       path: attachmentMetadataPath,
       ref: writeBranch,

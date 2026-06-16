@@ -389,6 +389,9 @@ void main() {
       );
       await File('${repo.path}/DEMO/DEMO-1/attachments/design.png')
           .delete(recursive: true);
+      // Remove the default repository-path attachment created by
+      // _createLocalRepository() so the fixture only contains the
+      // release-backed attachment we seed below.
       await _writeFile(
         repo,
         'DEMO/DEMO-1/attachments.json',
