@@ -13,11 +13,17 @@ set -euo pipefail
 REPO="__REPO_PLACEHOLDER__"
 INSTALL_DIR="${HOME}/.trackstate/bin"
 
+FORCE=0
+
 print_usage() {
   cat <<EOF
-Usage: $0 [VERSION]
+Usage: $0 [OPTIONS] [VERSION]
 
 Install or update the TrackState CLI.
+
+Options:
+  --force   Install even when a conflicting trackstate binary is already
+            present on PATH.
 
 Arguments:
   VERSION   Release tag to install (e.g., v1.2.3). Defaults to the latest
@@ -26,6 +32,7 @@ Arguments:
 Examples:
   $0                 # install the latest release
   $0 v1.2.3          # install a pinned release
+  $0 --force         # install even if trackstate is already on PATH
 EOF
 }
 
@@ -44,17 +51,33 @@ while [[ $# -gt 0 ]]; do
       print_usage
       exit 0
       ;;
+    --force)
+      FORCE=1
+      shift
+      ;;
     -*)
       error "Unknown option: $1"
       ;;
     *)
-      break
+      REQUESTED_VERSION="$1"
+      shift
       ;;
   esac
-  shift
 done
 
-REQUESTED_VERSION="${1:-latest}"
+REQUESTED_VERSION="${REQUESTED_VERSION:-latest}"
+
+check_existing_trackstate() {
+  local existing
+  existing="$(command -v trackstate || true)"
+  if [[ -n "$existing" && "$existing" != "${INSTALL_DIR}/trackstate" ]]; then
+    if [[ "$FORCE" -eq 1 ]]; then
+      log "Warning: an existing trackstate binary was found at ${existing}; continuing because --force was passed."
+    else
+      error "A conflicting trackstate binary already exists on PATH at ${existing}. Use --force to override."
+    fi
+  fi
+}
 
 resolve_release_tag() {
   local version="$1"
@@ -124,6 +147,8 @@ sha256_hash() {
       ;;
   esac
 }
+
+check_existing_trackstate
 
 RELEASE_TAG="$(resolve_release_tag "$REQUESTED_VERSION")"
 PLATFORM="$(detect_platform)"

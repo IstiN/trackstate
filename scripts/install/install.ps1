@@ -7,12 +7,16 @@
 #   irm https://github.com/__REPO_PLACEHOLDER__/releases/download/v1.2.3/install.ps1 -OutFile install.ps1
 #   .\install.ps1 -Version v1.2.3
 #
+#   .\install.ps1 -Force          # install even if trackstate.exe is already on PATH
+#
 # The script installs the TrackState CLI into a user-local directory and
 # appends that directory to the user-level PATH when it is not already present.
 # No administrator privileges are required.
 param(
     [Parameter(Position = 0)]
-    [string]$Version = "latest"
+    [string]$Version = "latest",
+
+    [switch]$Force
 )
 
 $ErrorActionPreference = "Stop"
@@ -76,9 +80,24 @@ function Invoke-Download {
     }
 }
 
+$InstallDir = Join-Path $env:LOCALAPPDATA "trackstate\bin"
+
+function Test-ExistingTrackstateConflict {
+    $existing = Get-Command "trackstate.exe" -ErrorAction SilentlyContinue
+    $managedBin = Join-Path $InstallDir "trackstate.exe"
+    if ($existing -and $existing.Source -ne $managedBin) {
+        if ($Force) {
+            Write-Info "Warning: an existing trackstate.exe binary was found at $($existing.Source); continuing because -Force was passed."
+        } else {
+            Write-ErrorAndExit "A conflicting trackstate.exe binary already exists on PATH at $($existing.Source). Use -Force to override."
+        }
+    }
+}
+
+Test-ExistingTrackstateConflict
+
 $releaseTag = Resolve-ReleaseTag -RequestedVersion $Version
 $platform = Get-PlatformSuffix
-$InstallDir = Join-Path $env:LOCALAPPDATA "trackstate\bin"
 $archiveName = "trackstate-cli-$platform-$releaseTag.tar.gz"
 $checksumName = "trackstate-$releaseTag.sha256"
 $downloadBase = "https://github.com/$Repo/releases/download/$releaseTag"
