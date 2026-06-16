@@ -308,19 +308,52 @@ void main() {
       );
     });
 
-    test('publishes a single unified GitHub release', () {
-      expect(
-        workflow,
-        contains('needs: [resolve-version, build-linux, build-windows, build-macos]'),
+    test('publishes Linux and Windows assets independently of macOS availability', () {
+      final publishJob = workflow.substring(
+        workflow.indexOf('publish-release:'),
+        workflow.indexOf('publish-macos-release:'),
       );
-      expect(workflow, contains('actions/download-artifact@v4'));
-      expect(workflow, contains('sha256sum'));
-      expect(workflow, contains(r'trackstate-${release_tag}.sha256'));
-      expect(workflow, contains(r'gh release create "$release_tag"'));
-      expect(workflow, contains(r'gh release upload "$release_tag"'));
-      expect(workflow, contains('--clobber'));
-      expect(workflow, contains('--draft=false'));
-      expect(workflow, contains('--prerelease=false'));
+      expect(
+        publishJob,
+        contains('needs: [resolve-version, build-linux, build-windows]'),
+      );
+      expect(
+        publishJob,
+        isNot(contains('build-macos')),
+      );
+      expect(publishJob, contains(r'CLI_LINUX: ${{ needs.build-linux.outputs.cli_archive }}'));
+      expect(publishJob, contains(r'"build/linux/$CLI_LINUX"'));
+      expect(publishJob, contains(r'gh release upload "$release_tag"'));
+    });
+
+    test('has a separate macOS publish job that opportunistically adds Apple assets', () {
+      final macosPublishJob = workflow.substring(
+        workflow.indexOf('publish-macos-release:'),
+      );
+      expect(
+        macosPublishJob,
+        contains('needs: [resolve-version, build-macos, publish-release]'),
+      );
+      expect(macosPublishJob, contains('actions/download-artifact@v4'));
+      expect(macosPublishJob, contains(r'DESKTOP_MACOS: ${{ needs.build-macos.outputs.desktop_archive }}'));
+      expect(macosPublishJob, contains(r'CLI_MACOS: ${{ needs.build-macos.outputs.cli_archive }}'));
+      expect(macosPublishJob, contains(r'gh release upload "$release_tag"'));
+      expect(macosPublishJob, contains('--clobber'));
+    });
+
+    test('publishes a single GitHub release for Linux and Windows', () {
+      final publishJob = workflow.substring(
+        workflow.indexOf('publish-release:'),
+        workflow.indexOf('publish-macos-release:'),
+      );
+      expect(publishJob, contains('actions/download-artifact@v4'));
+      expect(publishJob, contains('sha256sum'));
+      expect(publishJob, contains(r'trackstate-${release_tag}.sha256'));
+      expect(publishJob, contains(r'gh release create "$release_tag"'));
+      expect(publishJob, contains(r'gh release upload "$release_tag"'));
+      expect(publishJob, contains('--clobber'));
+      expect(publishJob, contains('--draft=false'));
+      expect(publishJob, contains('--prerelease=false'));
     });
 
     test('build jobs use least-privilege permissions', () {
@@ -368,8 +401,15 @@ void main() {
       expect(publishStep, isNot(contains('<<EOF')));
       expect(publishStep, contains(r'echo "## Compiled artifacts"'));
       expect(publishStep, contains(r'echo "| Linux | $DESKTOP_LINUX | $CLI_LINUX |"'));
-      expect(publishStep, contains(r'echo "| macOS | $DESKTOP_MACOS | $CLI_MACOS |"'));
       expect(publishStep, contains(r'echo "| Windows | $DESKTOP_WINDOWS | $CLI_WINDOWS |"'));
+      expect(
+        publishStep,
+        contains('macOS assets are published by a separate job'),
+      );
+      expect(
+        publishStep,
+        isNot(contains(r'echo "| macOS | $DESKTOP_MACOS | $CLI_MACOS |"')),
+      );
     });
 
     test('release notes use bash and --fail for Linux macOS install commands', () {
@@ -482,7 +522,7 @@ void main() {
 
     test('checksum file lists assets without subdirectory prefixes', () {
       final checksumStep = workflow.substring(
-        workflow.indexOf('Generate unified SHA256 checksums'),
+        workflow.indexOf('Generate SHA256 checksums'),
       );
       expect(checksumStep, contains('sha256sum'));
       expect(checksumStep, contains(r'trackstate-${release_tag}.sha256'));
@@ -492,9 +532,10 @@ void main() {
       );
     });
 
-    test('checksum step env-backs archive names', () {
+    test('checksum step env-backs archive names for Linux and Windows', () {
       final checksumStep = workflow.substring(
-        workflow.indexOf('Generate unified SHA256 checksums'),
+        workflow.indexOf('Generate SHA256 checksums'),
+        workflow.indexOf('Prepare install script assets'),
       );
       expect(checksumStep, contains('env:'));
       expect(
@@ -507,14 +548,6 @@ void main() {
       );
       expect(
         checksumStep,
-        contains(r'DESKTOP_MACOS: ${{ needs.build-macos.outputs.desktop_archive }}'),
-      );
-      expect(
-        checksumStep,
-        contains(r'CLI_MACOS: ${{ needs.build-macos.outputs.cli_archive }}'),
-      );
-      expect(
-        checksumStep,
         contains(r'DESKTOP_WINDOWS: ${{ needs.build-windows.outputs.desktop_archive }}'),
       );
       expect(
@@ -523,10 +556,16 @@ void main() {
       );
       expect(checksumStep, contains(r'"linux/$DESKTOP_LINUX"'));
       expect(checksumStep, contains(r'"linux/$CLI_LINUX"'));
-      expect(checksumStep, contains(r'"macos/$DESKTOP_MACOS"'));
-      expect(checksumStep, contains(r'"macos/$CLI_MACOS"'));
       expect(checksumStep, contains(r'"windows/$DESKTOP_WINDOWS"'));
       expect(checksumStep, contains(r'"windows/$CLI_WINDOWS"'));
+      expect(
+        checksumStep,
+        isNot(contains(r'DESKTOP_MACOS')),
+      );
+      expect(
+        checksumStep,
+        isNot(contains(r'CLI_MACOS')),
+      );
       expect(
         checksumStep,
         isNot(
@@ -537,9 +576,31 @@ void main() {
       );
     });
 
+    test('macOS checksum step env-backs archive names and produces an Apple checksum file', () {
+      final macosJob = workflow.substring(
+        workflow.indexOf('publish-macos-release:'),
+      );
+      final checksumStep = macosJob.substring(
+        macosJob.indexOf('Generate macOS SHA256 checksums'),
+      );
+      expect(checksumStep, contains('env:'));
+      expect(
+        checksumStep,
+        contains(r'DESKTOP_MACOS: ${{ needs.build-macos.outputs.desktop_archive }}'),
+      );
+      expect(
+        checksumStep,
+        contains(r'CLI_MACOS: ${{ needs.build-macos.outputs.cli_archive }}'),
+      );
+      expect(checksumStep, contains(r'trackstate-apple-${release_tag}.sha256'));
+      expect(checksumStep, contains(r'"$DESKTOP_MACOS"'));
+      expect(checksumStep, contains(r'"$CLI_MACOS"'));
+    });
+
     test('fails fast when downloaded release artifacts are missing', () {
       final publishJob = workflow.substring(
         workflow.indexOf('publish-release:'),
+        workflow.indexOf('publish-macos-release:'),
       );
       expect(publishJob, contains('actions/download-artifact@v4'));
 
@@ -551,13 +612,17 @@ void main() {
 
       final windowsDownload = publishJob.substring(
         publishJob.indexOf('Download Windows artifacts'),
-        publishJob.indexOf('Download macOS artifacts'),
+        publishJob.indexOf('Generate SHA256 checksums'),
       );
       expect(windowsDownload, contains('if-no-files-found: error'));
 
-      final macosDownload = publishJob.substring(
-        publishJob.indexOf('Download macOS artifacts'),
+      final macosJob = workflow.substring(
+        workflow.indexOf('publish-macos-release:'),
       );
+      final macosDownload = macosJob.substring(
+        macosJob.indexOf('Download macOS artifacts'),
+      );
+      expect(macosDownload, contains('actions/download-artifact@v4'));
       expect(macosDownload, contains('if-no-files-found: error'));
     });
 

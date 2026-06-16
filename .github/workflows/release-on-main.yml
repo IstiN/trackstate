@@ -305,7 +305,7 @@ jobs:
 
   publish-release:
     name: Publish GitHub release
-    needs: [resolve-version, build-linux, build-windows, build-macos]
+    needs: [resolve-version, build-linux, build-windows]
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -336,22 +336,13 @@ jobs:
           path: build/windows
           if-no-files-found: error
 
-      - name: Download macOS artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: ${{ needs.build-macos.outputs.artifact_name }}
-          path: build/macos
-          if-no-files-found: error
-
-      - name: Generate unified SHA256 checksums
+      - name: Generate SHA256 checksums
         shell: bash
         env:
           DESKTOP_LINUX: ${{ needs.build-linux.outputs.desktop_archive }}
           CLI_LINUX: ${{ needs.build-linux.outputs.cli_archive }}
           DESKTOP_WINDOWS: ${{ needs.build-windows.outputs.desktop_archive }}
           CLI_WINDOWS: ${{ needs.build-windows.outputs.cli_archive }}
-          DESKTOP_MACOS: ${{ needs.build-macos.outputs.desktop_archive }}
-          CLI_MACOS: ${{ needs.build-macos.outputs.cli_archive }}
         run: |
           set -euo pipefail
 
@@ -361,8 +352,6 @@ jobs:
             "linux/$CLI_LINUX" \
             "windows/$DESKTOP_WINDOWS" \
             "windows/$CLI_WINDOWS" \
-            "macos/$DESKTOP_MACOS" \
-            "macos/$CLI_MACOS" \
             | awk '{ sub(/^[^\/]+\//, "", $2); print $1 "  " $2 }' \
             > "trackstate-${release_tag}.sha256"
 
@@ -392,8 +381,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           DESKTOP_LINUX: ${{ needs.build-linux.outputs.desktop_archive }}
           CLI_LINUX: ${{ needs.build-linux.outputs.cli_archive }}
-          DESKTOP_MACOS: ${{ needs.build-macos.outputs.desktop_archive }}
-          CLI_MACOS: ${{ needs.build-macos.outputs.cli_archive }}
           DESKTOP_WINDOWS: ${{ needs.build-windows.outputs.desktop_archive }}
           CLI_WINDOWS: ${{ needs.build-windows.outputs.cli_archive }}
           INSTALL_SH: install.sh
@@ -426,7 +413,6 @@ jobs:
             echo "| Platform | Desktop | CLI |"
             echo "|---|---|---|"
             echo "| Linux | $DESKTOP_LINUX | $CLI_LINUX |"
-            echo "| macOS | $DESKTOP_MACOS | $CLI_MACOS |"
             echo "| Windows | $DESKTOP_WINDOWS | $CLI_WINDOWS |"
             echo ""
             echo "Verify downloads with \`trackstate-${release_tag}.sha256\`."
@@ -461,7 +447,7 @@ jobs:
             echo ""
             echo "> **Desktop auth:** These desktop builds authenticate with a GitHub fine-grained PAT or a token from \`gh auth token\`. GitHub App OAuth is supported in the web build only."
             echo ""
-            echo "> **macOS requirement:** The macOS desktop package is built for Apple Silicon (arm64) and requires an Apple Silicon Mac."
+            echo "> **macOS requirement:** The macOS desktop package is built for Apple Silicon (arm64) and requires an Apple Silicon Mac. macOS assets are published by a separate job when the TrackState release runner is available; verify them with \`trackstate-apple-${release_tag}.sha256\`."
             echo ""
             echo "## Launching unsigned desktop packages"
             echo ""
@@ -491,12 +477,78 @@ jobs:
             "build/linux/$CLI_LINUX" \
             "build/windows/$DESKTOP_WINDOWS" \
             "build/windows/$CLI_WINDOWS" \
-            "build/macos/$DESKTOP_MACOS" \
-            "build/macos/$CLI_MACOS" \
             "build/trackstate-${release_tag}.sha256" \
             "build/install/$INSTALL_SH" \
             "build/install/$INSTALL_PS1" \
             "build/install/$INSTALL_CMD" \
+            --clobber
+
+          gh release edit "$release_tag" \
+            --title "TrackState $release_tag" \
+            --target "$release_target_commit" \
+            --draft=false \
+            --prerelease=false
+
+  publish-macos-release:
+    name: Publish macOS release assets
+    needs: [resolve-version, build-macos, publish-release]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      actions: read
+      contents: write
+    env:
+      release_tag: ${{ needs.resolve-version.outputs.release_tag }}
+      release_checkout_ref: ${{ needs.resolve-version.outputs.release_checkout_ref }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ env.release_checkout_ref }}
+          token: ${{ secrets.PAT_TOKEN || github.token }}
+
+      - name: Download macOS artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build-macos.outputs.artifact_name }}
+          path: build/macos
+          if-no-files-found: error
+
+      - name: Generate macOS SHA256 checksums
+        shell: bash
+        env:
+          DESKTOP_MACOS: ${{ needs.build-macos.outputs.desktop_archive }}
+          CLI_MACOS: ${{ needs.build-macos.outputs.cli_archive }}
+        run: |
+          set -euo pipefail
+
+          cd build/macos
+          sha256sum \
+            "$DESKTOP_MACOS" \
+            "$CLI_MACOS" \
+            > "trackstate-apple-${release_tag}.sha256"
+
+      - name: Publish macOS release assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DESKTOP_MACOS: ${{ needs.build-macos.outputs.desktop_archive }}
+          CLI_MACOS: ${{ needs.build-macos.outputs.cli_archive }}
+        run: |
+          set -euo pipefail
+
+          release_target_commit="$(git rev-parse HEAD)"
+
+          if ! gh release view "$release_tag" >/dev/null 2>&1; then
+            echo "::error::Release $release_tag does not exist. The Linux/Windows publish job must run first."
+            exit 1
+          fi
+
+          gh release upload "$release_tag" \
+            "build/macos/$DESKTOP_MACOS" \
+            "build/macos/$CLI_MACOS" \
+            "build/macos/trackstate-apple-${release_tag}.sha256" \
             --clobber
 
           gh release edit "$release_tag" \

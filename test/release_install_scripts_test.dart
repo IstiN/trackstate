@@ -93,5 +93,28 @@ void main() {
       // script does not silently do nothing.
       expect(result.exitCode, isNot(0));
     });
+
+    test('install.sh resolves the unified checksum for Linux and the Apple checksum for macOS', () {
+      final script = File('$repositoryRoot/scripts/install/install.sh');
+      final content = script.readAsStringSync();
+      final checksumCaseStart = content.indexOf(
+        'macOS assets are published by a separate Apple release job',
+      );
+      expect(checksumCaseStart, greaterThan(-1));
+      final checksumCaseBlock = content.substring(checksumCaseStart);
+      expect(checksumCaseBlock, contains(r'case "$PLATFORM" in'));
+      expect(checksumCaseBlock, contains('macos-arm64)'));
+      expect(
+        checksumCaseBlock,
+        contains(r'CHECKSUM_NAME="trackstate-apple-${RELEASE_TAG}.sha256"'),
+      );
+      expect(
+        checksumCaseBlock,
+        contains(r'CHECKSUM_NAME="trackstate-${RELEASE_TAG}.sha256"'),
+      );
+      final macosBranchIndex = checksumCaseBlock.indexOf('macos-arm64)');
+      final defaultBranchIndex = checksumCaseBlock.indexOf('*)');
+      expect(defaultBranchIndex, greaterThan(macosBranchIndex));
+    });
   });
 }
