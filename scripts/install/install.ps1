@@ -37,6 +37,7 @@ function Get-ConflictingTrackStateBinary {
 
     $pathSeparator = [System.IO.Path]::PathSeparator
     $pathDirs = $env:PATH -split [regex]::Escape($pathSeparator)
+    $normalizedInstallDir = [System.IO.Path]::GetFullPath($InstallDir).TrimEnd('\','/').ToLowerInvariant()
 
     foreach ($dir in $pathDirs) {
         if ([string]::IsNullOrWhiteSpace($dir)) {
@@ -44,7 +45,8 @@ function Get-ConflictingTrackStateBinary {
         }
 
         $candidate = Join-Path $dir "trackstate.exe"
-        if ((Test-Path $candidate) -and ($dir -ne $InstallDir)) {
+        $normalizedDir = [System.IO.Path]::GetFullPath($dir).TrimEnd('\','/').ToLowerInvariant()
+        if ((Test-Path $candidate -PathType Leaf) -and ($normalizedDir -ne $normalizedInstallDir)) {
             return $candidate
         }
     }
@@ -108,9 +110,7 @@ $downloadBase = "https://github.com/$Repo/releases/download/$releaseTag"
 if (-not $Force) {
     $conflictingBinary = Get-ConflictingTrackStateBinary -InstallDir $InstallDir
     if ($conflictingBinary) {
-        Write-Host "WARNING: A conflicting trackstate.exe already exists on PATH: $conflictingBinary" -ForegroundColor Yellow
-        Write-Host "Use -Force to override this conflict and continue installation." -ForegroundColor Yellow
-        exit 1
+        Write-ErrorAndExit "A conflicting trackstate.exe already exists on PATH: $conflictingBinary. Use -Force to override this conflict and continue installation."
     }
 }
 
