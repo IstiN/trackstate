@@ -52,7 +52,14 @@ THIRD_WORKSPACE_DISPLAY_NAME = "Hosted third workspace"
 SECOND_WORKSPACE_WRITE_BRANCH = "ts-1007-alt"
 THIRD_WORKSPACE_WRITE_BRANCH = "ts-1007-third"
 LAST_INTERNAL_CONTROL_LABEL = "Save and switch"
-LINKED_BUGS = ["TS-997"]
+LINKED_BUGS = [
+    "TS-997",
+    "TS-999",
+    "TS-1009",
+    "TS-1150",
+    "TS-1155",
+    "TS-1210",
+]
 
 PRECONDITIONS = [
     "The TrackState application is opened.",
@@ -193,9 +200,7 @@ def main() -> None:
                         f"Opened {config.app_url} in Chromium at "
                         f"{DESKTOP_VIEWPORT['width']}x{DESKTOP_VIEWPORT['height']}; "
                         f"first_internal_target={_first_internal_label(initial_state)!r}; "
-                        f"footer_label={_button_state_from_state(initial_state).get('label')!r}; "
-                        f"footer_disabled={_button_state_from_state(initial_state).get('disabled')}; "
-                        f"footer_aria_disabled={_button_state_from_state(initial_state).get('aria_disabled')!r}."
+                        f"footer={_button_state_summary(_button_state_from_state(initial_state))}."
                     ),
                 )
                 _record_human_verification(
@@ -205,8 +210,8 @@ def main() -> None:
                         "confirmed the footer still showed Save and switch before any edits."
                     ),
                     observed=(
-                        f"visible_panel_labels={_interactive_label_summary(initial_state)!r}; "
-                        f"footer_state={json.dumps(_button_state_from_state(initial_state), ensure_ascii=True)}"
+                        f"visible_panel_labels={_label_list_summary(_interactive_label_summary(initial_state))}; "
+                        f"footer={_button_state_summary(_button_state_from_state(initial_state))}"
                     ),
                 )
 
@@ -249,7 +254,7 @@ def main() -> None:
                         f"actual_focus={_active_label_for_summary(after_shift_tab_state)!r}; "
                         f"focus_within_switcher={_focus_from_state(after_shift_tab_state).get('active_within_switcher')}; "
                         f"focus_on_trigger={_focus_from_state(after_shift_tab_state).get('active_on_trigger')}; "
-                        f"footer_state={json.dumps(_button_state_from_state(after_shift_tab_state), ensure_ascii=True)}"
+                        f"footer={_button_state_summary(_button_state_from_state(after_shift_tab_state))}"
                     ),
                 )
                 _assert_reverse_wrap_to_disabled_footer(after_shift_tab_state)
@@ -261,8 +266,7 @@ def main() -> None:
                     observed=(
                         f"Shift+Tab started from {_before_label_for_summary(after_shift_tab_state)!r} "
                         f"and moved focus to {_active_label_for_summary(after_shift_tab_state)!r}; "
-                        f"footer_disabled={_button_state_from_state(after_shift_tab_state).get('disabled')}; "
-                        f"footer_aria_disabled={_button_state_from_state(after_shift_tab_state).get('aria_disabled')!r}; "
+                        f"footer={_button_state_summary(_button_state_from_state(after_shift_tab_state))}; "
                         f"panel_hidden_during_key={_monitor_from_state(after_shift_tab_state).get('ever_hidden_after_visible')}."
                     ),
                 )
@@ -330,11 +334,11 @@ def _open_switcher_and_capture(page: LiveWorkspaceSwitcherPage) -> dict[str, obj
         LAST_INTERNAL_CONTROL_LABEL,
         timeout_ms=FOCUS_TIMEOUT_MS,
     )
-    first_row = _selected_saved_workspace(rows)
+    first_row, first_row_source = _resolve_primary_saved_workspace_row(rows)
     if first_row is None:
         raise AssertionError(
-            "Step 1 failed: the open workspace switcher did not expose a selected saved "
-            "workspace row in pristine state.\n"
+            "Step 1 failed: the open workspace switcher did not expose the expected "
+            "saved workspace row needed to establish the pristine TS-1007 precondition.\n"
             f"Observed rows: {json.dumps(_saved_workspace_rows_payload(rows), indent=2)}",
         )
     first_row_label = _saved_workspace_row_focus_label(first_row)
@@ -357,6 +361,7 @@ def _open_switcher_and_capture(page: LiveWorkspaceSwitcherPage) -> dict[str, obj
         "internal_tab_stops": _tab_stops_payload(internal_tab_stops),
         "first_row_display_name": first_row.display_name,
         "first_row_label": first_row_label,
+        "first_row_source": first_row_source,
         "first_internal_target": _resolve_first_internal_focus_target(
             active=active,
             focus=focus,
@@ -575,7 +580,7 @@ def _assert_initial_state(state: dict[str, object]) -> None:
 
     if FIRST_WORKSPACE_DISPLAY_NAME not in str(state.get("first_row_display_name")):
         failures.append(
-            f"the selected saved workspace row was {state.get('first_row_display_name')!r} "
+            f"the primary saved workspace row was {state.get('first_row_display_name')!r} "
             f"instead of {FIRST_WORKSPACE_DISPLAY_NAME!r}",
         )
     if "Workspace switcher" not in str(switcher.get("switcher_text", "")):
@@ -817,6 +822,24 @@ def _selected_saved_workspace(
     return next((row for row in rows if row.selected), None)
 
 
+def _resolve_primary_saved_workspace_row(
+    rows: tuple[WorkspaceSwitcherSavedWorkspaceRowObservation, ...],
+) -> tuple[WorkspaceSwitcherSavedWorkspaceRowObservation | None, str]:
+    selected_row = _selected_saved_workspace(rows)
+    if selected_row is not None:
+        return selected_row, "selected-row"
+
+    named_row = next(
+        (row for row in rows if row.display_name == FIRST_WORKSPACE_DISPLAY_NAME),
+        None,
+    )
+    if named_row is not None:
+        return named_row, "display-name-fallback"
+
+    if rows:
+        return rows[0], "first-visible-row"
+
+    return None, "missing-row"
 def _saved_workspace_row_focus_label(
     row: WorkspaceSwitcherSavedWorkspaceRowObservation,
 ) -> str:
@@ -1258,6 +1281,36 @@ def _button_reports_disabled(button_state: dict[str, object]) -> bool:
     return button_state.get("aria_disabled") == "true" or bool(button_state.get("disabled"))
 
 
+def _button_disabled_state_text(button_state: dict[str, object]) -> str:
+    if bool(button_state.get("disabled")):
+        return "disabled"
+    if button_state.get("aria_disabled") == "true":
+        return "disabled via aria-disabled"
+    return "enabled"
+
+
+def _button_state_summary(button_state: dict[str, object]) -> str:
+    return (
+        f"label={button_state.get('label')!r}; "
+        f"state={_button_disabled_state_text(button_state)}; "
+        f"keyboard_focusable={button_state.get('keyboard_focusable')}; "
+        f"active_within={button_state.get('active_within')}"
+    )
+
+
+def _label_list_summary(labels: list[str], *, limit: int = 8) -> str:
+    if not labels:
+        return "[]"
+    visible = labels[:limit]
+    suffix = "" if len(labels) <= limit else f", ... (+{len(labels) - limit} more)"
+    return "[" + ", ".join(repr(label) for label in visible) + suffix + "]"
+
+
+def _clip_text(value: object, *, limit: int) -> str:
+    text = str(value)
+    if len(text) <= limit:
+        return text
+    return text[: limit - 3] + "..."
 def _capture_failure_screenshot(
     page: LiveWorkspaceSwitcherPage | None,
     result: dict[str, object],
@@ -1336,12 +1389,18 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
         f"*Run command:* {{code}}{RUN_COMMAND}{{code}}",
         "",
         "h4. What automation checked",
-        f"# {AUTOMATION_STEPS[0]} - *{_step_status(result, 1).upper()}*: {_step_observation(result, 1)}",
-        f"# {AUTOMATION_STEPS[1]} - *{_step_status(result, 2).upper()}*: {_step_observation(result, 2)}",
+        (
+            f"# {AUTOMATION_STEPS[0]} - *{_step_status(result, 1).upper()}*: "
+            f"{_clip_text(_step_observation(result, 1), limit=1200)}"
+        ),
+        (
+            f"# {AUTOMATION_STEPS[1]} - *{_step_status(result, 2).upper()}*: "
+            f"{_clip_text(_step_observation(result, 2), limit=1200)}"
+        ),
         "",
         "h4. Human-style verification",
         *[
-            f"# {item['check']} - {item['observed']}"
+            f"# {item['check']} - {_clip_text(item['observed'], limit=1200)}"
             for item in _human_verification(result)
         ],
         "",
@@ -1357,11 +1416,11 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
                 "",
                 "h4. Failure details",
                 f"*Failed step:* {_failed_step_label(result)}",
-                f"*Error:* {{code}}{result.get('error')}{{code}}",
+                f"*Error:* {{code}}{_clip_text(result.get('error'), limit=2000)}{{code}}",
                 "",
                 "h4. Exact error",
                 "{code}",
-                str(result.get("traceback", result.get("error", ""))),
+                _clip_text(result.get("traceback", result.get("error", "")), limit=4000),
                 "{code}",
             ],
         )
@@ -1386,12 +1445,18 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
         f"**Run command:** `{RUN_COMMAND}`",
         "",
         "## What automation checked",
-        f"1. {AUTOMATION_STEPS[0]} - **{_step_status(result, 1).upper()}**: {_step_observation(result, 1)}",
-        f"2. {AUTOMATION_STEPS[1]} - **{_step_status(result, 2).upper()}**: {_step_observation(result, 2)}",
+        (
+            f"1. {AUTOMATION_STEPS[0]} - **{_step_status(result, 1).upper()}**: "
+            f"{_clip_text(_step_observation(result, 1), limit=1200)}"
+        ),
+        (
+            f"2. {AUTOMATION_STEPS[1]} - **{_step_status(result, 2).upper()}**: "
+            f"{_clip_text(_step_observation(result, 2), limit=1200)}"
+        ),
         "",
         "## Human-style verification",
         *[
-            f"1. {item['check']} - {item['observed']}"
+            f"1. {item['check']} - {_clip_text(item['observed'], limit=1200)}"
             for item in _human_verification(result)
         ],
         "",
@@ -1407,7 +1472,7 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
                 "",
                 "## Failure details",
                 f"- **Failed step:** {_failed_step_label(result)}",
-                f"- **Error:** `{result.get('error')}`",
+                f"- **Error:** `{_clip_text(result.get('error'), limit=2000)}`",
                 (
                     f"- **Screenshot:** `{result.get('screenshot')}`"
                     if result.get("screenshot")
@@ -1416,7 +1481,7 @@ def _markdown_summary(result: dict[str, object], *, passed: bool) -> str:
                 "",
                 "## Exact error",
                 "```text",
-                str(result.get("traceback", result.get("error", ""))),
+                _clip_text(result.get("traceback", result.get("error", "")), limit=4000),
                 "```",
             ],
         )
@@ -1474,15 +1539,14 @@ def _actual_vs_expected_summary(result: dict[str, object]) -> str:
         return (
             f"Shift+Tab wrapped focus from the first internal panel target to {expected!r}, "
             "the workspace switcher stayed open, and the focused footer control still "
-            f"reported disabled={button_state.get('disabled')} and "
-            f"aria-disabled={button_state.get('aria_disabled')!r}."
+            f"reported {_button_disabled_state_text(button_state)}."
         )
     return (
         f"Shift+Tab should have wrapped focus to the disabled footer control {expected!r}, "
         f"but the live app moved focus to {actual!r}. "
         f"focus_within_switcher={focus.get('active_within_switcher')}, "
         f"focus_on_trigger={focus.get('active_on_trigger')}, "
-        f"footer_state={json.dumps(button_state, ensure_ascii=True)}."
+        f"footer={_button_state_summary(button_state)}."
     )
 
 
@@ -1645,7 +1709,7 @@ def _annotated_request_steps(result: dict[str, object]) -> str:
                 + (
                     f"Expected focus: {_expected_target_label(after_state)!r}; actual focus: "
                     f"{_active_label_for_summary(after_state)!r}; footer state: "
-                    f"{json.dumps(_button_state_from_state(after_state), ensure_ascii=True)}"
+                    f"{_button_state_summary(_button_state_from_state(after_state))}"
                     if isinstance(after_state, dict)
                     else "Not reached because the precondition failed before the Shift+Tab step."
                 )

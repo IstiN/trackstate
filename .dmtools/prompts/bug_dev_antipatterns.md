@@ -60,7 +60,19 @@ git log --oneline --all -- 'lib/ui/features/tracker/services/browser_workspace*'
 
 Check what was already tried. Don't repeat the same approach the reviewer already rejected.
 
-## 7. NEVER add unrelated changes to a bug fix PR
+## 7. NEVER write bug-fix tests under `testing/`
+
+```mermaid
+flowchart TD
+  Fix([Bug fix TDD]) --> Loc{Where is the
+failing test?}
+  Loc -->|testing/tests/...| BAD["❌ BLOCKING\n`testing/` is owned by test-automation agents.\nMove the test to `test/` (Flutter/Dart unit/widget)."]
+  Loc -->|test/| GOOD([✅ Correct unit-test tree])
+```
+
+**Rule**: Bug development TDD tests belong in the project's standard unit-test tree (`test/` for Flutter/Dart). Regression / workflow-observation / accessibility tests under `testing/` are updated only by test-automation agents.
+
+## 8. NEVER add unrelated changes to a bug fix PR
 
 ```mermaid
 flowchart TD
@@ -71,7 +83,7 @@ flowchart TD
 
 **Rule**: If the ticket is about accessibility-gate logging, do NOT also refactor locale settings UI. One ticket = one concern. Unrelated changes get instant BLOCKING rejection.
 
-## 8. Assertions must be specific, not regex-broad
+## 9. Assertions must be specific, not regex-broad
 
 ```python
 # ❌ WRONG — matches ANY message with generic words
@@ -84,7 +96,7 @@ assert 'workspace directory mismatch' in message or \
 
 **Rule**: Generic word-matching passes on unrelated failures. Use exact expected error variants from the ticket description.
 
-## 9. Test seed state must match ticket precondition EXACTLY
+## 10. Test seed state must match ticket precondition EXACTLY
 
 If the ticket says "workspace is Local Unavailable":
 - ❌ Seeding a healthy hosted workspace (test passes without exercising the fail path)

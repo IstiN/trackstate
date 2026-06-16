@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import base64
 import json
 import platform
+import shutil
 import subprocess
 import sys
 import traceback
@@ -15,10 +17,14 @@ from testing.components.pages.live_workspace_switcher_page import (  # noqa: E40
     LiveWorkspaceSwitcherPage,
     WorkspaceSwitcherObservation,
     WorkspaceSwitcherRowObservation,
+    WorkspaceSwitcherSavedWorkspaceRowObservation,
     WorkspaceSwitcherTriggerObservation,
 )
 from testing.components.pages.live_project_settings_page import (  # noqa: E402
     LiveProjectSettingsPage,
+)
+from testing.components.pages.trackstate_tracker_page import (  # noqa: E402
+    TrackStateTrackerPage,
 )
 from testing.components.services.live_setup_repository_service import (  # noqa: E402
     LiveSetupRepositoryService,
@@ -26,8 +32,11 @@ from testing.components.services.live_setup_repository_service import (  # noqa:
 from testing.core.config.live_setup_test_config import load_live_setup_test_config  # noqa: E402
 from testing.core.utils.polling import poll_until  # noqa: E402
 from testing.tests.support.live_tracker_app_factory import create_live_tracker_app  # noqa: E402
-from testing.tests.support.stored_workspace_profiles_runtime import (  # noqa: E402
-    StoredWorkspaceProfilesRuntime,
+from testing.tests.support.ts980_restore_persistence_runtime import (  # noqa: E402
+    Ts980RestorePersistenceRuntime,
+    install_restorable_directory_picker,
+    read_manual_reauth_probe,
+    read_restorable_directory_picker_state,
 )
 
 TICKET_KEY = "TS-808"
@@ -92,6 +101,9 @@ def main() -> None:
         "desktop_viewport": DESKTOP_VIEWPORT,
         "user_login": user.login,
         "preloaded_workspace_state": workspace_state,
+        "workspace_token_profile_ids": list(
+            _workspace_token_profile_ids(workspace_state),
+        ),
         "prepared_local_workspace": prepared_local_workspace,
         "trigger_wait_seconds": TRIGGER_WAIT_SECONDS,
         "steps": [],
@@ -99,14 +111,17 @@ def main() -> None:
     }
 
     page: LiveWorkspaceSwitcherPage | None = None
+    runtime_context: Ts980RestorePersistenceRuntime | None = None
     try:
+        runtime_context = Ts980RestorePersistenceRuntime(
+            repository=config.repository,
+            token=token,
+            workspace_state=workspace_state,
+            workspace_token_profile_ids=_workspace_token_profile_ids(workspace_state),
+        )
         with create_live_tracker_app(
             config,
-            runtime_factory=lambda: StoredWorkspaceProfilesRuntime(
-                repository=config.repository,
-                token=token,
-                workspace_state=workspace_state,
-            ),
+            runtime_factory=lambda: runtime_context,
         ) as tracker_page:
             page = LiveWorkspaceSwitcherPage(tracker_page)
             try:
@@ -142,6 +157,7 @@ def main() -> None:
                 try:
                     trigger = _ensure_active_local_precondition(
                         page=page,
+                        tracker_page=tracker_page,
                         settings_page=settings_page,
                         token=token,
                         repository=service.repository,
@@ -187,6 +203,12 @@ def main() -> None:
                 )
 
                 switcher = page.open_and_observe()
+                switcher = _ensure_active_local_row_observable(
+                    page=page,
+                    switcher=switcher,
+                    trigger=trigger,
+                    result=result,
+                )
                 result["switcher_observation"] = _switcher_payload(switcher)
                 _record_step(
                     result,
@@ -296,6 +318,11 @@ def main() -> None:
         result["traceback"] = traceback.format_exc()
         _write_failure_outputs(result)
         raise
+    finally:
+        if runtime_context is not None:
+            result["console_events"] = list(runtime_context.console_events)
+            result["page_errors"] = list(runtime_context.page_errors)
+        _remove_local_workspace_repository()
 
     _write_pass_outputs(result)
     print(f"{TICKET_KEY} passed")
@@ -332,6 +359,19 @@ def _workspace_state(repository: str) -> dict[str, object]:
     }
 
 
+def _workspace_token_profile_ids(workspace_state: dict[str, object]) -> tuple[str, ...]:
+    raw_profiles = workspace_state.get("profiles", [])
+    if not isinstance(raw_profiles, list):
+        return ()
+    return tuple(
+        workspace_id
+        for profile in raw_profiles
+        if isinstance(profile, dict)
+        for workspace_id in [str(profile.get("id", "")).strip()]
+        if workspace_id
+    )
+
+
 def _prepare_local_workspace_repository() -> dict[str, object]:
     local_path = Path(LOCAL_TARGET)
     local_path.mkdir(parents=True, exist_ok=True)
@@ -351,8 +391,15 @@ def _prepare_local_workspace_repository() -> dict[str, object]:
         encoding="utf-8",
     )
 
+    seeded_paths = [marker_path.name]
+    for relative_path, content in _restorable_workspace_fixture_files().items():
+        destination = local_path / relative_path
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(content, encoding="utf-8")
+        seeded_paths.append(relative_path)
+
     subprocess.run(
-        ["git", "-C", str(local_path), "add", marker_path.name],
+        ["git", "-C", str(local_path), "add", "."],
         check=True,
         capture_output=True,
         text=True,
@@ -414,12 +461,118 @@ def _prepare_local_workspace_repository() -> dict[str, object]:
         "head": head.stdout.strip(),
         "status": status.stdout.strip(),
         "marker_path": str(marker_path),
+        "seeded_paths": seeded_paths,
+    }
+
+
+def _restorable_workspace_fixture_files() -> dict[str, str]:
+    return {
+        "project.json": json.dumps(
+            {
+                "key": "DEMO",
+                "name": "TS-808 Demo",
+                "repository": "local/ts-808-demo",
+                "branch": DEFAULT_BRANCH,
+                "defaultLocale": "en",
+                "supportedLocales": ["en"],
+            },
+        )
+        + "\n",
+        "DEMO/config/statuses.json": json.dumps(
+            [
+                {"id": "todo", "name": "To Do", "category": "new"},
+                {
+                    "id": "in-progress",
+                    "name": "In Progress",
+                    "category": "indeterminate",
+                },
+                {"id": "done", "name": "Done", "category": "done"},
+            ],
+        )
+        + "\n",
+        "DEMO/config/workflows.json": json.dumps(
+            {
+                "default": {
+                    "name": "Default Workflow",
+                    "statuses": ["todo", "in-progress", "done"],
+                    "transitions": [
+                        {
+                            "id": "start-progress",
+                            "name": "Start progress",
+                            "from": "todo",
+                            "to": "in-progress",
+                        },
+                        {
+                            "id": "finish-work",
+                            "name": "Finish work",
+                            "from": "in-progress",
+                            "to": "done",
+                        },
+                    ],
+                },
+            },
+        )
+        + "\n",
+        "DEMO/config/issue-types.json": json.dumps(
+            [
+                {
+                    "id": "story",
+                    "name": "Story",
+                    "workflowId": "default",
+                    "hierarchyLevel": 0,
+                },
+            ],
+        )
+        + "\n",
+        "DEMO/config/fields.json": json.dumps(
+            [
+                {"id": "summary", "name": "Summary", "type": "string", "required": True},
+                {
+                    "id": "description",
+                    "name": "Description",
+                    "type": "markdown",
+                    "required": False,
+                },
+                {
+                    "id": "priority",
+                    "name": "Priority",
+                    "type": "option",
+                    "required": False,
+                    "options": [
+                        {"id": "high", "name": "High"},
+                        {"id": "medium", "name": "Medium"},
+                    ],
+                },
+            ],
+        )
+        + "\n",
+        "DEMO/DEMO-1/main.md": "\n".join(
+            [
+                "---",
+                "key: DEMO-1",
+                "project: DEMO",
+                "issueType: story",
+                "status: in-progress",
+                "priority: high",
+                "summary: TS-808 seeded local workspace issue",
+                "assignee: ts808-user",
+                "reporter: ts808-user",
+                "updated: 2026-05-27T00:00:00Z",
+                "---",
+                "",
+                "# Description",
+                "",
+                "Seeded local workspace content for TS-808 signed-in startup validation.",
+                "",
+            ],
+        ),
     }
 
 
 def _ensure_active_local_precondition(
     *,
     page: LiveWorkspaceSwitcherPage,
+    tracker_page,
     settings_page: LiveProjectSettingsPage,
     token: str,
     repository: str,
@@ -428,8 +581,25 @@ def _ensure_active_local_precondition(
     result: dict[str, object],
 ) -> WorkspaceSwitcherTriggerObservation:
     trigger = initial_trigger
-    current_body_text = page.current_body_text()
-    if "Connect GitHub" in current_body_text:
+    startup_ready, startup_observation = _wait_for_signed_in_active_local_precondition(
+        page=page,
+        user_login=user_login,
+        repository=repository,
+        timeout_seconds=TRIGGER_WAIT_SECONDS,
+    )
+    result["precondition_startup_observation"] = startup_observation
+    result["precondition_restored_within_wait"] = startup_ready
+    trigger = _trigger_from_precondition_observation(startup_observation, fallback=trigger)
+    result["precondition_trigger_after_wait"] = _trigger_payload(trigger)
+    if startup_ready:
+        return trigger
+
+    current_body_text = str(startup_observation.get("body_text", page.current_body_text()))
+    if _session_requires_connect(
+        body_text=current_body_text,
+        user_login=user_login,
+        repository=repository,
+    ):
         connection_body_text = settings_page.ensure_connected(
             token=token,
             repository=repository,
@@ -437,23 +607,26 @@ def _ensure_active_local_precondition(
         )
         result["precondition_connection_body_text"] = connection_body_text
         page.dismiss_connection_banner()
-        trigger = page.observe_trigger()
+        connected_ready, connected_observation = _wait_for_signed_in_active_local_precondition(
+            page=page,
+            user_login=user_login,
+            repository=repository,
+            timeout_seconds=TRIGGER_WAIT_SECONDS,
+        )
+        result["precondition_post_connect_observation"] = connected_observation
+        trigger = _trigger_from_precondition_observation(
+            connected_observation,
+            fallback=trigger,
+        )
         result["precondition_trigger_after_connect"] = _trigger_payload(trigger)
-
-    restored, trigger = poll_until(
-        probe=lambda: page.observe_trigger(timeout_ms=10_000),
-        is_satisfied=_trigger_matches_active_local_precondition,
-        timeout_seconds=TRIGGER_WAIT_SECONDS,
-        interval_seconds=5,
-    )
-    result["precondition_trigger_after_wait"] = _trigger_payload(trigger)
-    result["precondition_restored_within_wait"] = restored
-    if _trigger_matches_active_local_precondition(trigger):
-        return trigger
+        if connected_ready:
+            return trigger
 
     switcher = page.open_and_observe()
     result["precondition_switcher_before_switch"] = _switcher_payload(switcher)
     local_row = _find_named_local_row(switcher)
+    saved_rows = page.observe_saved_workspace_rows(timeout_ms=20_000)
+    saved_local_row = _find_named_saved_local_row(saved_rows)
     local_row_summary = (
         _row_payload(local_row)
         if local_row is not None
@@ -465,6 +638,19 @@ def _ensure_active_local_precondition(
             }
     )
     result["precondition_local_row_before_switch"] = local_row_summary
+    result["precondition_saved_local_row_before_switch"] = _saved_row_payload(saved_local_row)
+    _record_human_verification(
+        result,
+        check=(
+            "Waited for startup restoration, then opened the workspace switcher to "
+            "inspect the visible active workspace state before the ticket steps."
+        ),
+        observed=(
+            f"trigger_label={trigger.semantic_label!r}; "
+            f"local_row={json.dumps(local_row_summary, indent=2)}; "
+            f"switcher_text={switcher.switcher_text!r}"
+        ),
+    )
     if local_row is not None and local_row.state_label == "Local Git":
         try:
             trigger = page.switch_to_workspace(
@@ -485,7 +671,24 @@ def _ensure_active_local_precondition(
                 f"{error}"
             ) from error
         result["precondition_trigger_after_switch"] = _trigger_payload(trigger)
-        if "Connect GitHub" in page.current_body_text():
+        post_switch_ready, post_switch_observation = _wait_for_signed_in_active_local_precondition(
+            page=page,
+            user_login=user_login,
+            repository=repository,
+            timeout_seconds=TRIGGER_WAIT_SECONDS,
+        )
+        result["precondition_post_switch_observation"] = post_switch_observation
+        trigger = _trigger_from_precondition_observation(
+            post_switch_observation,
+            fallback=trigger,
+        )
+        if post_switch_ready:
+            return trigger
+        if _session_requires_connect(
+            body_text=str(post_switch_observation.get("body_text", page.current_body_text())),
+            user_login=user_login,
+            repository=repository,
+        ):
             connection_body_text = settings_page.ensure_connected(
                 token=token,
                 repository=repository,
@@ -495,9 +698,48 @@ def _ensure_active_local_precondition(
                 connection_body_text
             )
             page.dismiss_connection_banner()
-            trigger = page.observe_trigger()
+            connected_ready, connected_observation = _wait_for_signed_in_active_local_precondition(
+                page=page,
+                user_login=user_login,
+                repository=repository,
+                timeout_seconds=TRIGGER_WAIT_SECONDS,
+            )
+            result["precondition_post_switch_connect_observation"] = connected_observation
+            trigger = _trigger_from_precondition_observation(
+                connected_observation,
+                fallback=trigger,
+            )
             result["precondition_trigger_after_connect"] = _trigger_payload(trigger)
-        if _trigger_matches_active_local_precondition(trigger):
+            if connected_ready:
+                return trigger
+        if _signed_in_active_local_precondition(
+            trigger=trigger,
+            body_text=page.current_body_text(),
+            user_login=user_login,
+            repository=repository,
+        ):
+            return trigger
+
+    if local_row is not None and local_row.state_label == "Unavailable":
+        trigger = _restore_unavailable_local_workspace(
+            tracker_page=tracker_page,
+            page=page,
+            switcher=switcher,
+            saved_local_row=saved_local_row,
+            result=result,
+        )
+        restored_ready, restored_observation = _wait_for_signed_in_active_local_precondition(
+            page=page,
+            user_login=user_login,
+            repository=repository,
+            timeout_seconds=TRIGGER_WAIT_SECONDS,
+        )
+        result["precondition_post_manual_restore_observation"] = restored_observation
+        trigger = _trigger_from_precondition_observation(
+            restored_observation,
+            fallback=trigger,
+        )
+        if restored_ready:
             return trigger
 
     raise AssertionError(
@@ -509,6 +751,252 @@ def _ensure_active_local_precondition(
         f"Observed local row: {json.dumps(local_row_summary, indent=2)}\n"
         f"Observed switcher text:\n{switcher.switcher_text}"
     )
+
+def _wait_for_signed_in_active_local_precondition(
+    *,
+    page: LiveWorkspaceSwitcherPage,
+    user_login: str,
+    repository: str,
+    timeout_seconds: int,
+) -> tuple[bool, dict[str, object]]:
+    return poll_until(
+        probe=lambda: _observe_signed_in_active_local_precondition(
+            page=page,
+            user_login=user_login,
+            repository=repository,
+        ),
+        is_satisfied=lambda observation: bool(observation["ready"]),
+        timeout_seconds=timeout_seconds,
+        interval_seconds=5,
+    )
+
+
+def _ensure_active_local_row_observable(
+    *,
+    page: LiveWorkspaceSwitcherPage,
+    switcher: WorkspaceSwitcherObservation,
+    trigger: WorkspaceSwitcherTriggerObservation,
+    result: dict[str, object],
+) -> WorkspaceSwitcherObservation:
+    if switcher.rows:
+        return switcher
+    if not _switcher_text_mentions_active_local_row(
+        switcher_text=switcher.switcher_text,
+        trigger=trigger,
+    ):
+        return switcher
+    rows_materialized, reprobed_switcher = poll_until(
+        probe=lambda: page.observe_open_switcher(timeout_ms=5_000),
+        is_satisfied=lambda observation: bool(observation.rows),
+        timeout_seconds=10,
+        interval_seconds=1,
+    )
+    result["switcher_row_reprobe_observation"] = _switcher_payload(reprobed_switcher)
+    if rows_materialized:
+        return reprobed_switcher
+    raise AssertionError(
+        "Step 2 could not inspect the active local workspace row because the visible "
+        "workspace switcher text already showed the active Local Git row, but the "
+        "observation layer kept returning zero parsed rows after retrying. This is an "
+        "instrumentation failure, not valid product evidence for TS-808.\n"
+        f"Observed trigger label: {trigger.semantic_label!r}\n"
+        f"Observed initial switcher text:\n{switcher.switcher_text}\n"
+        "Observed switcher text after reprobe:\n"
+        f"{reprobed_switcher.switcher_text}"
+    )
+
+
+def _switcher_text_mentions_active_local_row(
+    *,
+    switcher_text: str,
+    trigger: WorkspaceSwitcherTriggerObservation,
+) -> bool:
+    normalized_switcher_text = " ".join(switcher_text.split()).casefold()
+    if not normalized_switcher_text:
+        return False
+    row_fragments = [
+        trigger.display_name,
+        trigger.workspace_type,
+        trigger.state_label,
+    ]
+    return all(fragment.casefold() in normalized_switcher_text for fragment in row_fragments)
+
+
+def _observe_signed_in_active_local_precondition(
+    *,
+    page: LiveWorkspaceSwitcherPage,
+    user_login: str,
+    repository: str,
+) -> dict[str, object]:
+    body_text = page.current_body_text()
+    trigger = _safe_trigger_payload(page)
+    return {
+        "ready": (
+            trigger is not None
+            and _signed_in_active_local_precondition(
+                trigger=_trigger_from_payload(trigger),
+                body_text=body_text,
+                user_login=user_login,
+                repository=repository,
+            )
+        ),
+        "authenticated_session": not _session_requires_connect(
+            body_text=body_text,
+            user_login=user_login,
+            repository=repository,
+        ),
+        "body_text": body_text,
+        "trigger": trigger,
+    }
+
+
+def _trigger_from_precondition_observation(
+    observation: dict[str, object],
+    *,
+    fallback: WorkspaceSwitcherTriggerObservation,
+) -> WorkspaceSwitcherTriggerObservation:
+    trigger_payload = observation.get("trigger")
+    if isinstance(trigger_payload, dict):
+        return _trigger_from_payload(trigger_payload)
+    return fallback
+
+
+def _signed_in_active_local_precondition(
+    *,
+    trigger: WorkspaceSwitcherTriggerObservation,
+    body_text: str,
+    user_login: str,
+    repository: str,
+) -> bool:
+    return _trigger_matches_active_local_precondition(
+        trigger,
+    ) and not _session_requires_connect(
+        body_text=body_text,
+        user_login=user_login,
+        repository=repository,
+    )
+
+
+def _session_requires_connect(
+    *,
+    body_text: str,
+    user_login: str,
+    repository: str,
+) -> bool:
+    return not TrackStateTrackerPage.body_has_authenticated_session(
+        body_text,
+        user_login=user_login,
+        repository=repository,
+    )
+def _restore_unavailable_local_workspace(
+    *,
+    tracker_page,
+    page: LiveWorkspaceSwitcherPage,
+    switcher: WorkspaceSwitcherObservation,
+    saved_local_row: WorkspaceSwitcherSavedWorkspaceRowObservation | None,
+    result: dict[str, object],
+) -> WorkspaceSwitcherTriggerObservation:
+    local_workspace_id = f"local:{LOCAL_TARGET}@{DEFAULT_BRANCH}"
+    workspace_directory_snapshot = _workspace_directory_snapshot(Path(LOCAL_TARGET))
+    install_restorable_directory_picker(
+        tracker_page=tracker_page,
+        directory_snapshot=workspace_directory_snapshot,
+    )
+    result["manual_directory_picker_fixture"] = _workspace_directory_snapshot_summary(
+        workspace_directory_snapshot,
+    )
+    result["manual_reauth_probe_before_action"] = read_manual_reauth_probe(tracker_page)
+    result["manual_directory_picker_state_before_action"] = (
+        read_restorable_directory_picker_state(tracker_page)
+    )
+    exact_action_label = _saved_workspace_action_label(saved_local_row)
+    result["manual_restore_action_label"] = exact_action_label
+
+    page.click_saved_workspace_action_button(exact_action_label, timeout_ms=10_000)
+    callback_observed, restore_attempt_observation = poll_until(
+        probe=lambda: _observe_manual_restore_attempt(
+            tracker_page=tracker_page,
+            page=page,
+        ),
+        is_satisfied=lambda observation: observation["directory_access_callback_observed"]
+        or observation["failure_message"] is not None,
+        timeout_seconds=15,
+        interval_seconds=1,
+    )
+    result["manual_restore_attempt_observation"] = restore_attempt_observation
+    result["manual_reauth_probe_after_action"] = restore_attempt_observation["probe"]
+    result["manual_directory_picker_state_after_action"] = restore_attempt_observation[
+        "directory_picker_state"
+    ]
+    if not callback_observed:
+        raise AssertionError(
+            "Precondition failed before step 1: the visible saved-workspace retry action "
+            "never triggered a browser directory-access callback and never restored the "
+            "prepared local workspace.\n"
+            f"Observed action label: {exact_action_label!r}\n"
+            "Observed probe state:\n"
+            f"{json.dumps(restore_attempt_observation['probe'], indent=2)}\n"
+            "Observed injected picker state:\n"
+            f"{json.dumps(restore_attempt_observation['directory_picker_state'], indent=2)}\n"
+            f"Observed switcher text:\n{switcher.switcher_text}"
+        )
+    if restore_attempt_observation["failure_message"] is not None:
+        raise AssertionError(
+            "Precondition failed before step 1: the visible saved-workspace retry action "
+            "failed in the deployed app before the active local workspace returned to "
+            "`Local Git`.\n"
+            f"Observed action label: {exact_action_label!r}\n"
+            f"Observed failure message: {restore_attempt_observation['failure_message']}\n"
+            "Observed probe state:\n"
+            f"{json.dumps(restore_attempt_observation['probe'], indent=2)}\n"
+            "Observed injected picker state:\n"
+            f"{json.dumps(restore_attempt_observation['directory_picker_state'], indent=2)}"
+        )
+
+    restored, restored_observation = poll_until(
+        probe=lambda: _observe_restored_local_workspace(
+            tracker_page=tracker_page,
+            page=page,
+            expected_local_workspace_id=local_workspace_id,
+        ),
+        is_satisfied=lambda observation: observation["restored"],
+        timeout_seconds=45,
+        interval_seconds=2,
+    )
+    result["restored_workspace_observation"] = restored_observation
+    if not restored:
+        raise AssertionError(
+            "Precondition failed before step 1: the directory-access callback was observed, "
+            "but the deployed app never completed the Local Git restore flow for the "
+            "prepared active local workspace.\n"
+            f"Observed restore observation:\n{json.dumps(restored_observation, indent=2)}"
+        )
+
+    trigger_payload = restored_observation.get("trigger")
+    if not isinstance(trigger_payload, dict):
+        raise AssertionError(
+            "Precondition failed before step 1: the manual restore finished without a "
+            "readable workspace trigger observation.",
+        )
+    trigger = _trigger_from_payload(trigger_payload)
+    result["precondition_trigger_after_manual_restore"] = _trigger_payload(trigger)
+    result["switcher_observation_after_manual_restore"] = restored_observation.get("switcher")
+    result["active_local_row_after_manual_restore"] = restored_observation.get("local_row")
+    _record_human_verification(
+        result,
+        check=(
+            "Used the visible saved-workspace retry action, completed the browser "
+            "directory-access flow for the same prepared local repository, and checked "
+            "that the header trigger returned to the active Local Git workspace before "
+            "opening the ticket steps."
+        ),
+        observed=(
+            f"trigger_after_restore={json.dumps(trigger_payload, ensure_ascii=True)}; "
+            "local_row_after_restore="
+            f"{json.dumps(restored_observation.get('local_row'), ensure_ascii=True)}"
+        ),
+    )
+    return trigger
 
 
 def _trigger_matches_active_local_precondition(
@@ -534,6 +1022,19 @@ def _find_named_local_row(
     return None
 
 
+def _find_named_saved_local_row(
+    rows: tuple[WorkspaceSwitcherSavedWorkspaceRowObservation, ...],
+) -> WorkspaceSwitcherSavedWorkspaceRowObservation | None:
+    for row in rows:
+        if (
+            row.display_name == LOCAL_DISPLAY_NAME
+            and row.target_type_label == "Local"
+            and LOCAL_TARGET in row.detail_text
+        ):
+            return row
+    return None
+
+
 def _find_active_local_row(
     switcher: WorkspaceSwitcherObservation,
     *,
@@ -546,6 +1047,18 @@ def _find_active_local_row(
             and row.state_label == "Local Git"
         ):
             return row
+    fallback_candidates = [
+        row
+        for row in switcher.rows
+        if (
+            row.display_name == trigger.display_name
+            and row.target_type_label == "Local"
+            and row.state_label == "Local Git"
+            and not _row_has_visible_workspace_actions(row)
+        )
+    ]
+    if len(fallback_candidates) == 1:
+        return fallback_candidates[0]
     raise AssertionError(
         "Step 2 failed: the workspace switcher did not show a selected active local "
         "workspace row in the `Local Git` state after startup.\n"
@@ -553,6 +1066,195 @@ def _find_active_local_row(
         f"Observed rows: {[row.visible_text for row in switcher.rows]!r}\n"
         f"Observed switcher text:\n{switcher.switcher_text}"
     )
+
+
+def _row_has_visible_workspace_actions(row: WorkspaceSwitcherRowObservation) -> bool:
+    labels = [
+        *row.action_labels,
+        *row.button_labels,
+    ]
+    action_prefixes = ("Open:", "Delete:", "Retry:", "Connect GitHub", "Active")
+    return any(
+        label != row.visible_text and label.startswith(action_prefixes) for label in labels
+    )
+
+
+def _saved_workspace_action_label(
+    row: WorkspaceSwitcherSavedWorkspaceRowObservation | None,
+) -> str:
+    if row is None:
+        raise AssertionError(
+            "Precondition failed before step 1: the open workspace switcher did not "
+            "expose a saved local workspace row with a visible manual action.",
+        )
+    action_label = next(
+        (
+            label
+            for label in row.action_labels
+            if label and not label.startswith("Delete:")
+        ),
+        None,
+    )
+    if not action_label:
+        raise AssertionError(
+            "Precondition failed before step 1: the unavailable local workspace row "
+            "did not expose any visible manual action.\n"
+            f"Observed saved row: {json.dumps(_saved_row_payload(row), indent=2)}"
+        )
+    return action_label
+
+
+def _observe_manual_restore_attempt(
+    *,
+    tracker_page,
+    page: LiveWorkspaceSwitcherPage,
+) -> dict[str, object]:
+    body_text = tracker_page.body_text()
+    probe = read_manual_reauth_probe(tracker_page)
+    directory_picker_state = read_restorable_directory_picker_state(tracker_page)
+    trigger = _safe_trigger_payload(page)
+    return {
+        "probe": probe,
+        "directory_picker_state": directory_picker_state,
+        "body_text": body_text,
+        "trigger": trigger,
+        "failure_message": _extract_workspace_open_failure_message(body_text),
+        "directory_access_callback_observed": bool(
+            probe["showDirectoryPickerCalls"]
+            or probe["requestPermissionCalls"]
+            or directory_picker_state["calls"]
+            or directory_picker_state.get("selectedDirectoryName")
+        ),
+    }
+
+
+def _observe_restored_local_workspace(
+    *,
+    tracker_page,
+    page: LiveWorkspaceSwitcherPage,
+    expected_local_workspace_id: str,
+) -> dict[str, object]:
+    trigger = _safe_trigger_payload(page)
+    shell_observation = tracker_page.observe_interactive_shell(
+        ("Dashboard", "Board", "JQL Search", "Hierarchy", "Settings"),
+        timeout_ms=10_000,
+    )
+    persisted_workspace_state = _decode_workspace_state(
+        tracker_page.snapshot_local_storage(
+            [
+                "trackstate.workspaceProfiles.state",
+                "flutter.trackstate.workspaceProfiles.state",
+            ],
+        ),
+    )
+    trigger_is_restored = (
+        trigger is not None
+        and trigger["display_name"] == LOCAL_DISPLAY_NAME
+        and trigger["workspace_type"] == "Local"
+        and trigger["state_label"] == "Local Git"
+    )
+    storage_matches = (
+        persisted_workspace_state is not None
+        and persisted_workspace_state.get("activeWorkspaceId") == expected_local_workspace_id
+    )
+    restored = (
+        trigger_is_restored
+        and bool(shell_observation.get("shell_ready"))
+        and storage_matches
+    )
+    if not restored:
+        return {
+            "restored": False,
+            "trigger": trigger,
+            "shell_observation": shell_observation,
+            "persisted_workspace_state": persisted_workspace_state,
+            "body_text": tracker_page.body_text(),
+        }
+
+    switcher_after = page.open_and_observe(timeout_ms=20_000)
+    local_row_after = _find_named_local_row(switcher_after)
+    selected_row_after = next((row for row in switcher_after.rows if row.selected), None)
+    return {
+        "restored": True,
+        "trigger": trigger,
+        "shell_observation": shell_observation,
+        "persisted_workspace_state": persisted_workspace_state,
+        "switcher": _switcher_payload(switcher_after),
+        "local_row": _row_payload(local_row_after) if local_row_after is not None else None,
+        "selected_row": (
+            _row_payload(selected_row_after) if selected_row_after is not None else None
+        ),
+    }
+
+
+def _safe_trigger_payload(page: LiveWorkspaceSwitcherPage) -> dict[str, object] | None:
+    try:
+        return _trigger_payload(page.observe_trigger(timeout_ms=2_000))
+    except AssertionError:
+        return None
+
+
+def _extract_workspace_open_failure_message(body_text: str) -> str | None:
+    marker = f"Could not open {LOCAL_DISPLAY_NAME}."
+    if marker not in body_text:
+        return None
+    for line in body_text.splitlines():
+        normalized = " ".join(line.split())
+        if marker in normalized:
+            return normalized
+    return marker
+
+
+def _workspace_directory_snapshot(local_path: Path) -> dict[str, object]:
+    relative_paths = [
+        ".git/HEAD",
+        ".git/config",
+        ".trackstate-ts808-precondition.txt",
+    ]
+    files: list[dict[str, str]] = []
+    for relative_path in relative_paths:
+        absolute_path = local_path / relative_path
+        if not absolute_path.is_file():
+            continue
+        files.append(
+            {
+                "path": relative_path,
+                "base64": base64.b64encode(absolute_path.read_bytes()).decode("ascii"),
+            },
+        )
+    return {
+        "rootName": local_path.name,
+        "rootPath": str(local_path),
+        "files": files,
+    }
+
+
+def _workspace_directory_snapshot_summary(
+    snapshot: dict[str, object],
+) -> dict[str, object]:
+    files = snapshot.get("files", [])
+    return {
+        "rootName": snapshot.get("rootName"),
+        "rootPath": snapshot.get("rootPath"),
+        "fileCount": len(files) if isinstance(files, list) else 0,
+        "paths": [
+            entry.get("path")
+            for entry in files
+            if isinstance(entry, dict) and isinstance(entry.get("path"), str)
+        ],
+    }
+
+
+def _decode_workspace_state(storage_snapshot: dict[str, str | None]) -> dict[str, object] | None:
+    for value in storage_snapshot.values():
+        if value is None:
+            continue
+        parsed = json.loads(value)
+        if isinstance(parsed, str):
+            parsed = json.loads(parsed)
+        if isinstance(parsed, dict):
+            return parsed
+    return None
 
 
 def _assert_connect_github_hidden(
@@ -829,8 +1531,11 @@ def _bug_description(result: dict[str, object]) -> str:
                 {
                     "prepared_local_workspace": result.get("prepared_local_workspace"),
                     "trigger_observation": result.get("trigger_observation"),
-                    "precondition_switcher_observation": result.get(
-                        "precondition_switcher_observation"
+                    "precondition_switcher_before_switch": result.get(
+                        "precondition_switcher_before_switch"
+                    ),
+                    "precondition_local_row_before_switch": result.get(
+                        "precondition_local_row_before_switch"
                     ),
                     "active_local_row": result.get("active_local_row"),
                     "switcher_observation": result.get("switcher_observation"),
@@ -1024,6 +1729,26 @@ def _trigger_payload(trigger: WorkspaceSwitcherTriggerObservation) -> dict[str, 
     }
 
 
+def _trigger_from_payload(payload: dict[str, object]) -> WorkspaceSwitcherTriggerObservation:
+    bounds = payload.get("bounds", {})
+    return WorkspaceSwitcherTriggerObservation(
+        viewport_width=float(payload["viewport_width"]),
+        viewport_height=float(payload["viewport_height"]),
+        semantic_label=str(payload["semantic_label"]),
+        visible_text=str(payload["visible_text"]),
+        raw_text_lines=tuple(str(line) for line in payload["raw_text_lines"]),
+        display_name=str(payload["display_name"]),
+        workspace_type=str(payload["workspace_type"]),
+        state_label=str(payload["state_label"]),
+        icon_count=int(payload.get("icon_count", 0)),
+        left=float(bounds.get("left", 0.0)) if isinstance(bounds, dict) else 0.0,
+        top=float(bounds.get("top", 0.0)) if isinstance(bounds, dict) else 0.0,
+        width=float(bounds.get("width", 0.0)) if isinstance(bounds, dict) else 0.0,
+        height=float(bounds.get("height", 0.0)) if isinstance(bounds, dict) else 0.0,
+        top_button_labels=tuple(str(label) for label in payload["top_button_labels"]),
+    )
+
+
 def _switcher_payload(switcher: WorkspaceSwitcherObservation) -> dict[str, object]:
     return {
         "row_count": switcher.row_count,
@@ -1032,7 +1757,28 @@ def _switcher_payload(switcher: WorkspaceSwitcherObservation) -> dict[str, objec
     }
 
 
-def _row_payload(row: WorkspaceSwitcherRowObservation) -> dict[str, object]:
+def _saved_row_payload(
+    row: WorkspaceSwitcherSavedWorkspaceRowObservation | None,
+) -> dict[str, object] | None:
+    if row is None:
+        return None
+    return {
+        "display_name": row.display_name,
+        "target_type_label": row.target_type_label,
+        "state_label": row.state_label,
+        "detail_text": row.detail_text,
+        "selected": row.selected,
+        "action_labels": list(row.action_labels),
+        "left": row.left,
+        "top": row.top,
+        "width": row.width,
+        "height": row.height,
+    }
+
+
+def _row_payload(row: WorkspaceSwitcherRowObservation | None) -> dict[str, object] | None:
+    if row is None:
+        return None
     return {
         "display_name": row.display_name,
         "target_type_label": row.target_type_label,
@@ -1045,6 +1791,10 @@ def _row_payload(row: WorkspaceSwitcherRowObservation) -> dict[str, object]:
         "action_labels": list(row.action_labels),
         "button_labels": list(row.button_labels),
     }
+
+
+def _remove_local_workspace_repository() -> None:
+    shutil.rmtree(LOCAL_TARGET, ignore_errors=True)
 
 
 if __name__ == "__main__":

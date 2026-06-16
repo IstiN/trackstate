@@ -6,4 +6,5 @@ dependencies: []
 notes:
   - Starts from the hosted runtime, verifies the top-bar Create issue entry point is visible and user-reachable, then switches to Local Git through Settings.
   - Verifies the storage-mode indicator changes to Local Git without a page refresh and that Dashboard still shows a reachable top-bar Create issue entry point.
+  - Continues the post-switch Create issue verification even if the storage-mode badge is wrong so the result captures all independent regressions.
   - Fails with top-bar and visible-text snapshots when the runtime label or Create issue affordance does not match the expected user-facing state.

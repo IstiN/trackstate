@@ -1334,6 +1334,124 @@ void main() {
   );
 
   testWidgets(
+    'workspace switcher restores an unavailable saved local workspace through manual browser re-authentication before falling back to the picker',
+    (tester) async {
+      const localWorkspaceId = 'local:/tmp/demo@main';
+      const hostedWorkspaceId = 'hosted:stable/repo@main';
+      final service = _MemoryWorkspaceProfileService(
+        WorkspaceProfilesState(
+          profiles: const [
+            WorkspaceProfile(
+              id: hostedWorkspaceId,
+              displayName: 'stable/repo',
+              targetType: WorkspaceProfileTargetType.hosted,
+              target: 'stable/repo',
+              defaultBranch: 'main',
+              writeBranch: 'main',
+            ),
+            WorkspaceProfile(
+              id: localWorkspaceId,
+              displayName: 'demo',
+              targetType: WorkspaceProfileTargetType.local,
+              target: '/tmp/demo',
+              defaultBranch: 'main',
+              writeBranch: 'main',
+            ),
+          ],
+          activeWorkspaceId: hostedWorkspaceId,
+          migrationComplete: true,
+          unavailableLocalWorkspaceIds: {localWorkspaceId},
+        ),
+      );
+      var directoryPickerCalls = 0;
+      var browserAccessRequests = 0;
+      var browserOpenAttempts = 0;
+
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      await tester.pumpWidget(
+        TrackStateApp(
+          repositoryFactory: DemoTrackStateRepository.new,
+          workspaceProfileService: service,
+          workspaceDirectoryPicker:
+              ({String? confirmButtonText, String? initialDirectory}) async {
+                directoryPickerCalls += 1;
+                return '/tmp/demo';
+              },
+          requestBrowserLocalRepositoryAccess:
+              ({
+                required String repositoryPath,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async {
+                browserAccessRequests += 1;
+                expect(repositoryPath, '/tmp/demo');
+                return _LocalQueuedLoadTrackStateRepository(
+                  loadResults: [await _snapshotForRepository(repositoryPath)],
+                );
+              },
+          openBrowserLocalRepository:
+              ({
+                required String repositoryPath,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async {
+                browserOpenAttempts += 1;
+                return null;
+              },
+          openHostedRepository:
+              ({
+                required String repository,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async => DemoTrackStateRepository(
+                snapshot: await _snapshotForRepository(repository),
+              ),
+          openLocalRepository:
+              ({
+                required String repositoryPath,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async => throw UnsupportedError(
+                'Unsupported operation: Process.run',
+              ),
+        ),
+      );
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.byKey(const ValueKey('workspace-switcher-trigger')),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.byKey(
+          const ValueKey('workspace-primary-action-$localWorkspaceId'),
+        ),
+      );
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      expect(browserAccessRequests, 1);
+      expect(browserOpenAttempts, 1);
+      expect(
+        directoryPickerCalls,
+        0,
+        reason: 'Manual re-auth should reuse the saved browser handle first.',
+      );
+      expect(service.state.activeWorkspaceId, localWorkspaceId);
+      expect(find.textContaining('/tmp/demo'), findsWidgets);
+      expect(find.textContaining('stable/repo'), findsNothing);
+    },
+  );
+
+  testWidgets(
     'workspace switcher restores an unavailable saved local workspace through the browser retry fallback without reopening the directory picker',
     (tester) async {
       const localWorkspaceId = 'local:/tmp/demo@main';
@@ -1489,6 +1607,135 @@ void main() {
         findsNothing,
       );
       expect(find.textContaining('Could not open demo'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'workspace switcher restores an unavailable saved local workspace after directory re-selection through browser access recovery',
+    (tester) async {
+      const localWorkspaceId = 'local:/tmp/demo@main';
+      const hostedWorkspaceId = 'hosted:stable/repo@main';
+      final service = _MemoryWorkspaceProfileService(
+        WorkspaceProfilesState(
+          profiles: const [
+            WorkspaceProfile(
+              id: hostedWorkspaceId,
+              displayName: 'stable/repo',
+              targetType: WorkspaceProfileTargetType.hosted,
+              target: 'stable/repo',
+              defaultBranch: 'main',
+              writeBranch: 'main',
+            ),
+            WorkspaceProfile(
+              id: localWorkspaceId,
+              displayName: 'demo',
+              targetType: WorkspaceProfileTargetType.local,
+              target: '/tmp/demo',
+              defaultBranch: 'main',
+              writeBranch: 'main',
+            ),
+          ],
+          activeWorkspaceId: hostedWorkspaceId,
+          migrationComplete: true,
+          unavailableLocalWorkspaceIds: {localWorkspaceId},
+        ),
+      );
+      var directoryPickerCalls = 0;
+      var browserOpenAttempts = 0;
+      var browserAccessRequests = 0;
+
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      await tester.pumpWidget(
+        TrackStateApp(
+          repositoryFactory: DemoTrackStateRepository.new,
+          workspaceProfileService: service,
+          workspaceDirectoryPicker:
+              ({String? confirmButtonText, String? initialDirectory}) async {
+                directoryPickerCalls += 1;
+                expect(initialDirectory, '/tmp/demo');
+                return '/tmp/demo';
+              },
+          requestBrowserLocalRepositoryAccess:
+              ({
+                required String repositoryPath,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async {
+                browserAccessRequests += 1;
+                expect(repositoryPath, '/tmp/demo');
+                if (browserAccessRequests == 1) {
+                  return null;
+                }
+                return _LocalQueuedLoadTrackStateRepository(
+                  loadResults: [await _snapshotForRepository(repositoryPath)],
+                );
+              },
+          openBrowserLocalRepository:
+              ({
+                required String repositoryPath,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async {
+                browserOpenAttempts += 1;
+                expect(repositoryPath, '/tmp/demo');
+                return null;
+              },
+          openHostedRepository:
+              ({
+                required String repository,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async => DemoTrackStateRepository(
+                snapshot: await _snapshotForRepository(repository),
+              ),
+          openLocalRepository:
+              ({
+                required String repositoryPath,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async =>
+                  throw UnsupportedError('Unsupported operation: Process.run'),
+        ),
+      );
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.byKey(const ValueKey('workspace-switcher-trigger')),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.byKey(
+          const ValueKey('workspace-primary-action-$localWorkspaceId'),
+        ),
+      );
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      expect(directoryPickerCalls, 1);
+      expect(browserOpenAttempts, greaterThanOrEqualTo(1));
+      expect(
+        browserAccessRequests,
+        2,
+        reason:
+            'Manual retry should re-open the newly selected browser handle through the permission-aware access path.',
+      );
+      expect(service.state.activeWorkspaceId, localWorkspaceId);
+      expect(find.textContaining('/tmp/demo'), findsWidgets);
+      expect(find.textContaining('stable/repo'), findsNothing);
+      expect(
+        _findExplicitWorkspaceSwitcherSemantics(
+          'Workspace switcher: demo, Local, Local Git',
+        ),
+        findsOneWidget,
+      );
     },
   );
 
@@ -2006,6 +2253,102 @@ void main() {
   );
 
   testWidgets(
+    'workspace switcher shows Sync issue for the active hosted workspace after a startup sync reload failure',
+    (tester) async {
+      const activeHostedWorkspaceId = 'hosted:alpha/repo@main';
+      final authStore = _MemoryAuthStore()
+        ..workspaceTokens[activeHostedWorkspaceId] = 'alpha-token';
+      final service = _MemoryWorkspaceProfileService(
+        WorkspaceProfilesState(
+          profiles: const [
+            WorkspaceProfile(
+              id: activeHostedWorkspaceId,
+              displayName: 'alpha/repo',
+              targetType: WorkspaceProfileTargetType.hosted,
+              target: 'alpha/repo',
+              defaultBranch: 'main',
+              writeBranch: 'main',
+              hostedAccessMode: HostedWorkspaceAccessMode.attachmentRestricted,
+            ),
+          ],
+          activeWorkspaceId: activeHostedWorkspaceId,
+          migrationComplete: true,
+        ),
+      );
+      final hostedRepository = _HostedStartupSyncReloadFailureRepository(
+        snapshot: await _snapshotForRepository('alpha/repo'),
+        loadError: StateError(
+          'GitHub connection failed (500): Internal Server Error',
+        ),
+      );
+
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      await tester.pumpWidget(
+        TrackStateApp(
+          workspaceProfileService: service,
+          authStore: authStore,
+          openHostedRepository:
+              ({
+                required String repository,
+                required String defaultBranch,
+                required String writeBranch,
+              }) async {
+                if (repository != 'alpha/repo') {
+                  throw StateError('Unexpected repository $repository');
+                }
+                return hostedRepository;
+              },
+        ),
+      );
+      await tester.pump();
+      final dynamic appState = tester.state(find.byType(TrackStateApp));
+      for (var index = 0; index < 20; index += 1) {
+        await tester.pump(const Duration(milliseconds: 100));
+        final dynamic syncStatus = appState.viewModel.workspaceSyncStatus;
+        if (syncStatus.health == WorkspaceSyncHealth.attentionNeeded) {
+          break;
+        }
+      }
+      final dynamic syncStatus = appState.viewModel.workspaceSyncStatus;
+      expect(syncStatus.health, WorkspaceSyncHealth.attentionNeeded);
+
+      expect(
+        _findExplicitWorkspaceSwitcherSemantics(
+          'Workspace switcher: alpha/repo, Hosted, Sync issue',
+        ),
+        findsOneWidget,
+      );
+
+      await tester.tap(
+        find.byKey(const ValueKey('workspace-switcher-trigger')),
+      );
+      await tester.pumpAndSettle();
+
+      final activeRow = find.byKey(
+        const ValueKey('workspace-hosted:alpha/repo@main'),
+      );
+      expect(activeRow, findsOneWidget);
+      expect(
+        find.descendant(of: activeRow, matching: find.text('Sync issue')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: activeRow,
+          matching: find.text('Attachments limited'),
+        ),
+        findsNothing,
+      );
+    },
+  );
+
+  testWidgets(
     'workspace switcher keeps visible workspace details on compact layouts',
     (tester) async {
       final service = _MemoryWorkspaceProfileService(
@@ -2108,9 +2451,10 @@ void main() {
                 required String defaultBranch,
                 required String writeBranch,
               }) async {
-                final hostedRepository = ReactiveIssueDetailTrackStateRepository(
-                  permission: attachmentRestrictedPermission,
-                );
+                final hostedRepository =
+                    ReactiveIssueDetailTrackStateRepository(
+                      permission: attachmentRestrictedPermission,
+                    );
                 await hostedRepository.connect(
                   const RepositoryConnection(
                     repository: 'alpha/repo',
@@ -4893,4 +5237,144 @@ class _SyncErrorLocalTrackStateRepository extends DemoTrackStateRepository
   Future<RepositorySyncCheck> checkSync({
     RepositorySyncState? previousState,
   }) async => throw error;
+}
+
+class _HostedStartupSyncReloadFailureRepository
+    extends ProviderBackedTrackStateRepository {
+  _HostedStartupSyncReloadFailureRepository({
+    required TrackerSnapshot snapshot,
+    required this.loadError,
+  }) : _snapshot = snapshot,
+       super(
+         provider: _HostedStartupSyncReloadFailureProvider(),
+         supportsGitHubAuth: false,
+       );
+
+  final JqlSearchService _searchService = const JqlSearchService();
+  final Object loadError;
+  final TrackerSnapshot _snapshot;
+  int _loadSnapshotCalls = 0;
+
+  @override
+  Future<TrackerSnapshot> loadSnapshot() async {
+    _loadSnapshotCalls += 1;
+    if (_loadSnapshotCalls > 1) {
+      throw loadError;
+    }
+    replaceCachedState(snapshot: _snapshot);
+    return _snapshot;
+  }
+
+  @override
+  Future<TrackStateIssueSearchPage> searchIssuePage(
+    String jql, {
+    int startAt = 0,
+    int maxResults = 50,
+    String? continuationToken,
+  }) async {
+    return _searchService.search(
+      issues: _snapshot.issues,
+      project: _snapshot.project,
+      jql: jql,
+      startAt: startAt,
+      maxResults: maxResults,
+      continuationToken: continuationToken,
+    );
+  }
+}
+
+class _HostedStartupSyncReloadFailureProvider
+    implements TrackStateProviderAdapter {
+  static const RepositoryPermission _permission = RepositoryPermission(
+    canRead: true,
+    canWrite: true,
+    isAdmin: false,
+    canCreateBranch: true,
+    canManageAttachments: false,
+    attachmentUploadMode: AttachmentUploadMode.noLfs,
+    canCheckCollaborators: false,
+  );
+
+  @override
+  String get dataRef => 'main';
+
+  @override
+  ProviderType get providerType => ProviderType.github;
+
+  @override
+  String get repositoryLabel => 'alpha/repo';
+
+  @override
+  Future<RepositoryUser> authenticate(RepositoryConnection connection) async =>
+      const RepositoryUser(login: 'demo-user', displayName: 'Demo User');
+
+  @override
+  Future<RepositorySyncCheck> checkSync({
+    RepositorySyncState? previousState,
+  }) async => RepositorySyncCheck(
+    state: const RepositorySyncState(
+      providerType: ProviderType.github,
+      repositoryRevision: 'sync-rev-1',
+      sessionRevision: 'connected:true:true:no-lfs',
+      connectionState: ProviderConnectionState.connected,
+      permission: _permission,
+    ),
+    signals: const {WorkspaceSyncSignal.hostedRepository},
+    hostedSnapshotReloadDirective: HostedSnapshotReloadDirective.enabled,
+  );
+
+  @override
+  Future<RepositoryPermission> getPermission() async => _permission;
+
+  @override
+  Future<RepositoryCommitResult> createCommit(
+    RepositoryCommitRequest request,
+  ) async => RepositoryCommitResult(
+    branch: request.branch,
+    message: request.message,
+    revision: 'sync-rev-1',
+  );
+
+  @override
+  Future<void> ensureCleanWorktree() async {}
+
+  @override
+  Future<RepositoryBranch> getBranch(String name) async =>
+      RepositoryBranch(name: name, exists: true, isCurrent: true);
+
+  @override
+  Future<bool> isLfsTracked(String path) async => false;
+
+  @override
+  Future<List<RepositoryTreeEntry>> listTree({required String ref}) async =>
+      const <RepositoryTreeEntry>[];
+
+  @override
+  Future<RepositoryAttachment> readAttachment(
+    String path, {
+    required String ref,
+  }) async => throw const TrackStateProviderException('Not used in test.');
+
+  @override
+  Future<RepositoryTextFile> readTextFile(
+    String path, {
+    required String ref,
+  }) async => throw const TrackStateProviderException('Not used in test.');
+
+  @override
+  Future<String> resolveWriteBranch() async => dataRef;
+
+  @override
+  Future<RepositoryAttachmentWriteResult> writeAttachment(
+    RepositoryAttachmentWriteRequest request,
+  ) async => throw const TrackStateProviderException('Not used in test.');
+
+  @override
+  Future<RepositoryWriteResult> writeTextFile(
+    RepositoryWriteRequest request,
+  ) async => RepositoryWriteResult(
+    path: request.path,
+    branch: request.branch,
+    revision: 'sync-rev-1',
+  );
 }

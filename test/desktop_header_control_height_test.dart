@@ -97,4 +97,138 @@ void main() {
       semantics.dispose();
     }
   });
+
+  testWidgets(
+    'desktop top bar search field keeps zero vertical content padding',
+    (tester) async {
+      const attachmentRestrictedPermission = RepositoryPermission(
+        canRead: true,
+        canWrite: true,
+        isAdmin: false,
+        canCreateBranch: true,
+        canManageAttachments: false,
+        attachmentUploadMode: AttachmentUploadMode.noLfs,
+        canCheckCollaborators: false,
+      );
+
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+
+      try {
+        await tester.pumpWidget(
+          TrackStateApp(
+            repository: ReactiveIssueDetailTrackStateRepository(
+              permission: attachmentRestrictedPermission,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final searchField = tester.widget<TextField>(find.byType(TextField));
+        final contentPadding = searchField.decoration?.contentPadding;
+        final resolvedPadding = contentPadding! as EdgeInsets;
+
+        expect(contentPadding, isA<EdgeInsets>());
+        expect(
+          resolvedPadding.top,
+          0,
+          reason:
+              'Desktop search field should not add vertical content padding, or the browser text-editing host grows beyond the required 32px header height.',
+        );
+        expect(
+          resolvedPadding.bottom,
+          0,
+          reason:
+              'Desktop search field should not add vertical content padding, or the browser text-editing host grows beyond the required 32px header height.',
+        );
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      }
+    },
+  );
+
+  testWidgets(
+    'desktop top bar exposes a shared semantics container for audited controls',
+    (tester) async {
+      const attachmentRestrictedPermission = RepositoryPermission(
+        canRead: true,
+        canWrite: true,
+        isAdmin: false,
+        canCreateBranch: true,
+        canManageAttachments: false,
+        attachmentUploadMode: AttachmentUploadMode.noLfs,
+        canCheckCollaborators: false,
+      );
+
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+
+      try {
+        await tester.pumpWidget(
+          TrackStateApp(
+            repository: ReactiveIssueDetailTrackStateRepository(
+              permission: attachmentRestrictedPermission,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final headerContainer = find.byWidgetPredicate((widget) {
+          if (widget is! Semantics) {
+            return false;
+          }
+          return widget.properties.identifier ==
+              'trackstate-desktop-header-controls';
+        }, description: 'desktop header semantics container');
+
+        expect(headerContainer, findsOneWidget);
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      }
+    },
+  );
+
+  testWidgets(
+    'desktop top bar search field exposes a stable semantics identifier',
+    (tester) async {
+      const attachmentRestrictedPermission = RepositoryPermission(
+        canRead: true,
+        canWrite: true,
+        isAdmin: false,
+        canCreateBranch: true,
+        canManageAttachments: false,
+        attachmentUploadMode: AttachmentUploadMode.noLfs,
+        canCheckCollaborators: false,
+      );
+
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+
+      try {
+        await tester.pumpWidget(
+          TrackStateApp(
+            repository: ReactiveIssueDetailTrackStateRepository(
+              permission: attachmentRestrictedPermission,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final searchSemantics = find.byWidgetPredicate((widget) {
+          if (widget is! Semantics) {
+            return false;
+          }
+          return widget.properties.identifier ==
+              'trackstate-desktop-search-input';
+        }, description: 'desktop search semantics identifier');
+
+        expect(searchSemantics, findsOneWidget);
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      }
+    },
+  );
 }

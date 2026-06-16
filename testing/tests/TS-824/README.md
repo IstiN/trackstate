@@ -8,13 +8,14 @@ the workspace switcher trigger.
 
 The automation:
 1. launches the deployed TrackState app in Chromium with a stored hosted token
-2. tabs through the visible desktop shell until the workspace switcher trigger
+2. runs the live desktop flow at the standard `1440x900` viewport
+3. tabs through the visible desktop shell until the workspace switcher trigger
    owns keyboard focus
-3. opens the workspace switcher from that focused trigger and confirms the
+4. opens the workspace switcher from that focused trigger and confirms the
    visible desktop panel is rendered
-4. presses `Tab` once to verify focus moves from the trigger into a visible
+5. presses `Tab` once to verify focus moves from the trigger into a visible
    element inside the panel
-5. presses `Escape` from that internal focused element and confirms the panel
+6. presses `Escape` from that internal focused element and confirms the panel
    dismisses and the trigger is immediately keyboard-usable again
 
 ## Run this test

@@ -369,6 +369,109 @@ void main() {
   );
 
   test(
+    'local release-backed re-upload does not read existing release asset from '
+    'git before delegating to release store',
+    () async {
+      final repo = await _createLocalRepository();
+      addTearDown(() => repo.delete(recursive: true));
+
+      // Reconfigure the fixture for GitHub Releases attachment storage and
+      // seed an existing release-backed attachment without the actual file in
+      // Git. This reproduces TS-1372: the earlier implementation tried to read
+      // the non-existent file from the local Git provider before deciding to
+      // use release storage, so the upload never reached the release lookup.
+      await _writeFile(
+        repo,
+        'DEMO/project.json',
+        '{"key":"DEMO","name":"Local Demo","attachmentStorage":{'
+        '"mode":"github-releases","githubReleases":{'
+        '"tagPrefix":"trackstate-attachments-"}}}\n',
+      );
+      await File('${repo.path}/DEMO/DEMO-1/attachments/design.png')
+          .delete(recursive: true);
+      // Remove the default repository-path attachment created by
+      // _createLocalRepository() so the fixture only contains the
+      // release-backed attachment we seed below.
+      await _writeFile(
+        repo,
+        'DEMO/DEMO-1/attachments.json',
+        jsonEncode([
+          {
+            'id': 'DEMO/DEMO-1/attachments/logic.drawio',
+            'name': 'logic.drawio',
+            'mediaType': 'application/xml',
+            'sizeBytes': 6,
+            'author': 'local-user',
+            'createdAt': '2026-05-13T07:00:00Z',
+            'storagePath': 'DEMO/DEMO-1/attachments/logic.drawio',
+            'revisionOrOid': 'seeded-asset-1',
+            'storageBackend': 'github-releases',
+            'githubReleaseTag': 'trackstate-attachments-DEMO-1',
+            'githubReleaseAssetName': 'logic.drawio',
+          },
+        ]),
+      );
+      await _git(repo.path, [
+        'remote',
+        'add',
+        'origin',
+        'https://github.com/octo/releases-demo.git',
+      ]);
+      await _git(repo.path, ['add', '.']);
+      await _git(repo.path, [
+        'commit',
+        '-m',
+        'Configure release-backed attachment storage with seeded release asset',
+      ]);
+
+      final hostedProvider = _FakeHostedReleaseTrackStateProvider();
+      final repository = ProviderBackedTrackStateRepository(
+        provider: LocalGitTrackStateProvider(
+          repositoryPath: repo.path,
+          hostedProviderFactory:
+              ({
+                required String repository,
+                required String branch,
+                required String dataRef,
+              }) {
+                hostedProvider.repositoryName = repository;
+                hostedProvider.branch = branch;
+                hostedProvider.dataRefOverride = dataRef;
+                return hostedProvider;
+              },
+        ),
+        usesLocalPersistence: true,
+        supportsGitHubAuth: false,
+      );
+      final snapshot = await repository.loadSnapshot();
+      await repository.connect(
+        const RepositoryConnection(
+          repository: '.',
+          branch: 'main',
+          token: 'env-token',
+        ),
+      );
+
+      final updated = await repository.uploadIssueAttachment(
+        issue: snapshot.issues.single,
+        name: 'logic.drawio',
+        bytes: Uint8List.fromList(utf8.encode('v2-xml')),
+      );
+      final uploaded = updated.attachments.firstWhere(
+        (attachment) => attachment.name == 'logic.drawio',
+      );
+
+      expect(uploaded.storageBackend, AttachmentStorageMode.githubReleases);
+      expect(uploaded.revisionOrOid, 'asset-1');
+      expect(hostedProvider.lastWriteRequest, isNotNull);
+      expect(
+        hostedProvider.lastWriteRequest!.assetName,
+        'logic.drawio',
+      );
+    },
+  );
+
+  test(
     'local repository derives issue history entries from git commits',
     () async {
       final repo = await _createLocalRepository();
@@ -1882,6 +1985,93 @@ void main() {
           ),
         ),
       );
+    },
+  );
+
+  test(
+    'local repository rejects zero-delta project settings saves when no git commit is produced',
+    () async {
+      final repo = await _createLocalRepository();
+      addTearDown(() => repo.delete(recursive: true));
+
+      await _writeFile(
+        repo,
+        'DEMO/config/statuses.json',
+        '[{"id":"todo","name":"To Do","category":"new"},'
+            '{"id":"done","name":"Done","category":"done"}]\n',
+      );
+      await _writeFile(
+        repo,
+        'DEMO/config/issue-types.json',
+        '[{"id":"story","name":"Story","workflow":"delivery-workflow"}]\n',
+      );
+      await _writeFile(
+        repo,
+        'DEMO/config/fields.json',
+        '[{"id":"summary","name":"Summary","type":"string","required":true},'
+            '{"id":"description","name":"Description","type":"markdown","required":false},'
+            '{"id":"acceptanceCriteria","name":"Acceptance Criteria","type":"markdown","required":false},'
+            '{"id":"priority","name":"Priority","type":"option","required":false,"options":[{"id":"medium","name":"Medium"}]},'
+            '{"id":"assignee","name":"Assignee","type":"user","required":false},'
+            '{"id":"labels","name":"Labels","type":"array","required":false},'
+            '{"id":"storyPoints","name":"Story Points","type":"number","required":false}]\n',
+      );
+      await _writeFile(
+        repo,
+        'DEMO/config/workflows.json',
+        '{"delivery-workflow":{"name":"Delivery Workflow","statuses":["todo","done"],'
+            '"transitions":[{"id":"finish","name":"Finish","from":"todo","to":"done"}]}}\n',
+      );
+      await _git(repo.path, ['add', 'DEMO/config']);
+      await _git(repo.path, [
+        'commit',
+        '-m',
+        'Seed validated settings fixture',
+      ]);
+
+      final repository = LocalTrackStateRepository(repositoryPath: repo.path);
+      final snapshot = await repository.loadSnapshot();
+      final normalizedSnapshot = await repository.saveProjectSettings(
+        snapshot.project.settingsCatalog,
+      );
+      final beforeHead = await Process.run('git', [
+        '-C',
+        repo.path,
+        'rev-parse',
+        'HEAD',
+      ]);
+
+      await expectLater(
+        () => repository.saveProjectSettings(
+          normalizedSnapshot.project.settingsCatalog,
+        ),
+        throwsA(
+          isA<TrackStateRepositoryException>().having(
+            (error) => error.message,
+            'message',
+            contains('No Git commit was produced'),
+          ),
+        ),
+      );
+
+      final afterHead = await Process.run('git', [
+        '-C',
+        repo.path,
+        'rev-parse',
+        'HEAD',
+      ]);
+      final status = await Process.run('git', [
+        '-C',
+        repo.path,
+        'status',
+        '--short',
+      ]);
+
+      expect(
+        afterHead.stdout.toString().trim(),
+        beforeHead.stdout.toString().trim(),
+      );
+      expect(status.stdout.toString().trim(), isEmpty);
     },
   );
 
