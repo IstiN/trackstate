@@ -406,6 +406,16 @@ jobs:
           fi
 
           {
+            echo "# TrackState ${release_tag}"
+            echo ""
+            echo "## Quick Start"
+            echo ""
+            echo "Download the appropriate artifact for your platform from the table below and follow the installation instructions."
+            echo ""
+            echo "## Installation"
+            echo ""
+            echo "See the CLI install commands below for your platform."
+            echo ""
             echo "<!-- The compiled artifacts table below is intentionally additive; it is appended even when the GitHub API generates release notes, so every release page lists the published assets. -->"
             echo ""
             echo "## Compiled artifacts"
