@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import fnmatch
 import json
 import os
@@ -883,7 +881,3 @@ def _markdown_human_lines(checks: Any) -> list[str]:
             f"- **Check:** {entry.get('check')} **Observed:** `{entry.get('observed')}`"
         )
     return lines
-
-
-if __name__ == "__main__":
-    unittest.main()
