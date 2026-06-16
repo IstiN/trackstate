@@ -28,6 +28,7 @@ class WorkspaceSyncService {
     WorkspaceSyncTimerFactory? timerFactory,
     Duration cadence = const Duration(seconds: 60),
     Duration minimumInterval = const Duration(seconds: 30),
+    Duration retryWatchdogInterval = const Duration(seconds: 5),
     List<Duration> hostedBackoffSteps = const <Duration>[
       Duration(minutes: 1),
       Duration(minutes: 2),
@@ -43,6 +44,7 @@ class WorkspaceSyncService {
        _timerFactory = timerFactory ?? _defaultTimerFactory,
        _cadence = cadence,
        _minimumInterval = minimumInterval,
+       _retryWatchdogInterval = retryWatchdogInterval,
        _hostedBackoffSteps = hostedBackoffSteps;
 
   final WorkspaceSyncRepository _repository;
@@ -53,14 +55,17 @@ class WorkspaceSyncService {
   final WorkspaceSyncTimerFactory _timerFactory;
   final Duration _cadence;
   final Duration _minimumInterval;
+  final Duration _retryWatchdogInterval;
   final List<Duration> _hostedBackoffSteps;
 
   Timer? _timer;
+  Timer? _retryWatchdogTimer;
   bool _disposed = false;
   bool _inFlight = false;
   WorkspaceSyncTrigger? _queuedFollowUpTrigger;
   int _hostedBackoffIndex = 0;
   DateTime? _lastCompletedAt;
+  DateTime? _scheduledHostedRetryAt;
   TrackerSnapshot? _baselineSnapshot;
   RepositorySyncState? _previousSyncState;
 
@@ -110,6 +115,8 @@ class WorkspaceSyncService {
     final effectiveTrigger = _queuedFollowUpTrigger ?? trigger;
     _queuedFollowUpTrigger = null;
     _timer?.cancel();
+    _retryWatchdogTimer?.cancel();
+    _retryWatchdogTimer = null;
     _inFlight = true;
     _publishStatus(
       _status.copyWith(
@@ -130,6 +137,9 @@ class WorkspaceSyncService {
       );
       _lastCompletedAt = _now();
       _hostedBackoffIndex = 0;
+      _scheduledHostedRetryAt = null;
+      _retryWatchdogTimer?.cancel();
+      _retryWatchdogTimer = null;
       _publishStatus(
         _status.copyWith(
           health: WorkspaceSyncHealth.synced,
@@ -152,7 +162,7 @@ class WorkspaceSyncService {
           nextRetryAt: nextRetryAt,
         ),
       );
-      _scheduleNext(nextRetryAt.difference(_lastCompletedAt!));
+      _scheduleRetryAt(nextRetryAt);
     } finally {
       _inFlight = false;
       if (_queuedFollowUpTrigger case final pendingTrigger? when !_disposed) {
@@ -284,10 +294,15 @@ class WorkspaceSyncService {
     if (_repository.usesLocalPersistence || _hostedBackoffSteps.isEmpty) {
       return now.add(_cadence);
     }
+    final scheduledHostedRetryAt = _scheduledHostedRetryAt;
+    if (scheduledHostedRetryAt != null && scheduledHostedRetryAt.isAfter(now)) {
+      return scheduledHostedRetryAt;
+    }
     final index = _hostedBackoffIndex < _hostedBackoffSteps.length
         ? _hostedBackoffIndex
         : _hostedBackoffSteps.length - 1;
     final nextRetryAt = now.add(_hostedBackoffSteps[index]);
+    _scheduledHostedRetryAt = nextRetryAt;
     if (_hostedBackoffIndex < _hostedBackoffSteps.length - 1) {
       _hostedBackoffIndex += 1;
     }
@@ -324,6 +339,39 @@ class WorkspaceSyncService {
     });
   }
 
+  void _scheduleRetryAt(DateTime nextRetryAt) {
+    final delay = nextRetryAt.difference(_now());
+    _startRetryWatchdog(nextRetryAt);
+    _scheduleNext(delay.isNegative ? Duration.zero : delay);
+  }
+
+  void _startRetryWatchdog(DateTime nextRetryAt) {
+    _retryWatchdogTimer?.cancel();
+    _retryWatchdogTimer = null;
+    if (_disposed ||
+        _repository.usesLocalPersistence ||
+        _retryWatchdogInterval <= Duration.zero) {
+      return;
+    }
+    final delay = nextRetryAt.difference(_now());
+    final watchdogDelay = delay <= Duration.zero
+        ? Duration.zero
+        : delay < _retryWatchdogInterval
+        ? delay
+        : _retryWatchdogInterval;
+    _retryWatchdogTimer = _timerFactory(watchdogDelay, () {
+      _retryWatchdogTimer = null;
+      if (_disposed) {
+        return;
+      }
+      if (!_now().isBefore(nextRetryAt)) {
+        unawaited(checkNow(force: true));
+        return;
+      }
+      _startRetryWatchdog(nextRetryAt);
+    });
+  }
+
   void _publishStatus(WorkspaceSyncStatus status) {
     _status = status;
     _onStatusChanged(status);
@@ -332,6 +380,7 @@ class WorkspaceSyncService {
   void dispose() {
     _disposed = true;
     _timer?.cancel();
+    _retryWatchdogTimer?.cancel();
   }
 }
 

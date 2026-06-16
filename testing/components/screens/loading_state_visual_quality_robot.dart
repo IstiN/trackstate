@@ -29,7 +29,11 @@ class LoadingStateVisualQualityRobot {
       matching: find.bySubtype<ButtonStyleButton>(),
     );
     if (descendantButtons.evaluate().isNotEmpty) {
-      return _topMost(descendantButtons);
+      return _filteredByGeometry(
+        descendantButtons,
+        predicate: (rect) => rect.top < 120 && rect.right > 900,
+        fallback: _topMost(descendantButtons),
+      );
     }
 
     final buttonCandidates = find.ancestor(
@@ -37,7 +41,11 @@ class LoadingStateVisualQualityRobot {
       matching: find.bySubtype<ButtonStyleButton>(),
     );
     if (buttonCandidates.evaluate().isNotEmpty) {
-      return _topMost(buttonCandidates);
+      return _filteredByGeometry(
+        buttonCandidates,
+        predicate: (rect) => rect.top < 120 && rect.right > 900,
+        fallback: _topMost(buttonCandidates),
+      );
     }
 
     return _topMost(semanticsScope);
@@ -189,6 +197,15 @@ class LoadingStateVisualQualityRobot {
     await tester.pump();
 
     final visits = <String>[];
+    if (jqlSearchField.evaluate().isNotEmpty) {
+      await tester.tap(jqlSearchField);
+      await tester.pump();
+      final initialLabel = _focusedCandidate(candidates);
+      if (initialLabel != null) {
+        visits.add(initialLabel);
+      }
+    }
+
     for (var index = 0; index < tabs; index += 1) {
       await tester.sendKeyEvent(LogicalKeyboardKey.tab);
       await tester.pump(const Duration(milliseconds: 60));
@@ -234,6 +251,26 @@ class LoadingStateVisualQualityRobot {
     return null;
   }
 
+  Color resolveNavigationBackground(String label, Set<WidgetState> states) {
+    final baseBackground =
+        navigationBackgroundColor(label) ?? Colors.transparent;
+    final inkWellFinder = find.descendant(
+      of: navigationItem(label),
+      matching: find.byType(InkWell),
+    );
+    if (inkWellFinder.evaluate().isEmpty) {
+      return baseBackground;
+    }
+
+    final element = inkWellFinder.evaluate().first;
+    final inkWell = element.widget as InkWell;
+    final theme = Theme.of(element);
+    final overlay =
+        inkWell.overlayColor?.resolve(states) ??
+        _inkWellOverlayColor(inkWell: inkWell, theme: theme, states: states);
+    return Color.alphaBlend(overlay, baseBackground);
+  }
+
   Color navigationTextColor(String label) {
     return renderedTextColorWithin(navigationItem(label), label);
   }
@@ -242,8 +279,34 @@ class LoadingStateVisualQualityRobot {
     return renderedTextColorWithin(jqlSearchLoadingBanner, 'Loading...');
   }
 
+  Color loadingBannerBackgroundColor() {
+    return _decoratedContainerColorWithin(
+      jqlSearchLoadingBanner,
+      largest: true,
+    );
+  }
+
   Color firstLoadingPillTextColor() {
     return renderedTextColorWithin(firstLoadingPill, 'Loading...');
+  }
+
+  Color firstLoadingPillBackgroundColor() {
+    return _decoratedContainerColorWithin(firstLoadingPill, largest: true);
+  }
+
+  Color loadingIndicatorForegroundColor() {
+    final decoration = _boxDecorationOf(_loadingBannerIndicator());
+    final border = decoration.border;
+    if (border is Border) {
+      return border.top.color;
+    }
+    throw StateError('No rendered loading-indicator border found.');
+  }
+
+  Color loadingIndicatorBackgroundColor() {
+    final decoration = _boxDecorationOf(_loadingBannerIndicator());
+    final fill = decoration.color ?? Colors.transparent;
+    return Color.alphaBlend(fill, loadingBannerBackgroundColor());
   }
 
   Color topBarPlaceholderTextColor() {
@@ -332,6 +395,89 @@ class LoadingStateVisualQualityRobot {
       }
     }
     return false;
+  }
+
+  Color _inkWellOverlayColor({
+    required InkWell inkWell,
+    required ThemeData theme,
+    required Set<WidgetState> states,
+  }) {
+    if (states.contains(WidgetState.pressed)) {
+      return inkWell.highlightColor ?? theme.highlightColor;
+    }
+    if (states.contains(WidgetState.focused)) {
+      return inkWell.focusColor ?? theme.focusColor;
+    }
+    if (states.contains(WidgetState.hovered)) {
+      return inkWell.hoverColor ?? theme.hoverColor;
+    }
+    return Colors.transparent;
+  }
+
+  Finder _loadingBannerIndicator() {
+    final indicators = find.descendant(
+      of: jqlSearchLoadingBanner,
+      matching: find.byWidgetPredicate((widget) {
+        if (widget is! Container) {
+          return false;
+        }
+        final decoration = widget.decoration;
+        return decoration is BoxDecoration &&
+            decoration.shape == BoxShape.circle &&
+            decoration.color != null &&
+            decoration.border is Border;
+      }, description: 'loading banner indicator'),
+    );
+    return _largestByArea(indicators);
+  }
+
+  Color _decoratedContainerColorWithin(Finder scope, {required bool largest}) {
+    final scopedDecoration = _tryBoxDecorationOf(scope);
+    if (scopedDecoration?.color case final color?) {
+      return color;
+    }
+
+    final candidates = find.descendant(
+      of: scope,
+      matching: find.byWidgetPredicate((widget) {
+        if (widget is! Container) {
+          return false;
+        }
+        final decoration = widget.decoration;
+        return decoration is BoxDecoration && decoration.color != null;
+      }, description: 'decorated container'),
+    );
+    if (candidates.evaluate().isEmpty) {
+      throw StateError('No decorated container color found within $scope.');
+    }
+    final target = largest
+        ? _largestByArea(candidates)
+        : _smallestByArea(candidates);
+    final decoration = _boxDecorationOf(target);
+    return decoration.color!;
+  }
+
+  BoxDecoration? _tryBoxDecorationOf(Finder scope) {
+    if (scope.evaluate().isEmpty) {
+      return null;
+    }
+    final widget = tester.widget(scope.first);
+    if (widget is! Container) {
+      return null;
+    }
+    final decoration = widget.decoration;
+    if (decoration is! BoxDecoration) {
+      return null;
+    }
+    return decoration;
+  }
+
+  BoxDecoration _boxDecorationOf(Finder scope) {
+    final decoration = _tryBoxDecorationOf(scope);
+    if (decoration == null) {
+      throw StateError('No BoxDecoration found for $scope.');
+    }
+    return decoration;
   }
 
   Finder _filteredByGeometry(

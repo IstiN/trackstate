@@ -177,6 +177,13 @@ void main() {
           final submitLabel = selectedState.submitLabel ?? '';
           final step3Failures = <String>[];
 
+          if (recordedInspection.state !=
+              LocalWorkspaceInspectionState.blocked) {
+            step3Failures.add(
+              'The production onboarding inspection did not classify the non-empty non-Git folder as blocked. '
+              'Observed inspection state: ${recordedInspection.state.name}',
+            );
+          }
           if (!hasExistingGitRepositoryGuidance || !hasEmptyFolderGuidance) {
             step3Failures.add(
               'The user-facing message did not instruct the user to choose an existing Git repository or an empty folder. '
@@ -201,6 +208,7 @@ void main() {
             status: step3Failures.isEmpty ? 'passed' : 'failed',
             action: _requestSteps[2],
             observed:
+                'inspection_state=${recordedInspection.state.name}; '
                 'status_label=${selectedState.statusLabel}; '
                 'inspection_message=$message; '
                 'submit_label=${selectedState.submitLabel}; '
@@ -222,6 +230,7 @@ void main() {
             check:
                 'Chose Initialize folder and reviewed the exact status card copy, selected folder path, visible fields, and button state shown for the non-empty non-Git directory.',
             observed:
+                'inspection_state=${recordedInspection.state.name}; '
                 'status_label=${selectedState.statusLabel}; '
                 'inspection_message=$message; '
                 'folder_path=${selectedState.folderPath}; '
@@ -331,7 +340,7 @@ String _jiraComment(Map<String, Object?> result, {required bool passed}) {
     'h4. What was tested',
     "* Opened the production first-launch onboarding screen and chose {noformat}Initialize folder{noformat}.",
     '* Used a real non-empty non-Git temp directory containing {noformat}notes.txt{noformat} as the selected folder.',
-    '* Checked the visible status label, guidance text, selected folder path, workspace details fields, and the visible Initialize action state after folder inspection.',
+    '* Checked the real production inspection state, the visible status label, guidance text, selected folder path, workspace details fields, and the visible Initialize action state after folder inspection.',
     '',
     'h4. Result',
     passed
@@ -384,7 +393,7 @@ String _prBody(Map<String, Object?> result, {required bool passed}) {
     '### What was tested',
     '- Opened the production first-launch onboarding screen and chose `Initialize folder`.',
     '- Used a real non-empty non-Git temp directory containing `notes.txt` as the selected folder.',
-    '- Checked the visible status label, guidance text, selected folder path, workspace details fields, and the visible Initialize action state after folder inspection.',
+    '- Checked the real production inspection state, the visible status label, guidance text, selected folder path, workspace details fields, and the visible Initialize action state after folder inspection.',
     '',
     '### Result',
     passed
@@ -475,7 +484,7 @@ String _bugDescription(Map<String, Object?> result) {
     'Selecting a non-empty non-Git folder from the Initialize folder flow should block initialization, show actionable guidance that tells the user to choose an existing Git repository or an empty folder, and keep the visible Initialize action disabled.',
     '',
     '## Actual result',
-    'After selecting `${result['directory_path']}`, the UI showed `${result['status_label']}` with the message `${result['inspection_message']}`. The visible Initialize action `${result['submit_label']}` remained `${result['submit_enabled'] == true ? 'enabled' : 'disabled'}` instead of blocking the flow.',
+    'After selecting `${result['directory_path']}`, the real production inspection state was `${result['production_inspection_state']}`. The UI showed `${result['status_label']}` with the message `${result['inspection_message']}`. The visible Initialize action `${result['submit_label']}` remained `${result['submit_enabled'] == true ? 'enabled' : 'disabled'}` instead of blocking the flow.',
     '',
     '## Exact error message / stack trace',
     '```',
@@ -485,8 +494,8 @@ String _bugDescription(Map<String, Object?> result) {
     '```',
     '',
     '## Actual vs Expected',
-    '- **Expected:** status should reflect a blocked folder, the message should explicitly direct users to choose an existing Git repository or an empty folder, and the visible Initialize action should be disabled.',
-    '- **Actual:** status was `${result['status_label']}`, the message was `${result['inspection_message']}`, and the visible Initialize action `${result['submit_label']}` had `enabled=${result['submit_enabled']}`.',
+    '- **Expected:** the real inspection state should be `blocked`, the status should reflect a blocked folder, the message should explicitly direct users to choose an existing Git repository or an empty folder, and the visible Initialize action should be disabled.',
+    '- **Actual:** the real inspection state was `${result['production_inspection_state']}`, the status was `${result['status_label']}`, the message was `${result['inspection_message']}`, and the visible Initialize action `${result['submit_label']}` had `enabled=${result['submit_enabled']}`.',
     '',
     '## Environment',
     '- Command: `$_runCommand`',
@@ -499,6 +508,8 @@ String _bugDescription(Map<String, Object?> result) {
     '## Relevant logs',
     '```',
     'Visible texts: ${((result['visible_texts'] as List?) ?? const []).join(' | ')}',
+    'Production inspection state: ${result['production_inspection_state'] ?? '<missing>'}',
+    'Production inspection message: ${result['production_inspection_message'] ?? '<missing>'}',
     'Status label: ${result['status_label'] ?? '<missing>'}',
     'Inspection message: ${result['inspection_message'] ?? '<missing>'}',
     'Folder path visible: ${result['folder_path_visible'] ?? '<missing>'}',

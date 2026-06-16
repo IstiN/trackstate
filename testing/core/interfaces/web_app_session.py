@@ -222,6 +222,13 @@ class WebAppSession(Protocol):
     ) -> object: ...
     def active_element(self) -> FocusedElementObservation: ...
 
+    def wait_for_active_element_change(
+        self,
+        previous_outer_html: str,
+        *,
+        timeout_ms: int = 2_000,
+    ) -> FocusedElementObservation: ...
+
     def wait_for_download_after_keypress(
         self,
         key: str,
@@ -229,7 +236,23 @@ class WebAppSession(Protocol):
         timeout_ms: int = 30_000,
     ) -> str: ...
 
+    def save_download_after_keypress(
+        self,
+        key: str,
+        *,
+        timeout_ms: int = 30_000,
+    ) -> str: ...
+
     def wait_for_download_after_click(
+        self,
+        selector: str,
+        *,
+        has_text: str | None = None,
+        index: int = 0,
+        timeout_ms: int = 30_000,
+    ) -> str: ...
+
+    def save_download_after_click(
         self,
         selector: str,
         *,
@@ -275,6 +298,10 @@ class WebAppSession(Protocol):
     def mouse_move(self, x: float, y: float) -> None: ...
 
     def mouse_click(self, x: float, y: float, *, delay_ms: int = 0) -> None: ...
+
+    def start_network_recording(self, *, name: str, url_fragment: str) -> None: ...
+
+    def read_network_log(self, *, name: str) -> list[dict[str, object]]: ...
 
     def wait_for_text_absent(
         self,

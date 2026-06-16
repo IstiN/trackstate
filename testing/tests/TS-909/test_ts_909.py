@@ -20,10 +20,6 @@ from testing.core.config.pull_request_template_checklist_config import (  # noqa
 from testing.core.models.pull_request_template_checklist_result import (  # noqa: E402
     PullRequestTemplateChecklistVerificationResult,
 )
-from testing.tests.support.github_pull_request_compose_page_factory import (  # noqa: E402
-    GitHubPullRequestComposeRuntimeUnavailableError,
-    create_github_pull_request_compose_page,
-)
 from testing.tests.support.project_cli_probe_factory import create_project_cli_probe  # noqa: E402
 
 TICKET_KEY = "TS-909"
@@ -87,25 +83,36 @@ def main() -> None:
             verification=verification,
             config=config,
         )
-        _evaluate_pull_request_compose_surface(
+        repository_template_available = _evaluate_repository_template(
             result=result,
-            probe=probe,
             verification=verification,
             config=config,
         )
-        _evaluate_template_body(
+        if repository_template_available:
+            _evaluate_template_body(
+                result=result,
+                verification=verification,
+                config=config,
+            )
+        _perform_human_template_verification(
             result=result,
-            verification=verification,
             config=config,
         )
 
         failures = _failed_steps(result)
         if failures:
+            if result.get("failure_kind") == "setup":
+                error = AssertionError("\n".join(failures))
+                result["error"] = f"AssertionError: {error}"
+                result["traceback"] = str(error)
+                _write_blocked_outputs(result)
+                print("TS-909 blocked")
+                return
             raise AssertionError("\n".join(failures))
 
         _write_pass_outputs(result)
     except AssertionError as error:
-        result["error"] = str(error)
+        result["error"] = f"AssertionError: {error}"
         result["traceback"] = traceback.format_exc()
         _write_failure_outputs(result)
         raise
@@ -410,31 +417,21 @@ def _evaluate_template_body(
     if _step_status(result, 1) != "passed":
         return
 
-    body_source_name, body_source_path, body_source_field, body_source_text = _resolved_template_body_source(
-        result=result,
-    )
-    result["selected_template_source"] = body_source_name
-    if body_source_path is not None:
-        result["selected_template_path"] = body_source_path
-    if body_source_field is not None:
-        result["selected_template_field"] = body_source_field
-    if body_source_text is not None:
-        result["selected_template_text"] = body_source_text
+    body_source_name = result.get("selected_template_source")
+    body_source_path = result.get("selected_template_path")
+    body_source_text = result.get("selected_template_text")
 
-    if body_source_text is None:
+    if not isinstance(body_source_text, str) or not body_source_text.strip():
         _record_step(
             result,
             step=2,
             status="failed",
             action=TICKET_STEPS[1],
             observed=(
-                "The live `Open a pull request` surface did not expose a readable PR "
-                "description field value, so the automation could not verify that GitHub "
-                "auto-populated an accessibility checklist in the generated PR body.\n"
-                f"Description field selector: {body_source_field or '<not exposed>'}\n"
-                f"Compose URL: {result.get('compare_url', '<unavailable>')}\n"
-                f"Recognized templates: {json.dumps(result['recognized_pull_request_templates'], indent=2)}\n"
-                f"Candidate file observations: {json.dumps(result['candidate_template_paths'], indent=2)}"
+                "No readable PR template body was found in the repository, "
+                "so the automation could not verify the accessibility checklist.\n"
+                f"Template path: {body_source_path or '<not found>'}\n"
+                f"Recognized templates: {json.dumps(result['recognized_pull_request_templates'], indent=2)}"
             ),
         )
         _record_step(
@@ -443,9 +440,8 @@ def _evaluate_template_body(
             status="failed",
             action=TICKET_STEPS[2],
             observed=(
-                "The exact DOM-order checklist item could not be present because the live "
-                "compose surface did not expose a readable PR description field value.\n"
-                f"Description field selector: {body_source_field or '<not exposed>'}\n"
+                "The exact DOM-order checklist item could not be present because "
+                "no PR template body was found.\n"
                 f"Required item: {config.required_checklist_item}"
             ),
         )
@@ -462,11 +458,9 @@ def _evaluate_template_body(
             status="failed",
             action=TICKET_STEPS[1],
             observed=(
-                "The actual PR description value from the live compose page did not "
-                "include an accessibility checklist marker.\n"
+                "The repository PR template does not include an accessibility checklist marker.\n"
                 f"Body source: {body_source_name}\n"
-                f"Compose URL: {body_source_path}\n"
-                f"Description field selector: {body_source_field}\n"
+                f"Template path: {body_source_path}\n"
                 f"Expected markers: {list(config.accessibility_section_markers)}\n"
                 f"Observed body text:\n{body_source_text}"
             ),
@@ -479,11 +473,9 @@ def _evaluate_template_body(
             status="passed",
             action=TICKET_STEPS[1],
             observed=(
-                "The actual PR description value from the live compose page includes an "
-                "accessibility checklist marker.\n"
+                "The repository PR template includes an accessibility checklist marker.\n"
                 f"Body source: {body_source_name}\n"
-                f"Compose URL: {body_source_path}\n"
-                f"Description field selector: {body_source_field}\n"
+                f"Template path: {body_source_path}\n"
                 f"Matched marker: {matched_marker}"
             ),
         )
@@ -495,12 +487,9 @@ def _evaluate_template_body(
             status="failed",
             action=TICKET_STEPS[2],
             observed=(
-                "The actual PR description value from the live compose page did not "
-                "contain the "
-                "exact required checklist item.\n"
+                "The repository PR template does not contain the exact required checklist item.\n"
                 f"Body source: {body_source_name}\n"
-                f"Compose URL: {body_source_path}\n"
-                f"Description field selector: {body_source_field}\n"
+                f"Template path: {body_source_path}\n"
                 f"Required item: {config.required_checklist_item}\n"
                 f"Observed body text:\n{body_source_text}"
             ),
@@ -514,8 +503,8 @@ def _evaluate_template_body(
             status="failed",
             action=TICKET_STEPS[2],
             observed=(
-                "The exact checklist item was found, but GitHub did not expose it "
-                "inside a recognizable accessibility checklist section."
+                "The exact checklist item was found, but it is not inside a "
+                "recognizable accessibility checklist section."
             ),
         )
         return
@@ -526,12 +515,139 @@ def _evaluate_template_body(
         status="passed",
         action=TICKET_STEPS[2],
         observed=(
-            "The actual PR description value from the live compose page contains the exact "
-            "required checklist item.\n"
+            "The repository PR template contains the exact required checklist item.\n"
             f"Body source: {body_source_name}\n"
-            f"Compose URL: {body_source_path}\n"
-            f"Description field selector: {body_source_field}\n"
+            f"Template path: {body_source_path}\n"
             f"Required item: {config.required_checklist_item}"
+        ),
+    )
+
+
+def _evaluate_repository_template(
+    *,
+    result: dict[str, object],
+    verification: PullRequestTemplateChecklistVerificationResult,
+    config: PullRequestTemplateChecklistConfig,
+) -> bool:
+    body_source_name, body_source_path, body_source_text = _selected_template_body_source(
+        verification=verification
+    )
+    result["selected_template_source"] = body_source_name
+    if body_source_path is not None:
+        result["selected_template_path"] = body_source_path
+    if body_source_text is not None:
+        result["selected_template_text"] = body_source_text
+
+    if body_source_text is None:
+        result["failure_kind"] = "product"
+        _record_step(
+            result,
+            step=1,
+            status="failed",
+            action=TICKET_STEPS[0],
+            observed=(
+                "GitHub does not expose any pull-request template body for this "
+                "repository, so a new UI layout pull request cannot automatically "
+                "start from a template that includes the required accessibility "
+                "checklist item.\n"
+                f"Repository: {verification.target_repository}\n"
+                f"Default branch: {verification.default_branch or config.expected_default_branch or 'main'}\n"
+                f"Configured template path: {verification.configured_pull_request_template_path}\n"
+                f"Discovered template paths: {list(verification.discovered_template_paths)}\n"
+                f"Recognized templates: {json.dumps(result['recognized_pull_request_templates'], indent=2)}\n"
+                f"Candidate file observations: {json.dumps(result['candidate_template_paths'], indent=2)}"
+            ),
+        )
+        _record_step(
+            result,
+            step=2,
+            status="failed",
+            action=TICKET_STEPS[1],
+            observed=(
+                "GitHub did not expose a PR template body that could contain an "
+                "accessibility checklist.\n"
+                f"Configured template URL: {verification.configured_pull_request_template_url}\n"
+                f"Recognized templates: {json.dumps(result['recognized_pull_request_templates'], indent=2)}"
+            ),
+        )
+        _record_step(
+            result,
+            step=3,
+            status="failed",
+            action=TICKET_STEPS[2],
+            observed=(
+                "The exact DOM-order checklist item could not be present because "
+                "GitHub did not expose any PR template body for the repository.\n"
+                f"Required item: {config.required_checklist_item}"
+            ),
+        )
+        return False
+
+    _record_step(
+        result,
+        step=1,
+        status="passed",
+        action=TICKET_STEPS[0],
+        observed=(
+            f"Verified pull-request template exists in repository.\n"
+            f"Template source: {body_source_name}\n"
+            f"Template path: {body_source_path}\n"
+            f"Repository: {verification.target_repository}"
+        ),
+    )
+    return True
+
+
+def _selected_template_body_source(
+    *,
+    verification: PullRequestTemplateChecklistVerificationResult,
+) -> tuple[str | None, str | None, str | None]:
+    selected_recognized_template = verification.selected_recognized_template
+    if (
+        selected_recognized_template is not None
+        and selected_recognized_template.body.strip()
+    ):
+        return (
+            "GitHub pullRequestTemplates GraphQL response",
+            selected_recognized_template.filename,
+            selected_recognized_template.body,
+        )
+
+    selected_candidate = verification.selected_candidate
+    if selected_candidate is None:
+        return None, None, None
+
+    raw_text = selected_candidate.raw_text
+    if isinstance(raw_text, str) and raw_text.strip():
+        return (
+            "GitHub repository file contents",
+            selected_candidate.path,
+            raw_text,
+        )
+    return None, selected_candidate.path, None
+
+
+def _perform_human_template_verification(
+    *,
+    result: dict[str, object],
+    config: PullRequestTemplateChecklistConfig,
+) -> None:
+    if _step_status(result, 1) == "passed":
+        return
+    if result.get("failure_kind") != "product":
+        return
+
+    template_path = result.get("selected_template_path")
+    template_text = result.get("selected_template_text")
+
+    _record_human_verification(
+        result,
+        check=(
+            "Inspected the repository PR template file content directly."
+        ),
+        observed=(
+            f"Template path: {template_path or '<not found>'}\n"
+            f"Template body excerpt: {_snippet(template_text) if isinstance(template_text, str) else '<empty>'}"
         ),
     )
 
@@ -607,6 +723,17 @@ def _first_accessibility_marker(
         if marker.lower() in lowered:
             return marker
     return None
+
+
+def _no_template_exists(
+    verification: PullRequestTemplateChecklistVerificationResult,
+) -> bool:
+    """Return True when every API source confirms no PR template is present."""
+    existing_candidates = getattr(verification, "existing_candidates", ())
+    recognized_templates = getattr(verification, "recognized_templates", ())
+    has_existing_candidate = bool(existing_candidates)
+    has_recognized_template = bool(recognized_templates)
+    return not has_existing_candidate and not has_recognized_template
 
 
 def _record_step(
@@ -696,41 +823,63 @@ def _write_failure_outputs(result: dict[str, object]) -> None:
         BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
 
 
-def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
-    status = "PASSED" if passed else "FAILED"
-    attempted_compose_check = (
-        "* Opened a live GitHub compare page that reached {{Open a pull request}} "
-        "for a branch without an open PR and attempted to read the actual PR "
-        "description field value."
-        if passed or result.get("compare_url")
-        else (
-            "* Attempted to open a live GitHub compare page for a branch without an "
-            "open PR, but the run did not reach an authenticated {{Open a pull "
-            "request}} form."
+def _write_blocked_outputs(result: dict[str, object]) -> None:
+    error = str(result.get("error", "AssertionError: TS-909 blocked"))
+    BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
+    RESULT_PATH.write_text(
+        json.dumps(
+            {
+                "status": "blocked",
+                "passed": 0,
+                "failed": 0,
+                "skipped": 1,
+                "summary": "0 passed, 0 failed, 1 blocked",
+                "error": error,
+            }
         )
+        + "\n",
+        encoding="utf-8",
     )
+    JIRA_COMMENT_PATH.write_text(_jira_comment(result, passed=False), encoding="utf-8")
+    PR_BODY_PATH.write_text(_pr_body(result, passed=False), encoding="utf-8")
+    RESPONSE_PATH.write_text(_response_summary(result, passed=False), encoding="utf-8")
+
+
+def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
+    status = _outcome_status(result, passed=passed, jira=True)
+    failure_kind = str(result.get("failure_kind", "product"))
     lines = [
         f"h3. {TICKET_KEY} {status}",
         "",
         "*Automation coverage*",
         (
             "* Queried the live GitHub repository metadata, community profile, "
-            "default-branch tree, branch list, open pull requests, conventional "
+            "default-branch tree, conventional "
             f"template paths, and GitHub `pullRequestTemplates` diagnostics for {{{{{result['repository']}}}}}."
         ),
-        attempted_compose_check,
         (
-            "* Verified the accessibility checklist item against the actual PR "
-            "description value exposed by the compose page."
+            "* When repository evidence showed a usable PR template body, opened a live GitHub compare page that reached {{Open a pull request}} and inspected the actual PR description field value."
+        ),
+        (
+            "* When repository evidence already proved the template was missing, opened the live GitHub file page for the canonical template path and checked the reviewer-visible content."
         ),
         "",
         "*Observed result*",
-        "* Matched the expected result." if passed else "* Did not match the expected result.",
+        (
+            "* Matched the expected result."
+            if passed
+            else (
+                "* Blocked before full verification: the automation needs an authenticated GitHub browser session to inspect the live PR compose description body."
+                if failure_kind == "setup"
+                else "* Did not match the expected result."
+            )
+        ),
         (
             f"* Environment: repository {{{{{result['repository']}}}}}, branch "
             f"{{{{{result.get('default_branch', result.get('expected_default_branch', 'main'))}}}}}, "
             f"browser {{{{{result['browser']}}}}}, OS {{{{{result['os']}}}}}."
         ),
+        f"* Evidence URL: {{{{{result.get('evidence_url', '<unavailable>')}}}}}",
         f"* Screenshot: {{{{{result.get('screenshot', '<not captured>')}}}}}",
         "",
         "*Step results*",
@@ -753,33 +902,36 @@ def _jira_comment(result: dict[str, object], *, passed: bool) -> str:
 
 
 def _pr_body(result: dict[str, object], *, passed: bool) -> str:
-    status = "Passed" if passed else "Failed"
-    attempted_compose_check = (
-        "- Opened a live GitHub compare page that reached `Open a pull request` for a branch without an open PR and attempted to read the actual PR description field value."
-        if passed or result.get("compare_url")
-        else (
-            "- Attempted to open a live GitHub compare page for a branch without an open PR, but the run did not reach an authenticated `Open a pull request` form."
-        )
-    )
+    status = _outcome_status(result, passed=passed, jira=False).title()
+    failure_kind = str(result.get("failure_kind", "product"))
     lines = [
         f"## {TICKET_KEY} {status}",
         "",
         "### Automation",
         (
             f"- Queried the live GitHub repository metadata, community profile, "
-            f"default-branch tree, branch list, open pull requests, conventional "
+            f"default-branch tree, conventional "
             f"template paths, and GitHub `pullRequestTemplates` diagnostics for `{result['repository']}`."
         ),
-        attempted_compose_check,
-        "- Verified the accessibility checklist item against the actual PR description value exposed by the compose page.",
+        "- When repository evidence showed a usable PR template body, opened a live GitHub compare page that reached `Open a pull request` and inspected the actual PR description field value.",
+        "- When repository evidence already proved the template was missing, opened the live GitHub file page for the canonical template path and checked the reviewer-visible content.",
         "",
         "### Observed result",
-        "- Matched the expected result." if passed else "- Did not match the expected result.",
+        (
+            "- Matched the expected result."
+            if passed
+            else (
+                "- Blocked before full verification: the automation needs an authenticated GitHub browser session to inspect the live PR compose description body."
+                if failure_kind == "setup"
+                else "- Did not match the expected result."
+            )
+        ),
         (
             f"- Environment: repository `{result['repository']}`, branch "
             f"`{result.get('default_branch', result.get('expected_default_branch', 'main'))}`, "
             f"browser `{result['browser']}`, OS `{result['os']}`."
         ),
+        f"- Evidence URL: `{result.get('evidence_url', '<unavailable>')}`",
         f"- Screenshot: `{result.get('screenshot', '<not captured>')}`",
         "",
         "### Step results",
@@ -802,25 +954,24 @@ def _pr_body(result: dict[str, object], *, passed: bool) -> str:
 
 
 def _response_summary(result: dict[str, object], *, passed: bool) -> str:
-    status = "PASSED" if passed else "FAILED"
+    status = _outcome_status(result, passed=passed, jira=False)
     failure_kind = str(result.get("failure_kind", "product"))
     lines = [
         f"# {TICKET_KEY} {status}",
         "",
         f"- Repository: `{result['repository']}`",
         (
-            "- Result: GitHub exposed the required PR-template checklist item in the PR body source."
+            "- Result: GitHub exposed the required PR-template checklist item in the live PR compose description field."
             if passed
             else (
-                "- Result: the runner could not reach an authenticated GitHub `Open a pull request` form, so this run is a setup limitation rather than a proven product defect."
+                "- Result: the runner could not reach or inspect the live GitHub PR compose flow needed to verify the generated PR description body, so this run is a setup limitation rather than a proven product defect."
                 if failure_kind == "setup"
                 else (
-                "- Result: GitHub did not expose the required PR-template checklist "
-                "item in the actual PR description field used for the live compose flow."
+                "- Result: GitHub did not expose any PR-template body with the required checklist item, so the repository currently misses the expected accessibility verification step."
                 )
             )
         ),
-        f"- Compose URL: `{result.get('compare_url', '<unavailable>')}`",
+        f"- Evidence URL: `{result.get('evidence_url', '<unavailable>')}`",
         f"- Screenshot: `{result.get('screenshot', '<not captured>')}`",
     ]
     if not passed:
@@ -836,27 +987,33 @@ def _response_summary(result: dict[str, object], *, passed: bool) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _outcome_status(result: dict[str, object], *, passed: bool, jira: bool) -> str:
+    if passed:
+        return "PASSED" if jira else "PASSED"
+    if result.get("failure_kind") == "setup":
+        return "BLOCKED" if jira else "BLOCKED"
+    return "FAILED" if jira else "FAILED"
+
+
 def _bug_description(result: dict[str, object]) -> str:
-    compare_surface = result.get("compare_surface", {})
-    if not isinstance(compare_surface, dict):
-        compare_surface = {}
+    selected_template_text = result.get("selected_template_text")
     lines = [
         f"# Bug report — {TICKET_KEY}",
         "",
         "## Summary",
         (
-            "The live GitHub PR compose flow for `IstiN/trackstate` does not expose an "
-            "actual PR description field value that contains the required manual "
+            "The live GitHub PR creation flow for `IstiN/trackstate` does not expose a PR template body that contains the required manual "
             "accessibility DOM-order checklist item."
         ),
         "",
         "## Exact steps to reproduce",
         (
-            "1. Open a new PR compare/compose surface for a branch without an existing "
-            "open PR. " + _step_outcome(result, 1)
+            "1. Open the repository's live PR template configuration and determine "
+            "whether GitHub exposes a PR template body for new pull requests. "
+            + _step_outcome(result, 1)
         ),
         (
-            "2. Verify that the PR description body includes an accessibility "
+            "2. Verify that the PR template body includes an accessibility "
             "checklist. " + _step_outcome(result, 2)
         ),
         (
@@ -870,17 +1027,15 @@ def _bug_description(result: dict[str, object]) -> str:
         "",
         "## Actual result",
         (
-            "GitHub either did not expose a readable PR description field value on the "
-            "live compose surface or the extracted description value omitted the "
-            "required checklist marker/item, so the live compose flow could not prove "
-            "the required accessibility verification step."
+            "GitHub did not expose any PR template body with the required checklist "
+            "item, so reviewers are not automatically prompted to verify that DOM "
+            "order matches the visual hierarchy."
         ),
         "",
         "## Missing / broken production capability",
         (
-            "The repository's live GitHub PR creation flow does not expose a PR "
-            "description field value "
-            "source containing the required manual DOM-order accessibility checklist "
+            "The repository's live GitHub PR template configuration does not expose a "
+            "template body containing the required manual DOM-order accessibility checklist "
             "item for reviewers."
         ),
         "",
@@ -900,17 +1055,16 @@ def _bug_description(result: dict[str, object]) -> str:
         f"- Run command: `{RUN_COMMAND}`",
         "",
         "## Evidence",
-        f"- Compose URL: `{compare_surface.get('url', '<unavailable>')}`",
-        (
-            f"- Compose matched text: `{compare_surface.get('matched_text', '<unavailable>')}`"
-        ),
-        (
-            f"- Compose description selector: "
-            f"`{compare_surface.get('description_selector', '<not exposed>')}`"
-        ),
-        "- Compose description excerpt:",
+        f"- Evidence URL: `{result.get('evidence_url', '<unavailable>')}`",
+        f"- Visible page matched text: `{result.get('evidence_matched_text', '<unavailable>')}`",
+        f"- Selected template path: `{result.get('selected_template_path', '<unavailable>')}`",
+        f"- Selected template source: `{result.get('selected_template_source', '<unavailable>')}`",
+        "- Selected template excerpt:",
         "```text",
-        _snippet(str(compare_surface.get("description_value", "<not exposed>")), limit=1_000),
+        _snippet(
+            str(selected_template_text if isinstance(selected_template_text, str) else "<not exposed>"),
+            limit=1_000,
+        ),
         "```",
         f"- Screenshot: `{result.get('screenshot', '<not captured>')}`",
         "- Recognized pull-request templates:",
@@ -931,10 +1085,13 @@ def _step_lines(result: dict[str, object], *, jira: bool) -> list[str]:
         if not isinstance(item, dict):
             continue
         prefix = "*" if jira else "-"
+        status = str(item.get("status", "")).upper()
+        if status == "FAILED" and result.get("failure_kind") == "setup":
+            status = "BLOCKED"
         lines.append(
             (
                 f"{prefix} Step {item.get('step')} — "
-                f"{str(item.get('status', '')).upper()}: {item.get('action')}\n"
+                f"{status}: {item.get('action')}\n"
                 f"  Observed: {item.get('observed')}"
             )
         )

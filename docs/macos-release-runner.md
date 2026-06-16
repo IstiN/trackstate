@@ -30,11 +30,18 @@ Each semantic tag release publishes exactly these Apple artifacts:
 2. Standalone compiled macOS CLI `tar.gz` archive
 3. SHA256 checksum file covering both published assets
 
+The repository also keeps a targeted historical repair path for `v0.0.98`: after
+successful `main` validation, `.github/workflows/repair-historical-apple-releases.yml`
+downloads the published `TrackState-macos-arm64-v0.0.98.zip` asset, verifies the
+embedded app binary with `file`, and dispatches `build-native.yml` against
+`release_ref: v0.0.98` only when the hosted archive is still universal or
+otherwise non-compliant.
+
 ## Readiness and failure mode
 
 The release workflow fails in two explicit places:
 
-1. **Ubuntu preflight:** queries the repository runner inventory and fails immediately when no online runner matches `[self-hosted, macOS, trackstate-release, ARM64]`
+1. **Ubuntu preflight:** queries the repository runner inventory when the token can read it and fails immediately when no online runner matches `[self-hosted, macOS, trackstate-release, ARM64]`; if the token cannot read runner inventory, the workflow warns and lets the macOS job's `runs-on` labels perform the real scheduling check
 2. **macOS readiness script:** runs `tool/check_macos_release_runner.sh` on the selected runner and fails if the host is not Apple Silicon macOS or if any required toolchain version is missing or out of contract
 
 This keeps the existing Ubuntu CI path unchanged while making Apple release infrastructure failures obvious for tagged releases.

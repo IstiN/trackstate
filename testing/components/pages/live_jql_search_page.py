@@ -89,6 +89,11 @@ class LiveJqlSearchPage:
         query: str,
         expected_count_summaries: tuple[str, ...] | None = None,
     ) -> LiveJqlSearchObservation:
+        if expected_count_summaries is not None:
+            return self.search_with_verified_result_change(
+                query=query,
+                expected_count_summaries=expected_count_summaries,
+            )
         field_selector, field_index = self._submit_query(query)
         self._wait_for_count_summary(expected_count_summaries=expected_count_summaries)
         return self._observe(
@@ -372,30 +377,58 @@ class LiveJqlSearchPage:
             index=index,
             timeout_ms=30_000,
         )
-        self._session.press(
-            field_selector,
-            "Control+A",
-            index=index,
-            timeout_ms=30_000,
-        )
-        self._session.press(
-            field_selector,
-            "Backspace",
-            index=index,
-            timeout_ms=30_000,
-        )
-        self._session.wait_for_input_value(
-            field_selector,
-            "",
-            index=index,
-            timeout_ms=30_000,
-        )
         self._session.fill(
             field_selector,
             query,
             index=index,
             timeout_ms=30_000,
         )
+        try:
+            self._session.wait_for_input_value(
+                field_selector,
+                query,
+                index=index,
+                timeout_ms=5_000,
+            )
+            return
+        except WebAppTimeoutError:
+            pass
+
+        for shortcut in ("Meta+A", "Control+A"):
+            self._session.click(
+                field_selector,
+                index=index,
+                timeout_ms=30_000,
+            )
+            self._session.press(
+                field_selector,
+                shortcut,
+                index=index,
+                timeout_ms=30_000,
+            )
+            self._session.press(
+                field_selector,
+                "Backspace",
+                index=index,
+                timeout_ms=30_000,
+            )
+            self._session.fill(
+                field_selector,
+                query,
+                index=index,
+                timeout_ms=30_000,
+            )
+            try:
+                self._session.wait_for_input_value(
+                    field_selector,
+                    query,
+                    index=index,
+                    timeout_ms=5_000,
+                )
+                return
+            except WebAppTimeoutError:
+                continue
+
         self._session.wait_for_input_value(
             field_selector,
             query,
