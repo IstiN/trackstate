@@ -164,8 +164,19 @@ check_existing_trackstate
 RELEASE_TAG="$(resolve_release_tag "$REQUESTED_VERSION")"
 PLATFORM="$(detect_platform)"
 ARCHIVE_NAME="trackstate-cli-${PLATFORM}-${RELEASE_TAG}.tar.gz"
-CHECKSUM_NAME="trackstate-${RELEASE_TAG}.sha256"
 DOWNLOAD_BASE="https://github.com/${REPO}/releases/download/${RELEASE_TAG}"
+
+# macOS assets are published by a separate Apple release job, so they use a
+# platform-specific checksum file. Linux and Windows assets share the unified
+# release checksum.
+case "$PLATFORM" in
+  macos-*)
+    CHECKSUM_NAME="trackstate-apple-${RELEASE_TAG}.sha256"
+    ;;
+  *)
+    CHECKSUM_NAME="trackstate-${RELEASE_TAG}.sha256"
+    ;;
+esac
 
 log "Installing TrackState CLI ${RELEASE_TAG} for ${PLATFORM}..."
 
