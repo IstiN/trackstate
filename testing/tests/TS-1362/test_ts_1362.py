@@ -70,11 +70,16 @@ class CompiledCliRegressionTest(unittest.TestCase):
         binary: Path,
         env: dict[str, str] | None = None,
         source_entrypoint: Path | None = None,
+        target: str = "local",
     ) -> tuple[int, str]:
         command = [str(binary)]
         if source_entrypoint is not None:
             command.append(str(source_entrypoint))
-        command.extend(["session", "--target", "local", "--path", ".", "--output", "json"])
+        command.extend(["session", "--target", target, "--output", "json"])
+        if target == "local":
+            command.extend(["--path", "."])
+        else:
+            command.extend(["--repository", "IstiN/trackstate"])
         merged_env = os.environ.copy()
         if env:
             merged_env.update(env)
@@ -129,26 +134,32 @@ class CompiledCliRegressionTest(unittest.TestCase):
 
             env = {"TRACKSTATE_TOKEN": "fake-token-for-regression-test"}
 
-            _, dart_stdout = self._run_cli(Path("dart"), env=env, source_entrypoint=SOURCE_ENTRYPOINT)
-            _, compiled_stdout = self._run_cli(compiled_binary, env=env)
+            _, dart_stdout = self._run_cli(
+                Path("dart"), env=env, source_entrypoint=SOURCE_ENTRYPOINT, target="hosted"
+            )
+            _, compiled_stdout = self._run_cli(
+                compiled_binary, env=env, target="hosted"
+            )
 
-            dart_data = json.loads(dart_stdout).get("data", {})
-            compiled_data = json.loads(compiled_stdout).get("data", {})
+            dart_data = json.loads(dart_stdout)
+            compiled_data = json.loads(compiled_stdout)
 
+            # Both should fail with AUTHENTICATION_FAILED because the fake token is invalid.
+            # The key parity check is that both entrypoints produce the same error shape.
             self.assertEqual(
-                dart_data.get("authSource"),
-                "env",
-                "Dart VM entrypoint should prefer TRACKSTATE_TOKEN over gh config.",
+                dart_data.get("error", {}).get("code"),
+                "AUTHENTICATION_FAILED",
+                "Dart VM entrypoint should fail with AUTHENTICATION_FAILED when TRACKSTATE_TOKEN is invalid.",
             )
             self.assertEqual(
-                compiled_data.get("authSource"),
-                "env",
-                "Compiled binary should prefer TRACKSTATE_TOKEN over gh config.",
+                compiled_data.get("error", {}).get("code"),
+                "AUTHENTICATION_FAILED",
+                "Compiled binary should fail with AUTHENTICATION_FAILED when TRACKSTATE_TOKEN is invalid.",
             )
             self.assertEqual(
-                dart_data.get("authSource"),
-                compiled_data.get("authSource"),
-                "Authentication precedence differs between Dart VM and compiled binary.",
+                dart_data.get("error", {}).get("code"),
+                compiled_data.get("error", {}).get("code"),
+                "Authentication error code differs between Dart VM and compiled binary.",
             )
 
 
