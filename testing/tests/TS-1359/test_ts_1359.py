@@ -1,17 +1,14 @@
 from __future__ import annotations
 
-import os
 import shutil
 import tempfile
 import unittest
 from pathlib import Path
 
 from testing.components.services.install_script_test_runtime import (
-    MockGitHubReleaseServer,
     MockReleaseAssets,
-    patch_install_ps1,
     path_entry_count,
-    run_install_ps1,
+    run_patched_install_ps1,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -59,41 +56,6 @@ class WindowsPowerShellInstallScriptTest(unittest.TestCase):
             "The PowerShell installer must not request administrator (runAs) privileges.",
         )
 
-    def _run_patched_install(
-        self,
-        tmpdir: Path,
-        assets: MockReleaseAssets,
-        version: str | None = None,
-        flags: list[str] | None = None,
-        path_prefix: str | None = None,
-    ) -> tuple[Path, Path, Path, "subprocess.CompletedProcess[str]"]:
-        """Patch install.ps1 and execute it in an isolated environment.
-
-        Returns the LocalAppData directory, the install directory, the path
-        store file, and the completed process.
-        """
-        local_app_data = tmpdir / "localappdata"
-        local_app_data.mkdir(exist_ok=True)
-        install_dir = local_app_data / "trackstate" / "bin"
-        path_store = tmpdir / "user_path.txt"
-        temp_dir = tmpdir / "temp"
-        temp_dir.mkdir(exist_ok=True)
-
-        with MockGitHubReleaseServer(assets, repo="test/repo") as server:
-            patched = tmpdir / "install.ps1"
-            patch_install_ps1(INSTALL_SCRIPT, patched, server, local_app_data, path_store)
-
-            base_path = os.environ.get("PATH", "")
-            env_path = base_path if path_prefix is None else f"{path_prefix}{os.pathsep}{base_path}"
-            env = {
-                "LOCALAPPDATA": str(local_app_data),
-                "TEMP": str(temp_dir),
-                "PATH": env_path,
-            }
-            result = run_install_ps1(patched, version=version, flags=flags, timeout=60, env=env)
-
-        return local_app_data, install_dir, path_store, result
-
     def test_install_ps1_installs_binary_and_updates_path(self) -> None:
         assets = MockReleaseAssets.build(
             tag="v1.2.3",
@@ -103,8 +65,8 @@ class WindowsPowerShellInstallScriptTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmpdir_str:
             tmpdir = Path(tmpdir_str)
-            local_app_data, install_dir, path_store, result = self._run_patched_install(
-                tmpdir, assets, version="v1.2.3"
+            local_app_data, install_dir, path_store, result = run_patched_install_ps1(
+                INSTALL_SCRIPT, tmpdir, assets, version="v1.2.3"
             )
             output = (result.stdout or "") + "\n" + (result.stderr or "")
 
@@ -133,7 +95,7 @@ class WindowsPowerShellInstallScriptTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir_str:
             tmpdir = Path(tmpdir_str)
 
-            first = self._run_patched_install(tmpdir, assets, version="v1.2.3")
+            first = run_patched_install_ps1(INSTALL_SCRIPT, tmpdir, assets, version="v1.2.3")
             first_output = (first[3].stdout or "") + "\n" + (first[3].stderr or "")
             self.assertEqual(
                 first[3].returncode,
@@ -147,7 +109,8 @@ class WindowsPowerShellInstallScriptTest(unittest.TestCase):
             )
 
             # Re-run the installer in an environment where the install dir is already on PATH.
-            second = self._run_patched_install(
+            second = run_patched_install_ps1(
+                INSTALL_SCRIPT,
                 tmpdir,
                 assets,
                 version="v1.2.3",
@@ -178,7 +141,8 @@ class WindowsPowerShellInstallScriptTest(unittest.TestCase):
             conflict_dir.mkdir()
             (conflict_dir / "trackstate.exe").write_text("@echo off\necho conflict\n")
 
-            local_app_data, install_dir, path_store, result = self._run_patched_install(
+            local_app_data, install_dir, path_store, result = run_patched_install_ps1(
+                INSTALL_SCRIPT,
                 tmpdir,
                 assets,
                 version="v1.2.3",
@@ -219,7 +183,8 @@ class WindowsPowerShellInstallScriptTest(unittest.TestCase):
             conflict_dir.mkdir()
             (conflict_dir / "trackstate.exe").write_text("@echo off\necho conflict\n")
 
-            local_app_data, install_dir, path_store, result = self._run_patched_install(
+            local_app_data, install_dir, path_store, result = run_patched_install_ps1(
+                INSTALL_SCRIPT,
                 tmpdir,
                 assets,
                 version="v1.2.3",
