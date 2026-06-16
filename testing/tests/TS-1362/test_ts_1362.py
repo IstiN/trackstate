@@ -122,12 +122,18 @@ class CompiledCliRegressionTest(unittest.TestCase):
                 "The compiled CLI JSON output does not match the Dart VM output.",
             )
 
-    def test_compiled_cli_preserves_environment_token_auth_precedence(self) -> None:
+    def test_compiled_cli_preserves_local_auth_source_neutrality(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir_str:
             tmpdir = Path(tmpdir_str)
             compiled_binary = self._compile_binary(tmpdir)
 
-            env = {"TRACKSTATE_TOKEN": "fake-token-for-regression-test"}
+            # Simulate an environment where hosted tokens are present. Local-target
+            # sessions must remain neutral and report authSource "none" regardless.
+            env = {
+                "TRACKSTATE_TOKEN": "fake-token-for-regression-test",
+                "GITHUB_TOKEN": "ghp_trackstate_regression_dummy_token",
+                "GH_TOKEN": "ghp_trackstate_regression_dummy_token",
+            }
 
             _, dart_stdout = self._run_cli(Path("dart"), env=env, source_entrypoint=SOURCE_ENTRYPOINT)
             _, compiled_stdout = self._run_cli(compiled_binary, env=env)
@@ -137,18 +143,20 @@ class CompiledCliRegressionTest(unittest.TestCase):
 
             self.assertEqual(
                 dart_data.get("authSource"),
-                "env",
-                "Dart VM entrypoint should prefer TRACKSTATE_TOKEN over gh config.",
+                "none",
+                "Dart VM entrypoint should report a neutral local auth source even when "
+                "hosted tokens are present in the environment.",
             )
             self.assertEqual(
                 compiled_data.get("authSource"),
-                "env",
-                "Compiled binary should prefer TRACKSTATE_TOKEN over gh config.",
+                "none",
+                "Compiled binary should report a neutral local auth source even when "
+                "hosted tokens are present in the environment.",
             )
             self.assertEqual(
                 dart_data.get("authSource"),
                 compiled_data.get("authSource"),
-                "Authentication precedence differs between Dart VM and compiled binary.",
+                "Local authSource handling differs between Dart VM and compiled binary.",
             )
 
 

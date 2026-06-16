@@ -137,6 +137,7 @@ class _RecordingTrackStateCliProviderFactory
     required String repository,
     required String branch,
     http.Client? client,
+    bool disableHostedSyncRequestCaching = false,
   }) {
     createHostedCall = <String, Object?>{
       'provider': provider,
@@ -173,6 +174,7 @@ class _RecordingTrackStateCliRepositoryFactory
     required String repository,
     required String branch,
     http.Client? client,
+    bool disableHostedSyncRequestCaching = false,
   }) => _RecordingHostedRepository(hostedProvider: hostedProvider);
 }
 
