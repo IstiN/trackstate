@@ -33,3 +33,5 @@ class TrackStateCliHelpObservation:
 class TrackStateCliHelpValidationResult:
     root_help: TrackStateCliHelpObservation
     session_help: TrackStateCliHelpObservation
+    missing_root_examples: tuple[str, ...] = ()
+    missing_root_option_fragments: tuple[str, ...] = ()

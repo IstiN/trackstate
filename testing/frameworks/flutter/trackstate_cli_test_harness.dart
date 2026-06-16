@@ -2,11 +2,13 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trackstate/cli/trackstate_cli.dart';
-
+import 'trackstate_cli_http_override.dart';
 void main() {
   test('trackstate cli harness', () async {
     final argsFile = _requiredEnvironmentVariable('TRACKSTATE_CLI_ARGS_FILE');
-    final stdoutFile = _requiredEnvironmentVariable('TRACKSTATE_CLI_STDOUT_FILE');
+    final stdoutFile = _requiredEnvironmentVariable(
+      'TRACKSTATE_CLI_STDOUT_FILE',
+    );
     final exitCodeFile = _requiredEnvironmentVariable(
       'TRACKSTATE_CLI_EXIT_CODE_FILE',
     );
@@ -18,10 +20,8 @@ void main() {
       environment: TrackStateCliEnvironment(
         environment: Platform.environment,
         workingDirectory: workingDirectory,
-        resolvePath: (path) => _resolvePath(
-          path: path,
-          workingDirectory: workingDirectory,
-        ),
+        resolvePath: (path) =>
+            _resolvePath(path: path, workingDirectory: workingDirectory),
         readGhAuthToken: () async {
           try {
             final result = await Process.run('gh', ['auth', 'token']);
@@ -36,13 +36,15 @@ void main() {
       ),
     );
 
-    final execution = await cli.run(await _readArguments(argsFile));
+    final arguments = await _readArguments(argsFile);
+    final execution = await runWithCliHttpInstrumentation(
+      () => cli.run(arguments),
+    );
 
     await File(stdoutFile).writeAsString(execution.stdout, flush: true);
-    await File(exitCodeFile).writeAsString(
-      execution.exitCode.toString(),
-      flush: true,
-    );
+    await File(
+      exitCodeFile,
+    ).writeAsString(execution.exitCode.toString(), flush: true);
   });
 }
 
@@ -77,6 +79,8 @@ Future<List<String>> _readArguments(String path) async {
 }
 
 String _resolvePath({required String path, required String workingDirectory}) {
-  final uri = Uri.file(workingDirectory.endsWith('/') ? workingDirectory : '$workingDirectory/');
+  final uri = Uri.file(
+    workingDirectory.endsWith('/') ? workingDirectory : '$workingDirectory/',
+  );
   return uri.resolve(path).toFilePath();
 }

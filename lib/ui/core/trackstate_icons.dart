@@ -17,6 +17,8 @@ enum TrackStateIconGlyph {
   attachment,
   link,
   user,
+  repository,
+  folder,
   plus,
   moon,
   sun,
@@ -282,6 +284,40 @@ class _TrackStateIconPainter extends CustomPainter {
           false,
           paint,
         );
+      case TrackStateIconGlyph.repository:
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(
+            Rect.fromLTWH(s * .18, s * .16, s * .64, s * .68),
+            Radius.circular(s * .08),
+          ),
+          paint,
+        );
+        canvas.drawLine(
+          Offset(s * .18, s * .34),
+          Offset(s * .82, s * .34),
+          paint,
+        );
+        canvas.drawCircle(Offset(s * .3, s * .25), s * .03, fillPaint);
+        canvas.drawLine(
+          Offset(s * .32, s * .54),
+          Offset(s * .66, s * .54),
+          paint,
+        );
+        canvas.drawLine(
+          Offset(s * .32, s * .68),
+          Offset(s * .58, s * .68),
+          paint,
+        );
+      case TrackStateIconGlyph.folder:
+        final path = Path()
+          ..moveTo(s * .14, s * .32)
+          ..lineTo(s * .38, s * .32)
+          ..lineTo(s * .46, s * .22)
+          ..lineTo(s * .84, s * .22)
+          ..lineTo(s * .78, s * .78)
+          ..lineTo(s * .18, s * .78)
+          ..close();
+        canvas.drawPath(path, paint);
       case TrackStateIconGlyph.plus:
         canvas.drawLine(
           Offset(s * .5, s * .18),

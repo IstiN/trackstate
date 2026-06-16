@@ -13,8 +13,8 @@ python3 -m unittest discover -s testing/tests/TS-378 -p 'test_*.py' -v
 ## Required configuration
 
 No Python packages are required beyond the standard library. The repository
-under test must have a Dart SDK available on `PATH`, or `TRACKSTATE_DART_BIN`
-must point to the Dart executable used to run `dart run trackstate`.
+under test must have Flutter available on `PATH` so the temporary CLI harness
+can be compiled from the current checkout.
 
 ## Expected passing output
 
@@ -27,8 +27,8 @@ Ran 1 test in <time>
 OK
 ```
 
-## Expected failing output for the current product defect
+## Expected failing output for a regression
 
-If the product bug is still present, this test fails because the exact ticket
-command returns a repository-open failure contract instead of an explicit
-unsupported error for the account-by-email operation.
+If the product regresses, this test fails because the exact ticket command no
+longer returns the explicit unsupported error contract from a seeded Local Git
+repository.

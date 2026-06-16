@@ -1,0 +1,11 @@
+test_id: TS-966
+type: web
+framework: playwright
+platform: chromium
+dependencies:
+  - Playwright for Python with Chromium installed
+  - GH_TOKEN or GITHUB_TOKEN with access to IstiN/trackstate-setup
+notes:
+  - Opens the deployed TrackState web app with hosted workspace profiles preloaded in browser storage.
+  - Triggers the desktop workspace switcher once in a healthy state, then enables a synthetic workspace-switcher-only runtime fault.
+  - Verifies the injected runtime failure does not stall the global shell and that sidebar navigation remains functional.

@@ -11,9 +11,10 @@ import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 const String _hostedTokenKey = 'trackstate.githubToken.trackstate.trackstate';
 const String _issueKey = 'TRACK-12';
 const String _issueSummary = 'Implement Git sync service';
-const String _restrictionTitle = 'Attachments stay download-only in the browser';
+const String _restrictionTitle =
+    'Some attachment uploads still require local Git';
 const String _restrictionMessage =
-    'Attachment upload is unavailable in this browser session. Existing attachments remain available for download.';
+    'Attachment upload is available for browser-supported files. Files that follow the Git LFS attachment path still need to be added from a local Git runtime.';
 const String _openSettingsLabel = 'Open settings';
 
 void main() {
@@ -45,7 +46,9 @@ void main() {
       await tester.pumpAndSettle();
 
       final issueLink = find.bySemanticsLabel(
-        RegExp('Open ${RegExp.escape(_issueKey)} ${RegExp.escape(_issueSummary)}'),
+        RegExp(
+          'Open ${RegExp.escape(_issueKey)} ${RegExp.escape(_issueSummary)}',
+        ),
       );
       await tester.ensureVisible(issueLink.first);
       await tester.tap(issueLink.first);
@@ -79,7 +82,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Project Settings'), findsOneWidget);
-      expect(find.widgetWithText(Tab, 'Attachments'), findsWidgets);
+      expect(_settingsTab('Attachments'), findsWidgets);
       expect(find.text('Attachment storage mode'), findsOneWidget);
     },
   );
@@ -104,7 +107,7 @@ void main() {
 
       await tester.tap(find.text('Settings').first);
       await tester.pumpAndSettle();
-      final statusesTab = find.widgetWithText(Tab, 'Statuses').first;
+      final statusesTab = _settingsTab('Statuses').first;
       await tester.ensureVisible(statusesTab);
       await tester.tap(statusesTab);
       await tester.pumpAndSettle();
@@ -115,7 +118,9 @@ void main() {
       await tester.pumpAndSettle();
 
       final issueLink = find.bySemanticsLabel(
-        RegExp('Open ${RegExp.escape(_issueKey)} ${RegExp.escape(_issueSummary)}'),
+        RegExp(
+          'Open ${RegExp.escape(_issueKey)} ${RegExp.escape(_issueSummary)}',
+        ),
       );
       await tester.ensureVisible(issueLink.first);
       await tester.tap(issueLink.first);
@@ -193,6 +198,9 @@ Finder _attachmentsRestrictionActionFinder(
   );
 }
 
+Finder _settingsTab(String label) =>
+    find.bySemanticsLabel(RegExp(RegExp.escape(label))).first;
+
 class _RepositoryPathWebTestProvider implements TrackStateProviderAdapter {
   const _RepositoryPathWebTestProvider();
 
@@ -204,8 +212,21 @@ class _RepositoryPathWebTestProvider implements TrackStateProviderAdapter {
     isAdmin: false,
     canCreateBranch: true,
     canManageAttachments: true,
-    attachmentUploadMode: AttachmentUploadMode.full,
+    attachmentUploadMode: AttachmentUploadMode.noLfs,
     canCheckCollaborators: false,
+  );
+
+  @override
+  Future<RepositorySyncCheck> checkSync({
+    RepositorySyncState? previousState,
+  }) async => const RepositorySyncCheck(
+    state: RepositorySyncState(
+      providerType: ProviderType.github,
+      repositoryRevision: _revision,
+      sessionRevision: 'web-test',
+      connectionState: ProviderConnectionState.connected,
+      permission: _permission,
+    ),
   );
 
   static const Map<String, String> _files = {
@@ -335,7 +356,10 @@ Read and write tracker files through GitHub Contents API.
   Future<RepositoryAttachment> readAttachment(
     String path, {
     required String ref,
-  }) async => RepositoryAttachment(path: path, bytes: Uint8List.fromList('<svg />'.codeUnits));
+  }) async => RepositoryAttachment(
+    path: path,
+    bytes: Uint8List.fromList('<svg />'.codeUnits),
+  );
 
   @override
   Future<RepositoryTextFile> readTextFile(
@@ -346,7 +370,11 @@ Read and write tracker files through GitHub Contents API.
     if (content == null) {
       throw TrackStateProviderException('Missing fixture for $path.');
     }
-    return RepositoryTextFile(path: path, content: content, revision: _revision);
+    return RepositoryTextFile(
+      path: path,
+      content: content,
+      revision: _revision,
+    );
   }
 
   @override

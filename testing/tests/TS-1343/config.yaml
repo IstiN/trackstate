@@ -1,0 +1,37 @@
+test_id: TS-1343
+type: ci
+framework: unittest
+platform: python
+dependencies:
+  - Python 3.12+
+  - PyYAML
+runtime_inputs:
+  workflow_path: .github/workflows/release-on-main.yml
+  required_triggers:
+    - push
+    - workflow_dispatch
+  required_jobs:
+    - resolve-version
+    - validate
+    - build-linux
+    - build-windows
+    - build-macos
+    - publish-release
+  required_job_dependencies:
+    build-linux:
+      - resolve-version
+      - validate
+    build-windows:
+      - resolve-version
+      - validate
+    build-macos:
+      - resolve-version
+      - validate
+    publish-release:
+      - resolve-version
+      - build-linux
+      - build-windows
+      - build-macos
+notes:
+  - Statically validates that platform build jobs declare a dependency on the shared validation job.
+  - Does not mutate the repository or trigger live workflow runs.

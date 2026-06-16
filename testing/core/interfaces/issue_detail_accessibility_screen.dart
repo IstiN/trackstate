@@ -1,3 +1,5 @@
+import '../models/issue_detail_icon_observation.dart';
+import '../models/issue_detail_row_style_observation.dart';
 import '../models/action_availability.dart';
 import '../models/issue_detail_focus_transition_observation.dart';
 import '../models/issue_detail_icon_observation.dart';
@@ -18,7 +20,6 @@ abstract interface class IssueDetailAccessibilityScreenHandle {
   Future<List<String>> collectForwardCollaborationTabFocusOrder(
     String issueKey,
   );
-
   bool showsIssueDetail(String issueKey);
 
   List<String> visibleTextsWithinIssueDetail(String issueKey);
@@ -34,7 +35,6 @@ abstract interface class IssueDetailAccessibilityScreenHandle {
   ActionAvailability commentComposerAction(String issueKey, String label);
 
   Future<void> tapIssueDetailAction(String issueKey, String label);
-
   List<String> commentActionLabels(String issueKey);
 
   bool showsCommentComposer(String issueKey);
@@ -196,7 +196,6 @@ abstract interface class IssueDetailAccessibilityScreenHandle {
   IssueDetailTextContrastObservation observeCommentComposerPlaceholderContrast(
     String issueKey,
   );
-
   IssueDetailRowStyleObservation observeDecoratedRowStyle(
     String issueKey, {
     required String rowAnchorText,

@@ -1,0 +1,185 @@
+name: Apple Release Builds
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_ref:
+        description: 'Semantic version tag to rebuild, or auto to create the next patch tag. Auto dispatches must be run from the main branch; explicit historical tags may be rebuilt from any branch.'
+        required: false
+        default: auto
+        type: string
+
+# Default to read-only permissions. Individual jobs override this explicitly
+# (e.g., publish-release requests contents: write) so a future job added without
+# its own permissions block does not accidentally inherit release-write access.
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: apple-release-${{ github.event_name }}-${{ github.ref }}-${{ inputs.release_ref || 'auto' }}
+  cancel-in-progress: false
+
+env:
+  release_ref: ${{ github.event.inputs.release_ref || 'auto' }}
+
+jobs:
+  resolve-release:
+    name: Resolve release tag
+    # Allow auto dispatches only from main; explicit historical-tag repairs may
+    # be dispatched from any branch.
+    if: github.ref == 'refs/heads/main' || inputs.release_ref != 'auto'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      release_tag: ${{ steps.release.outputs.release_tag }}
+      release_checkout_ref: ${{ steps.release.outputs.release_checkout_ref }}
+      build_number: ${{ steps.release.outputs.build_number }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.PAT_TOKEN || github.token }}
+
+      - name: Resolve release tag
+        id: release
+        shell: bash
+        env:
+          RELEASE_REF: ${{ inputs.release_ref || 'auto' }}
+        run: ./tool/resolve_semantic_version.sh >> "$GITHUB_OUTPUT"
+
+  build-macos:
+    name: Build macOS release artifacts
+    needs: resolve-release
+    permissions:
+      actions: read
+      contents: read
+    uses: ./.github/workflows/build-macos-reusable.yml
+    with:
+      release_tag: ${{ needs.resolve-release.outputs.release_tag }}
+      release_checkout_ref: ${{ needs.resolve-release.outputs.release_checkout_ref }}
+      build_number: ${{ needs.resolve-release.outputs.build_number }}
+    secrets:
+      PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
+
+  publish-release:
+    name: Publish macOS release assets
+    needs: [resolve-release, build-macos]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      actions: read
+      contents: write
+    env:
+      release_tag: ${{ needs.resolve-release.outputs.release_tag }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.resolve-release.outputs.release_checkout_ref }}
+          token: ${{ secrets.PAT_TOKEN || github.token }}
+
+      - name: Download macOS artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build-macos.outputs.artifact_name }}
+          path: build
+          if-no-files-found: error
+
+      - name: Generate SHA256 checksums
+        shell: bash
+        env:
+          DESKTOP_MACOS: ${{ needs.build-macos.outputs.desktop_archive }}
+          CLI_MACOS: ${{ needs.build-macos.outputs.cli_archive }}
+        run: |
+          set -euo pipefail
+
+          cd build
+          sha256sum \
+            "$DESKTOP_MACOS" \
+            "$CLI_MACOS" \
+            > "trackstate-apple-${release_tag}.sha256"
+
+      - name: Publish release assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DESKTOP_MACOS: ${{ needs.build-macos.outputs.desktop_archive }}
+          CLI_MACOS: ${{ needs.build-macos.outputs.cli_archive }}
+        run: |
+          set -euo pipefail
+
+          release_notes=""
+
+          heartbeat() {
+            while true; do
+              sleep 60
+              echo "::notice::GitHub release asset publishing is still running..."
+            done
+          }
+
+          heartbeat &
+          heartbeat_pid="$!"
+          cleanup_heartbeat() {
+            kill "$heartbeat_pid" 2>/dev/null || true
+            wait "$heartbeat_pid" 2>/dev/null || true
+          }
+          cleanup_publish() {
+            cleanup_heartbeat
+            rm -f "$release_notes"
+          }
+          trap cleanup_publish EXIT
+
+          release_target_commit="$(git rev-parse HEAD)"
+          legacy_checksum_asset="trackstate-apple-${release_tag}-sha256.txt"
+          if gh release view "$release_tag" >/dev/null 2>&1; then
+            echo "Updating existing release $release_tag"
+            if gh release view "$release_tag" --json assets --jq '.assets[].name' | grep -Fxq "$legacy_checksum_asset"; then
+              gh release delete-asset "$release_tag" "$legacy_checksum_asset" --yes
+            fi
+          else
+            release_notes="$(mktemp)"
+            if gh api \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "/repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+              -f tag_name="$release_tag" \
+              -f target_commitish="$release_target_commit" \
+              --jq '.body' > "$release_notes" 2>/dev/null; then
+              echo ""
+            else
+              echo "::warning::Could not generate release notes from the GitHub API; using fallback scaffold."
+              printf '%s\n' \
+                '## macOS compiled artifacts' \
+                '' \
+                '| Platform | Desktop | CLI |' \
+                '|---|---|---|' \
+                "| macOS | $DESKTOP_MACOS | $CLI_MACOS |" \
+                '' \
+                "Verify downloads with \`trackstate-apple-${release_tag}.sha256\`." \
+                '' \
+                '> Install commands and detailed asset descriptions will be added in a follow-up story.' \
+                > "$release_notes"
+            fi
+
+            gh release create "$release_tag" \
+              --title "TrackState $release_tag" \
+              --notes-file "$release_notes" \
+              --target "$release_target_commit"
+          fi
+
+          gh release upload "$release_tag" \
+            "build/$DESKTOP_MACOS" \
+            "build/$CLI_MACOS" \
+            "build/trackstate-apple-${release_tag}.sha256" \
+            --clobber
+
+          gh release edit "$release_tag" \
+            --title "TrackState $release_tag" \
+            --target "$release_target_commit" \
+            --draft=false \
+            --prerelease=false

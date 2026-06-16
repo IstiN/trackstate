@@ -1,0 +1,102 @@
+name: Repair Historical Apple Releases
+
+on:
+  workflow_run:
+    workflows: ['Flutter CI']
+    types: [completed]
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  repair-v0-0-98-macos-arm64-release:
+    name: Repair published v0.0.98 macOS arm64 asset when needed
+    if: >
+      github.repository == 'IstiN/trackstate' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Inspect published v0.0.98 desktop archive
+        id: inspect
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.PAT_TOKEN || github.token }}
+        run: |
+          set -euo pipefail
+
+          repair_tag='v0.0.98'
+          desktop_archive="TrackState-macos-arm64-${repair_tag}.zip"
+          temp_dir="$(mktemp -d)"
+          cleanup() {
+            rm -rf "$temp_dir"
+          }
+          trap cleanup EXIT
+
+          if ! gh release download "$repair_tag" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern "$desktop_archive" \
+            --dir "$temp_dir"; then
+            echo "::notice::$desktop_archive could not be downloaded from $repair_tag; dispatching a rebuild."
+            echo "needs_repair=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          unzip -q "$temp_dir/$desktop_archive" -d "$temp_dir/unpacked"
+
+          app_binary=""
+          while IFS= read -r candidate_app_binary; do
+            app_binary="$candidate_app_binary"
+            break
+          done < <(find "$temp_dir/unpacked" -path '*/Contents/MacOS/*' -type f)
+
+          if [[ -z "$app_binary" || ! -f "$app_binary" ]]; then
+            echo "::notice::$desktop_archive did not contain a macOS app executable; dispatching a rebuild."
+            echo "needs_repair=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          file_output="$(file "$app_binary")"
+          echo "Observed file output: $file_output"
+
+          if [[ "$file_output" == *"Mach-O 64-bit executable arm64"* ]] &&
+            [[ "$file_output" != *"universal binary"* ]] &&
+            [[ "$file_output" != *"x86_64"* ]]; then
+            echo "needs_repair=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "::notice::$desktop_archive is not arm64-only yet; dispatching a rebuild."
+          echo "needs_repair=true" >> "$GITHUB_OUTPUT"
+
+      - name: Require repair dispatch token
+        if: steps.inspect.outputs.needs_repair == 'true'
+        env:
+          PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
+        run: |
+          if [ -z "$PAT_TOKEN" ]; then
+            echo "::error::PAT_TOKEN is required to dispatch the historical Apple release repair workflow."
+            exit 1
+          fi
+
+      - name: Dispatch historical Apple release rebuild
+        if: steps.inspect.outputs.needs_repair == 'true'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.PAT_TOKEN }}
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: 'IstiN',
+              repo: 'trackstate',
+              workflow_id: 'build-native.yml',
+              ref: 'main',
+              inputs: {
+                release_ref: 'v0.0.98',
+              },
+            });
+
+      - name: Report compliant release asset
+        if: steps.inspect.outputs.needs_repair != 'true'
+        run: echo "::notice::The published v0.0.98 macOS arm64 archive already satisfies the Apple Silicon contract."
