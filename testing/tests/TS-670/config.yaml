@@ -1,0 +1,11 @@
+test_id: TS-670
+type: cli
+framework: unittest
+platform: python
+dependencies:
+  - Flutter SDK available on PATH
+  - git CLI available on PATH
+notes:
+  - Seeds a disposable local-git repository, creates Issue A and Issue B, and links them with `trackstate ticket link --type "relates to"`.
+  - Executes the exact ticket step `trackstate read ticket --key TS-2` from the seeded repository working directory.
+  - Verifies the JSON response exposes a `links` array entry with canonical inward symmetric metadata for TS-1.

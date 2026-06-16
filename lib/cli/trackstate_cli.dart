@@ -1,13 +1,23 @@
 import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:args/args.dart';
 import 'package:http/http.dart' as http;
 
+import 'jira_compatibility_service.dart';
 import '../data/providers/github/github_trackstate_provider.dart';
 import '../data/providers/local/local_git_trackstate_provider.dart';
 import '../data/providers/trackstate_provider.dart';
+import '../data/repositories/trackstate_repository.dart';
+import '../data/services/jql_search_service.dart';
+import '../data/services/issue_link_validation_service.dart';
+import '../data/services/issue_mutation_service.dart';
 import '../data/repositories/trackstate_runtime.dart';
+import '../domain/models/issue_mutation_models.dart';
 import '../domain/models/trackstate_models.dart';
+
+part 'trackstate_cli_commands.dart';
 
 const String trackStateCliSchemaVersion = '1';
 const String trackStateCliTokenEnvironmentVariable = 'TRACKSTATE_TOKEN';
@@ -17,17 +27,28 @@ class TrackStateCli {
     TrackStateCliEnvironment? environment,
     TrackStateCliCredentialResolver? credentialResolver,
     TrackStateCliProviderFactory? providerFactory,
+    TrackStateCliRepositoryFactory? repositoryFactory,
+    JiraCompatibilityRequestService? jiraCompatibilityService,
     http.Client? httpClient,
   }) : _environment = environment ?? const TrackStateCliEnvironment(),
        _credentialResolver =
            credentialResolver ?? const TrackStateCliCredentialResolver(),
        _providerFactory =
            providerFactory ?? const DefaultTrackStateCliProviderFactory(),
+       _repositoryFactory =
+           repositoryFactory ??
+           _ProviderBackedTrackStateCliRepositoryFactory(
+             providerFactory ?? const DefaultTrackStateCliProviderFactory(),
+           ),
+       _jiraCompatibilityService =
+           jiraCompatibilityService ?? const JiraCompatibilityRequestService(),
        _httpClient = httpClient;
 
   final TrackStateCliEnvironment _environment;
   final TrackStateCliCredentialResolver _credentialResolver;
   final TrackStateCliProviderFactory _providerFactory;
+  final TrackStateCliRepositoryFactory _repositoryFactory;
+  final JiraCompatibilityRequestService _jiraCompatibilityService;
   final http.Client? _httpClient;
 
   Future<TrackStateCliExecution> run(List<String> arguments) async {
@@ -39,8 +60,92 @@ class TrackStateCli {
         );
       }
 
-      return switch (arguments.first) {
-        'session' => await _runSession(arguments.skip(1).toList()),
+      final normalizedArguments = _normalizeCommandArguments(
+        _normalizeRootCommandArguments(arguments),
+      );
+      return switch (normalizedArguments.first) {
+        'session' => await _runSession(normalizedArguments.skip(1).toList()),
+        'search' => await _runSearch(normalizedArguments.skip(1).toList()),
+        'read' => await _runRead(normalizedArguments.skip(1).toList()),
+        'create' => await _runCreate(normalizedArguments.skip(1).toList()),
+        'ticket' => await _runTicket(normalizedArguments.skip(1).toList()),
+        'archive' => await _runTicketArchive(
+          normalizedArguments.skip(1).toList(),
+          defaultTargetType: TrackStateCliTargetType.local,
+        ),
+        'attachment' => await _runAttachment(
+          normalizedArguments.skip(1).toList(),
+        ),
+        'jira_create_ticket_basic' => await _runJiraCreateTicketBasic(
+          normalizedArguments.skip(1).toList(),
+        ),
+        'jira_create_ticket_with_json' => await _runJiraCreateTicketWithJson(
+          normalizedArguments.skip(1).toList(),
+        ),
+        'jira_create_ticket_with_parent' =>
+          await _runJiraCreateTicketWithParent(
+            normalizedArguments.skip(1).toList(),
+          ),
+        'jira_update_ticket' => await _runJiraUpdateTicket(
+          normalizedArguments.skip(1).toList(),
+        ),
+        'jira_update_description' => await _runJiraUpdateDescription(
+          normalizedArguments.skip(1).toList(),
+        ),
+        'jira_update_field' => await _runJiraUpdateField(
+          normalizedArguments.skip(1).toList(),
+        ),
+        'jira_update_all_fields_with_name' => await _runJiraUpdateField(
+          normalizedArguments.skip(1).toList(),
+        ),
+        'jira_clear_field' => await _runJiraClearField(
+          normalizedArguments.skip(1).toList(),
+        ),
+        'jira_update_ticket_parent' => await _runJiraUpdateTicketParent(
+          normalizedArguments.skip(1).toList(),
+        ),
+        'jira_move_to_status' => await _runJiraMoveToStatus(
+          normalizedArguments.skip(1).toList(),
+        ),
+        'jira_move_to_status_with_resolution' =>
+          await _runJiraMoveToStatusWithResolution(
+            normalizedArguments.skip(1).toList(),
+          ),
+        'jira_set_priority' => await _runJiraSetPriority(
+          normalizedArguments.skip(1).toList(),
+        ),
+        'jira_assign_ticket_to' => await _runJiraAssignTicket(
+          normalizedArguments.skip(1).toList(),
+        ),
+        'jira_add_label' => await _runJiraAddLabel(
+          normalizedArguments.skip(1).toList(),
+        ),
+        'jira_remove_label' => await _runJiraRemoveLabel(
+          normalizedArguments.skip(1).toList(),
+        ),
+        'jira_post_comment' => await _runJiraPostComment(
+          normalizedArguments.skip(1).toList(),
+        ),
+        'jira_link_issues' || 'jira-link-issues' => await _runJiraLinkIssues(
+          normalizedArguments.skip(1).toList(),
+        ),
+        'jira_delete_ticket' => await _runJiraDeleteTicket(
+          normalizedArguments.skip(1).toList(),
+          defaultTargetType: TrackStateCliTargetType.local,
+        ),
+        'jira_attach_file_to_ticket' => await _runAttachmentUpload(
+          _normalizeAttachmentUploadArguments(
+            normalizedArguments.skip(1).toList(),
+          ),
+        ),
+        'jira_download_attachment' => await _runAttachmentDownload(
+          _normalizeAttachmentDownloadArguments(
+            normalizedArguments.skip(1).toList(),
+          ),
+        ),
+        'jira_execute_request' => await _runExecuteRequest(
+          normalizedArguments.skip(1).toList(),
+        ),
         _ => _error(
           _TrackStateCliException(
             code: 'INVALID_TARGET',
@@ -81,417 +186,99 @@ class TrackStateCli {
     }
   }
 
-  Future<TrackStateCliExecution> _runSession(List<String> arguments) async {
-    final parser = ArgParser(allowTrailingOptions: false)
-      ..addFlag('help', abbr: 'h', negatable: false)
-      ..addOption('target', help: 'Target type: local or hosted.')
-      ..addOption(
-        'provider',
-        help: 'Provider name. Supported values: local-git, github.',
-      )
-      ..addOption('repository', help: 'Hosted repository in owner/name form.')
-      ..addOption(
-        'path',
-        help:
-            'Local repository path. Defaults to the current working directory.',
-      )
-      ..addOption('branch', help: 'Branch to use for the session.')
-      ..addOption('token', help: 'Hosted access token.')
-      ..addOption(
-        'output',
-        defaultsTo: 'json',
-        allowed: TrackStateCliOutput.values.map((value) => value.name).toList(),
-        help: 'Output format. Defaults to json.',
-      );
-
-    late final ArgResults results;
-    try {
-      results = parser.parse(arguments);
-    } on FormatException catch (error) {
-      throw _TrackStateCliException(
-        code: 'INVALID_TARGET',
-        category: TrackStateCliErrorCategory.validation,
-        message: error.message,
-        exitCode: 2,
-        details: <String, Object?>{'arguments': arguments},
-      );
+  Map<String, Object?> _linkPayload(IssueLink link) {
+    final warning = nonCanonicalIssueLinkMetadataWarning(link);
+    if (warning != null) {
+      stderr.writeln(warning);
     }
-
-    if (results['help'] == true) {
-      return TrackStateCliExecution.success(
-        output: TrackStateCliOutput.text,
-        content: _sessionHelpText(parser),
-      );
-    }
-
-    final output = TrackStateCliOutput.values.byName(
-      results['output']!.toString(),
-    );
-    final target = await _resolveTarget(results);
-
-    try {
-      return await switch (target.type) {
-        TrackStateCliTargetType.local => _runLocalSession(target, output),
-        TrackStateCliTargetType.hosted => _runHostedSession(target, output),
-      };
-    } on _TrackStateCliException catch (error) {
-      return _error(
-        error,
-        targetType: target.type,
-        targetValue: target.value,
-        provider: target.provider,
-        output: output,
-      );
-    } catch (error) {
-      return _error(
-        _TrackStateCliException(
-          code: 'UNEXPECTED_ERROR',
-          category: TrackStateCliErrorCategory.validation,
-          message: 'TrackState CLI failed unexpectedly.',
-          exitCode: 1,
-          details: <String, Object?>{'error': error.toString()},
-        ),
-        targetType: target.type,
-        targetValue: target.value,
-        provider: target.provider,
-        output: output,
-      );
-    }
-  }
-
-  Future<_ResolvedTarget> _resolveTarget(ArgResults results) async {
-    final targetValue = results['target']?.toString().trim() ?? '';
-    if (targetValue.isEmpty) {
-      throw _TrackStateCliException(
-        code: 'INVALID_TARGET',
-        category: TrackStateCliErrorCategory.validation,
-        message: 'Missing required option "--target". Use "local" or "hosted".',
-        exitCode: 2,
-        details: <String, Object?>{'option': 'target'},
-      );
-    }
-
-    final normalizedTarget = switch (targetValue.toLowerCase()) {
-      'local' => TrackStateCliTargetType.local,
-      'hosted' => TrackStateCliTargetType.hosted,
-      _ => throw _TrackStateCliException(
-        code: 'INVALID_TARGET',
-        category: TrackStateCliErrorCategory.validation,
-        message: 'Unsupported target "$targetValue". Use "local" or "hosted".',
-        exitCode: 2,
-        details: <String, Object?>{'target': targetValue},
-      ),
-    };
-
-    final providerOption = results['provider']?.toString().trim() ?? '';
-    final providerRuntime = providerOption.isEmpty
-        ? parseTrackStateRuntime(
-            normalizedTarget == TrackStateCliTargetType.local
-                ? 'local-git'
-                : 'github',
-          )
-        : _parseProviderRuntime(providerOption);
-    final provider = switch (providerRuntime) {
-      TrackStateRuntime.localGit => 'local-git',
-      TrackStateRuntime.github => 'github',
-    };
-
-    return switch (normalizedTarget) {
-      TrackStateCliTargetType.local => _resolveLocalTarget(
-        results: results,
-        providerRuntime: providerRuntime,
-        provider: provider,
-      ),
-      TrackStateCliTargetType.hosted => _resolveHostedTarget(
-        results: results,
-        providerRuntime: providerRuntime,
-        provider: provider,
-      ),
+    final direction = link.direction.trim().toLowerCase();
+    return <String, Object?>{
+      'type': _displayLinkType(link.type, direction: direction),
+      'target': link.targetKey,
+      'direction': link.direction,
     };
   }
 
-  _ResolvedTarget _resolveLocalTarget({
-    required ArgResults results,
-    required TrackStateRuntime providerRuntime,
-    required String provider,
+  String _displayLinkType(String type, {required String direction}) {
+    final normalizedType = type.trim().toLowerCase();
+    for (final linkType in jiraIssueLinkTypes) {
+      final id = linkType['id']!.toString().trim().toLowerCase();
+      final name = linkType['name']!.toString().trim().toLowerCase();
+      final outward = linkType['outward']!.toString().trim().toLowerCase();
+      final inward = linkType['inward']!.toString().trim().toLowerCase();
+      if (normalizedType != id &&
+          normalizedType != name &&
+          normalizedType != outward &&
+          normalizedType != inward) {
+        continue;
+      }
+      if (normalizedType == inward) {
+        return linkType['inward']!.toString();
+      }
+      return linkType['outward']!.toString();
+    }
+    return type;
+  }
+
+  IssueLink _canonicalCliLinkPayload({
+    required _ResolvedMutationField? normalizedLink,
+    required String requestedType,
+    required String issueKey,
+    required String targetKey,
+  }) => IssueLink(
+    type: _canonicalCliLinkType(
+      normalizedLink: normalizedLink,
+      requestedType: requestedType,
+    ),
+    targetKey: normalizedLink?.direction == 'inward' ? issueKey : targetKey,
+    direction: 'outward',
+  );
+
+  String _canonicalCliLinkType({
+    required _ResolvedMutationField? normalizedLink,
+    required String requestedType,
   }) {
-    if (providerRuntime != TrackStateRuntime.localGit) {
-      throw _TrackStateCliException(
-        code: 'INVALID_TARGET',
-        category: TrackStateCliErrorCategory.validation,
-        message:
-            'Target "local" only supports the "local-git" provider for this command.',
-        exitCode: 2,
-        details: <String, Object?>{'provider': provider},
-      );
+    final canonicalKey = normalizedLink?.canonicalKey.trim().toLowerCase();
+    if (canonicalKey == null || canonicalKey.isEmpty) {
+      return requestedType;
     }
 
-    final repository = results['repository']?.toString().trim() ?? '';
-    if (repository.isNotEmpty) {
-      throw _TrackStateCliException(
-        code: 'INVALID_TARGET',
-        category: TrackStateCliErrorCategory.validation,
-        message:
-            'Option "--repository" is only valid for hosted targets. Use "--path" for local targets.',
-        exitCode: 2,
-        details: <String, Object?>{'option': 'repository'},
-      );
+    for (final linkType in jiraIssueLinkTypes) {
+      final id = linkType['id']!.toString().trim().toLowerCase();
+      if (id != canonicalKey) {
+        continue;
+      }
+      return linkType['outward']!.toString();
     }
 
-    final token = results['token']?.toString().trim() ?? '';
-    if (token.isNotEmpty) {
-      throw _TrackStateCliException(
-        code: 'INVALID_TARGET',
-        category: TrackStateCliErrorCategory.validation,
-        message: 'Option "--token" is only valid for hosted targets.',
-        exitCode: 2,
-        details: <String, Object?>{'option': 'token'},
-      );
-    }
-
-    final configuredPath = results['path']?.toString().trim();
-    final resolvedPath = _environment.resolvePath(
-      configuredPath == null || configuredPath.isEmpty
-          ? _environment.workingDirectory
-          : configuredPath,
-    );
-    return _ResolvedTarget(
-      type: TrackStateCliTargetType.local,
-      provider: provider,
-      value: resolvedPath,
-      branch: results['branch']?.toString().trim() ?? '',
-      token: '',
-    );
+    return requestedType;
   }
 
-  _ResolvedTarget _resolveHostedTarget({
-    required ArgResults results,
-    required TrackStateRuntime providerRuntime,
-    required String provider,
-  }) {
-    if (providerRuntime != TrackStateRuntime.github) {
-      throw _TrackStateCliException(
-        code: 'UNSUPPORTED_PROVIDER',
-        category: TrackStateCliErrorCategory.unsupported,
-        message:
-            'Hosted provider "$provider" is not implemented yet. Supported value: github.',
-        exitCode: 5,
-        details: <String, Object?>{'provider': provider},
-      );
+  _ResolvedMutationField? _normalizeCliLinkType(String rawType) {
+    final normalized = rawType.trim().toLowerCase();
+    for (final linkType in jiraIssueLinkTypes) {
+      final id = linkType['id']!.toString();
+      final name = linkType['name']!.toString();
+      final outward = linkType['outward']!.toString();
+      final inward = linkType['inward']!.toString();
+      if (normalized == id.toLowerCase() ||
+          normalized == name.toLowerCase() ||
+          normalized == outward.toLowerCase()) {
+        return _ResolvedMutationField(
+          canonicalKey: id,
+          displayName: outward,
+          direction: 'outward',
+        );
+      }
+      if (normalized == inward.toLowerCase()) {
+        return _ResolvedMutationField(
+          canonicalKey: id,
+          displayName: inward,
+          direction: 'inward',
+        );
+      }
     }
-
-    final path = results['path']?.toString().trim() ?? '';
-    if (path.isNotEmpty) {
-      throw _TrackStateCliException(
-        code: 'INVALID_TARGET',
-        category: TrackStateCliErrorCategory.validation,
-        message: 'Option "--path" is only valid for local targets.',
-        exitCode: 2,
-        details: <String, Object?>{'option': 'path'},
-      );
-    }
-
-    final repository = results['repository']?.toString().trim() ?? '';
-    if (!_isValidHostedRepository(repository)) {
-      throw _TrackStateCliException(
-        code: 'INVALID_TARGET',
-        category: TrackStateCliErrorCategory.validation,
-        message: 'Hosted targets require "--repository owner/name".',
-        exitCode: 2,
-        details: <String, Object?>{'option': 'repository'},
-      );
-    }
-
-    return _ResolvedTarget(
-      type: TrackStateCliTargetType.hosted,
-      provider: provider,
-      value: repository,
-      branch:
-          results['branch']?.toString().trim() ??
-          GitHubTrackStateProvider.defaultSourceRef,
-      token: results['token']?.toString().trim() ?? '',
-    );
-  }
-
-  bool _isValidHostedRepository(String repository) {
-    if (repository.isEmpty) {
-      return false;
-    }
-
-    final segments = repository.split('/');
-    return segments.length == 2 &&
-        segments.every((segment) => segment.trim().isNotEmpty);
-  }
-
-  TrackStateRuntime _parseProviderRuntime(String provider) {
-    try {
-      return parseTrackStateRuntime(provider);
-    } on ArgumentError {
-      throw _TrackStateCliException(
-        code: 'UNSUPPORTED_PROVIDER',
-        category: TrackStateCliErrorCategory.unsupported,
-        message:
-            'Provider "$provider" is not implemented yet. Supported values: github, local-git.',
-        exitCode: 5,
-        details: <String, Object?>{'provider': provider},
-      );
-    }
-  }
-
-  Future<TrackStateCliExecution> _runLocalSession(
-    _ResolvedTarget target,
-    TrackStateCliOutput output,
-  ) async {
-    final provider = _providerFactory.createLocal(
-      repositoryPath: target.value,
-      dataRef: 'HEAD',
-    );
-
-    try {
-      final branch = target.branch.isEmpty
-          ? await provider.resolveWriteBranch()
-          : target.branch;
-      final user = await provider.authenticate(
-        RepositoryConnection(
-          repository: target.value,
-          branch: branch,
-          token: '',
-        ),
-      );
-      final permission = await provider.getPermission();
-      final data = <String, Object?>{
-        'command': 'session',
-        'provider': target.provider,
-        'branch': branch,
-        'authSource': 'none',
-        'user': <String, Object?>{
-          'login': user.login,
-          'displayName': user.displayName,
-        },
-        'permissions': _permissionJson(permission),
-      };
-      return _success(
-        targetType: target.type,
-        targetValue: target.value,
-        provider: target.provider,
-        output: output,
-        data: data,
-      );
-    } on TrackStateProviderException catch (error) {
-      throw _TrackStateCliException(
-        code: 'REPOSITORY_OPEN_FAILED',
-        category: TrackStateCliErrorCategory.repository,
-        message:
-            'Local repository session could not be opened for "${target.value}".',
-        exitCode: 4,
-        details: <String, Object?>{
-          'path': target.value,
-          'reason': error.message,
-        },
-      );
-    }
-  }
-
-  Future<TrackStateCliExecution> _runHostedSession(
-    _ResolvedTarget target,
-    TrackStateCliOutput output,
-  ) async {
-    final credential = await _credentialResolver.resolve(
-      explicitToken: target.token,
-      environment: _environment.environment,
-      readGhToken: _environment.readGhAuthToken,
-    );
-    if (credential == null) {
-      throw _TrackStateCliException(
-        code: 'AUTHENTICATION_FAILED',
-        category: TrackStateCliErrorCategory.auth,
-        message:
-            'Authentication is required for the selected provider. Pass --token, set TRACKSTATE_TOKEN, or authenticate with gh.',
-        exitCode: 3,
-        details: <String, Object?>{
-          'provider': target.provider,
-          'repository': target.value,
-        },
-      );
-    }
-
-    final provider = _providerFactory.createHosted(
-      provider: target.provider,
-      repository: target.value,
-      branch: target.branch.ifEmpty(GitHubTrackStateProvider.defaultSourceRef),
-      client: _httpClient,
-    );
-
-    try {
-      final user = await provider.authenticate(
-        RepositoryConnection(
-          repository: target.value,
-          branch: target.branch.ifEmpty(
-            GitHubTrackStateProvider.defaultSourceRef,
-          ),
-          token: credential.token,
-        ),
-      );
-      final permission = await provider.getPermission();
-      final data = <String, Object?>{
-        'command': 'session',
-        'provider': target.provider,
-        'branch': target.branch.ifEmpty(
-          GitHubTrackStateProvider.defaultSourceRef,
-        ),
-        'authSource': credential.source,
-        'user': <String, Object?>{
-          'login': user.login,
-          'displayName': user.displayName,
-        },
-        'permissions': _permissionJson(permission),
-      };
-      return _success(
-        targetType: target.type,
-        targetValue: target.value,
-        provider: target.provider,
-        output: output,
-        data: data,
-      );
-    } on TrackStateProviderException catch (error) {
-      throw _mapHostedProviderError(error, target);
-    }
-  }
-
-  _TrackStateCliException _mapHostedProviderError(
-    TrackStateProviderException error,
-    _ResolvedTarget target,
-  ) {
-    final message = error.message;
-    final isAuthenticationFailure =
-        message.contains('(401)') ||
-        message.contains('(403)') ||
-        message.toLowerCase().contains('bad credentials') ||
-        message.toLowerCase().contains('write access first');
-    if (isAuthenticationFailure) {
-      return _TrackStateCliException(
-        code: 'AUTHENTICATION_FAILED',
-        category: TrackStateCliErrorCategory.auth,
-        message: 'Authentication is required for the selected provider.',
-        exitCode: 3,
-        details: <String, Object?>{
-          'provider': target.provider,
-          'repository': target.value,
-          'reason': message,
-        },
-      );
-    }
-    return _TrackStateCliException(
-      code: 'REPOSITORY_OPEN_FAILED',
-      category: TrackStateCliErrorCategory.repository,
-      message: 'Repository access failed for "${target.value}".',
-      exitCode: 4,
-      details: <String, Object?>{
-        'provider': target.provider,
-        'repository': target.value,
-        'reason': message,
-      },
-    );
+    return null;
   }
 
   TrackStateCliExecution _success({
@@ -515,7 +302,7 @@ class TrackStateCli {
 
     return TrackStateCliExecution.success(
       output: output,
-      content: _encodeEnvelope(<String, Object?>{
+      content: _encodeJson(<String, Object?>{
         'schemaVersion': trackStateCliSchemaVersion,
         'ok': true,
         'provider': provider,
@@ -529,51 +316,93 @@ class TrackStateCli {
     );
   }
 
-  TrackStateCliExecution _error(
-    _TrackStateCliException error, {
-    required TrackStateCliTargetType targetType,
-    required String targetValue,
-    required String provider,
-    required TrackStateCliOutput output,
-  }) {
-    return TrackStateCliExecution.failure(
-      exitCode: error.exitCode,
-      content: _encodeEnvelope(<String, Object?>{
-        'schemaVersion': trackStateCliSchemaVersion,
-        'ok': false,
-        'provider': provider,
-        'target': <String, Object?>{
-          'type': targetType.name,
-          'value': targetValue,
-        },
-        'output': output.name,
-        'error': <String, Object?>{
-          'code': error.code,
-          'category': error.category.name,
-          'message': error.message,
-          'exitCode': error.exitCode,
-          'details': error.details,
-        },
-      }),
-    );
-  }
-
-  Map<String, Object?> _permissionJson(RepositoryPermission permission) =>
-      <String, Object?>{
-        'canRead': permission.canRead,
-        'canWrite': permission.canWrite,
-        'isAdmin': permission.isAdmin,
-        'canCreateBranch': permission.canCreateBranch,
-        'canManageAttachments': permission.canManageAttachments,
-        'canCheckCollaborators': permission.canCheckCollaborators,
-      };
-
   String _textSuccess({
     required TrackStateCliTargetType targetType,
     required String targetValue,
     required String provider,
     required Map<String, Object?> data,
   }) {
+    final command = data['command'];
+    if (command == 'search') {
+      final issues = data['issues']! as List<Object?>;
+      final lines = <String>[
+        'Search results',
+        'Target: ${targetType.name} ($targetValue)',
+        'Provider: $provider',
+        'Auth source: ${data['authSource']}',
+        'JQL: ${data['jql']}',
+        'Page: startAt=${data['startAt']} maxResults=${data['maxResults']} total=${data['total']}',
+      ];
+      if (data['nextPageToken'] != null) {
+        lines.add(
+          'Next page: startAt=${data['nextStartAt']} token=${data['nextPageToken']}',
+        );
+      }
+      if (issues.isEmpty) {
+        lines.add('No issues matched.');
+      } else {
+        for (final item in issues.cast<Map<String, Object?>>()) {
+          lines.add('${item['key']}: ${item['summary']}');
+        }
+      }
+      return lines.join('\n');
+    }
+    if (command == 'attachment-upload') {
+      final attachment = data['attachment']! as Map<String, Object?>;
+      return [
+        'Attachment uploaded',
+        'Target: ${targetType.name} ($targetValue)',
+        'Provider: $provider',
+        'Auth source: ${data['authSource']}',
+        'Issue: ${data['issue']}',
+        'Attachment: ${attachment['name']} (${attachment['id']})',
+      ].join('\n');
+    }
+    if (command == 'attachment-download') {
+      final attachment = data['attachment']! as Map<String, Object?>;
+      return [
+        'Attachment downloaded',
+        'Target: ${targetType.name} ($targetValue)',
+        'Provider: $provider',
+        'Auth source: ${data['authSource']}',
+        'Issue: ${data['issue']}',
+        'Attachment: ${attachment['name']} (${attachment['id']})',
+        'Saved file: ${data['savedFile']}',
+      ].join('\n');
+    }
+    if (command.toString().startsWith('ticket-') ||
+        command.toString().startsWith('jira-')) {
+      final lines = <String>[
+        'Mutation applied',
+        'Target: ${targetType.name} ($targetValue)',
+        'Provider: $provider',
+        'Auth source: ${data['authSource']}',
+        'Command: $command',
+      ];
+      final issue = data['issue'];
+      if (issue is Map<String, Object?>) {
+        lines.add('Issue: ${issue['key']} ${issue['summary'] ?? ''}'.trim());
+      }
+      final deletedIssue = data['deletedIssue'];
+      if (deletedIssue is Map<String, Object?>) {
+        lines.add('Deleted issue: ${deletedIssue['key']}');
+      }
+      final comment = data['comment'];
+      if (comment is Map<String, Object?>) {
+        lines.add('Comment: ${comment['id']}');
+      }
+      final link = data['link'];
+      if (link is Map<String, Object?>) {
+        lines.add(
+          'Link: ${link['type']} ${link['direction']} ${link['target']}',
+        );
+      }
+      if (data['revision'] != null) {
+        lines.add('Revision: ${data['revision']}');
+      }
+      return lines.join('\n');
+    }
+
     final user = data['user']! as Map<String, Object?>;
     final permissions = data['permissions']! as Map<String, Object?>;
     return [
@@ -589,52 +418,13 @@ class TrackStateCli {
           'admin=${permissions['isAdmin']} '
           'create-branch=${permissions['canCreateBranch']} '
           'attachments=${permissions['canManageAttachments']} '
+          'attachment-upload-mode=${permissions['attachmentUploadMode']} '
           'collaborators=${permissions['canCheckCollaborators']}',
     ].join('\n');
   }
 
-  bool _isHelpInvocation(List<String> arguments) =>
-      arguments.length == 1 &&
-      (arguments.first == '--help' || arguments.first == '-h');
-
-  String _encodeEnvelope(Map<String, Object?> payload) =>
+  String _encodeJson(Object? payload) =>
       const JsonEncoder.withIndent('  ').convert(payload);
-
-  String _sessionHelpText(ArgParser parser) => [
-    'trackstate session',
-    '',
-    'Resolve the selected target, load authentication/session state, and report repository access capabilities.',
-    '',
-    'Usage:',
-    '  trackstate session --target local [--path /repo] [--branch main] [--output json|text]',
-    '  trackstate session --target hosted --provider github --repository owner/name [--branch main] [--token <token>] [--output json|text]',
-    '',
-    'Options:',
-    parser.usage,
-    '',
-    'Credential precedence for hosted targets:',
-    '  1. --token',
-    '  2. $trackStateCliTokenEnvironmentVariable',
-    '  3. gh auth token',
-  ].join('\n');
-
-  String get _rootHelpText => [
-    'trackstate',
-    '',
-    'TrackState CLI foundation for local and hosted repository targets.',
-    '',
-    'Usage:',
-    '  trackstate <command> [arguments]',
-    '',
-    'Commands:',
-    '  session    Resolve the target and print session metadata.',
-    '',
-    'Examples:',
-    '  trackstate session --target local',
-    '  trackstate session --target hosted --provider github --repository owner/name',
-    '',
-    'Use "trackstate <command> --help" for command-specific options.',
-  ].join('\n');
 }
 
 class TrackStateCliExecution {
@@ -731,7 +521,63 @@ abstract interface class TrackStateCliProviderFactory {
     required String repository,
     required String branch,
     http.Client? client,
+    bool disableHostedSyncRequestCaching = false,
   });
+}
+
+abstract interface class TrackStateCliRepositoryFactory {
+  TrackStateRepository createLocal({
+    required String repositoryPath,
+    required String dataRef,
+    http.Client? client,
+  });
+
+  TrackStateRepository createHosted({
+    required String provider,
+    required String repository,
+    required String branch,
+    http.Client? client,
+    bool disableHostedSyncRequestCaching = false,
+  });
+}
+
+class _ProviderBackedTrackStateCliRepositoryFactory
+    implements TrackStateCliRepositoryFactory {
+  const _ProviderBackedTrackStateCliRepositoryFactory(this.providerFactory);
+
+  final TrackStateCliProviderFactory providerFactory;
+
+  @override
+  TrackStateRepository createLocal({
+    required String repositoryPath,
+    required String dataRef,
+    http.Client? client,
+  }) => ProviderBackedTrackStateRepository(
+    provider: providerFactory.createLocal(
+      repositoryPath: repositoryPath,
+      dataRef: dataRef,
+    ),
+    usesLocalPersistence: true,
+    supportsGitHubAuth: false,
+    githubClient: client,
+  );
+
+  @override
+  TrackStateRepository createHosted({
+    required String provider,
+    required String repository,
+    required String branch,
+    http.Client? client,
+    bool disableHostedSyncRequestCaching = false,
+  }) => ProviderBackedTrackStateRepository(
+    provider: providerFactory.createHosted(
+      provider: provider,
+      repository: repository,
+      branch: branch,
+      client: client,
+      disableHostedSyncRequestCaching: disableHostedSyncRequestCaching,
+    ),
+  );
 }
 
 class DefaultTrackStateCliProviderFactory
@@ -753,6 +599,7 @@ class DefaultTrackStateCliProviderFactory
     required String repository,
     required String branch,
     http.Client? client,
+    bool disableHostedSyncRequestCaching = false,
   }) {
     if (provider != 'github') {
       throw _TrackStateCliException(
@@ -770,6 +617,7 @@ class DefaultTrackStateCliProviderFactory
       repositoryName: repository,
       sourceRef: branch,
       dataRef: branch,
+      disableHostedSyncRequestCaching: disableHostedSyncRequestCaching,
     );
   }
 }
@@ -788,6 +636,112 @@ class _ResolvedTarget {
   final String value;
   final String branch;
   final String token;
+}
+
+class _ResolvedAttachment {
+  const _ResolvedAttachment({required this.issue, required this.attachment});
+
+  final TrackStateIssue issue;
+  final IssueAttachment attachment;
+}
+
+class _ReadResponse {
+  const _ReadResponse({required this.text, required this.jsonPayload});
+
+  final String text;
+  final Object jsonPayload;
+}
+
+class _PreparedMutationContext {
+  const _PreparedMutationContext({
+    required this.repository,
+    required this.service,
+    required this.snapshot,
+    required this.authSource,
+  });
+
+  final TrackStateRepository repository;
+  final IssueMutationService service;
+  final TrackerSnapshot snapshot;
+  final String authSource;
+}
+
+class _ResolvedMutationField {
+  const _ResolvedMutationField({
+    required this.canonicalKey,
+    required this.displayName,
+    this.aliases = const <String>[],
+    this.direction,
+  });
+
+  const _ResolvedMutationField.none()
+    : canonicalKey = '',
+      displayName = '',
+      aliases = const <String>[],
+      direction = null;
+
+  final String canonicalKey;
+  final String displayName;
+  final List<String> aliases;
+  final String? direction;
+
+  bool get isDefined => canonicalKey.isNotEmpty;
+
+  bool matches(String normalizedToken) {
+    if (_normalizeFieldTokenStatic(canonicalKey) == normalizedToken ||
+        _normalizeFieldTokenStatic(displayName) == normalizedToken) {
+      return true;
+    }
+    for (final alias in aliases) {
+      if (_normalizeFieldTokenStatic(alias) == normalizedToken) {
+        return true;
+      }
+    }
+    return false;
+  }
+}
+
+class _ResolvedMutationAssignment {
+  const _ResolvedMutationAssignment({
+    required this.field,
+    required this.value,
+    required this.requestedKey,
+  });
+
+  final _ResolvedMutationField field;
+  final Object? value;
+  final String requestedKey;
+}
+
+class _ResolvedHierarchyInput {
+  const _ResolvedHierarchyInput({this.parentKey, this.epicKey});
+
+  final String? parentKey;
+  final String? epicKey;
+}
+
+class _TicketCreateRequest {
+  const _TicketCreateRequest({
+    required this.summary,
+    required this.description,
+    required this.issueTypeId,
+    required this.priorityId,
+    required this.assignee,
+    required this.reporter,
+    required this.parentKey,
+    required this.epicKey,
+    required this.fields,
+  });
+
+  final String summary;
+  final String description;
+  final String? issueTypeId;
+  final String? priorityId;
+  final String? assignee;
+  final String? reporter;
+  final String? parentKey;
+  final String? epicKey;
+  final Map<String, Object?> fields;
 }
 
 class _TrackStateCliException implements Exception {
@@ -810,6 +764,95 @@ Future<String?> _readNoGhToken() async => null;
 
 String _identityPath(String path) => path;
 
+const Set<String> _jiraSystemFieldIds = {
+  'summary',
+  'description',
+  'priority',
+  'assignee',
+  'labels',
+};
+
+const List<_ResolvedMutationField> _mutationSystemFields = [
+  _ResolvedMutationField(
+    canonicalKey: 'summary',
+    displayName: 'Summary',
+    aliases: <String>['summary'],
+  ),
+  _ResolvedMutationField(
+    canonicalKey: 'description',
+    displayName: 'Description',
+    aliases: <String>['description'],
+  ),
+  _ResolvedMutationField(
+    canonicalKey: 'issueType',
+    displayName: 'Issue Type',
+    aliases: <String>['issuetype', 'type'],
+  ),
+  _ResolvedMutationField(
+    canonicalKey: 'status',
+    displayName: 'Status',
+    aliases: <String>['status'],
+  ),
+  _ResolvedMutationField(
+    canonicalKey: 'priority',
+    displayName: 'Priority',
+    aliases: <String>['priority'],
+  ),
+  _ResolvedMutationField(
+    canonicalKey: 'assignee',
+    displayName: 'Assignee',
+    aliases: <String>['assignee'],
+  ),
+  _ResolvedMutationField(
+    canonicalKey: 'reporter',
+    displayName: 'Reporter',
+    aliases: <String>['reporter'],
+  ),
+  _ResolvedMutationField(
+    canonicalKey: 'labels',
+    displayName: 'Labels',
+    aliases: <String>['label'],
+  ),
+  _ResolvedMutationField(
+    canonicalKey: 'components',
+    displayName: 'Components',
+    aliases: <String>['component'],
+  ),
+  _ResolvedMutationField(
+    canonicalKey: 'fixVersions',
+    displayName: 'Fix Versions',
+    aliases: <String>['fixversion', 'fixversions'],
+  ),
+  _ResolvedMutationField(
+    canonicalKey: 'watchers',
+    displayName: 'Watchers',
+    aliases: <String>['watcher'],
+  ),
+  _ResolvedMutationField(
+    canonicalKey: 'parent',
+    displayName: 'Parent',
+    aliases: <String>['parent'],
+  ),
+  _ResolvedMutationField(
+    canonicalKey: 'epic',
+    displayName: 'Epic',
+    aliases: <String>['epic', 'epiclink'],
+  ),
+  _ResolvedMutationField(
+    canonicalKey: 'resolution',
+    displayName: 'Resolution',
+    aliases: <String>['resolution'],
+  ),
+  _ResolvedMutationField(
+    canonicalKey: 'acceptanceCriteria',
+    displayName: 'Acceptance Criteria',
+    aliases: <String>['acceptancecriteria'],
+  ),
+];
+
 extension on String {
   String ifEmpty(String fallback) => trim().isEmpty ? fallback : this;
 }
+
+String _normalizeFieldTokenStatic(String value) =>
+    value.trim().toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '');

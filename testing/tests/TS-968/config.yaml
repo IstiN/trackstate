@@ -1,0 +1,21 @@
+test_id: TS-968
+type: ci
+framework: python-subprocess
+platform: nodejs
+dependencies:
+  - Node.js available on PATH
+runtime_inputs:
+  requested_command:
+    - node
+    - testing/accessibility/log_validation.node.test.js
+  workflow_relative_path: .github/workflows/unit-tests.yml
+  node_test_relative_path: testing/accessibility/log_validation.node.test.js
+  validator_relative_path: testing/accessibility/log_validation.js
+  log_validation_step_name: log-validation
+  expected_missing_step_message: Expected the accessibility workflow to expose a contributor-visible `log-validation` step.
+  expected_failing_subtest: accessibility workflow exposes a contributor-visible log-validation step
+  expected_pass_exit_code: 0
+  expected_fail_exit_code: 1
+notes:
+  - Runs the production Node test against the current repository as a precondition.
+  - Creates a disposable local copy of the workflow, removes the mandatory log-validation step, reruns the same Node command, and asserts that the process exits with code 1.
