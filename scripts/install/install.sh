@@ -59,6 +59,9 @@ while [[ $# -gt 0 ]]; do
       error "Unknown option: $1"
       ;;
     *)
+      if [[ -n "${REQUESTED_VERSION:-}" ]]; then
+        error "Unexpected argument: $1"
+      fi
       REQUESTED_VERSION="$1"
       shift
       ;;
@@ -69,7 +72,7 @@ REQUESTED_VERSION="${REQUESTED_VERSION:-latest}"
 
 check_existing_trackstate() {
   local existing
-  existing="$(command -v trackstate || true)"
+  existing="$(type -P trackstate || true)"
   if [[ -n "$existing" && "$existing" != "${INSTALL_DIR}/trackstate" ]]; then
     if [[ "$FORCE" -eq 1 ]]; then
       log "Warning: an existing trackstate binary was found at ${existing}; continuing because --force was passed."

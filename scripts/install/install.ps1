@@ -83,13 +83,16 @@ function Invoke-Download {
 $InstallDir = Join-Path $env:LOCALAPPDATA "trackstate\bin"
 
 function Test-ExistingTrackstateConflict {
-    $existing = Get-Command "trackstate.exe" -ErrorAction SilentlyContinue
+    $existing = Get-Command "trackstate" -ErrorAction SilentlyContinue
+    if (-not $existing) {
+        $existing = Get-Command "trackstate.exe" -ErrorAction SilentlyContinue
+    }
     $managedBin = Join-Path $InstallDir "trackstate.exe"
-    if ($existing -and $existing.Source -ne $managedBin) {
+    if ($existing -and $existing.Source.ToLowerInvariant() -ne $managedBin.ToLowerInvariant()) {
         if ($Force) {
-            Write-Info "Warning: an existing trackstate.exe binary was found at $($existing.Source); continuing because -Force was passed."
+            Write-Info "Warning: an existing trackstate binary was found at $($existing.Source); continuing because -Force was passed."
         } else {
-            Write-ErrorAndExit "A conflicting trackstate.exe binary already exists on PATH at $($existing.Source). Use -Force to override."
+            Write-ErrorAndExit "A conflicting trackstate binary already exists on PATH at $($existing.Source). Use -Force to override."
         }
     }
 }

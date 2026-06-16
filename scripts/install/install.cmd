@@ -6,6 +6,8 @@ REM   curl -fsSL https://github.com/IstiN/trackstate/releases/latest/download/in
 REM   install.cmd
 REM
 REM   install.cmd v1.2.3
+REM
+REM   install.cmd --force
 
 setlocal enabledelayedexpansion
 
@@ -30,7 +32,7 @@ if errorlevel 1 (
 )
 
 echo --> Running TrackState installer...
-powershell.exe -ExecutionPolicy Bypass -NoProfile -Command "& '%TEMP_SCRIPT%' '%VERSION%'"
+powershell.exe -ExecutionPolicy Bypass -NoProfile -Command "& '%TEMP_SCRIPT%' %*"
 set "EXIT_CODE=%ERRORLEVEL%"
 
 del /f /q "%TEMP_SCRIPT%" >nul 2>&1
