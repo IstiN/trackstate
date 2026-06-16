@@ -1,0 +1,40 @@
+test_id: TS-934
+type: ci
+framework: gh-cli
+platform: github-actions
+dependencies:
+  - gh CLI authenticated with push access to IstiN/trackstate and GitHub Actions
+  - network access to GitHub REST APIs and pull request metadata
+runtime_inputs:
+  repository: IstiN/trackstate
+  base_branch: main
+  target_workflow_name: Flutter Required Checks
+  target_workflow_path: .github/workflows/unit-tests.yml
+  probe_path: lib/ts934_accessibility_engine_logging_probe.dart
+  probe_render_host_path: lib/main.dart
+  branch_prefix: ts934-accessibility-engine-logging
+  commit_message: "TS-934 probe: verify Flutter engine initialization logging"
+  pull_request_title: "TS-934 disposable probe: verify accessibility engine-state logging"
+  pull_request_body: "Disposable PR created by TS-934 automation to verify that the live accessibility gate logs Flutter engine initialization transitions and semantics tree discovery status."
+  expected_accessibility_markers:
+    - accessibility
+    - axe-core
+    - axe
+    - wcag
+  contrast_evidence_markers:
+    - contrast
+    - color contrast
+    - ratio
+    - wcag
+    - 4.5:1
+  semantic_evidence_markers:
+    - aria
+    - semantics
+    - semantic
+    - label
+  poll_interval_seconds: 5
+  run_timeout_seconds: 900
+  pull_request_timeout_seconds: 180
+notes:
+  - Creates a disposable compliant accessibility pull request so the live PR workflow stays representative of a standard contributor run.
+  - Verifies the hosted accessibility run logs capture Flutter engine initialization transitions plus semantics-tree discovery status instead of relying on source inspection alone.

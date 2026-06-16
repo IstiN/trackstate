@@ -17,6 +17,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: true
+          token: ${{ secrets.PAT_TOKEN || github.token }}
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -25,24 +26,42 @@ jobs:
           channel: stable
           cache: true
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: 'package.json'
+          cache: npm
+
       - name: Install dependencies
         run: flutter pub get
 
+      - name: Install Node dependencies
+        run: npm ci
+
       - name: Analyze
         run: flutter analyze
+
+      - name: Check code duplication
+        run: |
+          npx jscpd lib/ --min-lines 5 --min-tokens 50 \
+            --ignore "**/*.g.dart,**/*.freezed.dart,lib/l10n/generated/**,lib/**/*.gr.dart" \
+            --reporters console --threshold 1
 
       - name: Run tests and goldens
         run: flutter test
 
       - name: Build GitHub Pages web app
+        env:
+          TRACKSTATE_GITHUB_APP_CLIENT_ID: ${{ vars.TRACKSTATE_GITHUB_APP_CLIENT_ID }}
+          TRACKSTATE_GITHUB_AUTH_PROXY_URL: ${{ vars.TRACKSTATE_GITHUB_AUTH_PROXY_URL }}
         run: |
           flutter build web --release \
             --base-href /trackstate/ \
             --dart-define TRACKSTATE_REPOSITORY=IstiN/trackstate-setup \
             --dart-define TRACKSTATE_SOURCE_REF=main \
             --dart-define TRACKSTATE_DATA_REF=main \
-            --dart-define TRACKSTATE_GITHUB_APP_CLIENT_ID="${{ vars.TRACKSTATE_GITHUB_APP_CLIENT_ID }}" \
-            --dart-define TRACKSTATE_GITHUB_AUTH_PROXY_URL="${{ vars.TRACKSTATE_GITHUB_AUTH_PROXY_URL }}"
+            --dart-define TRACKSTATE_GITHUB_APP_CLIENT_ID="$TRACKSTATE_GITHUB_APP_CLIENT_ID" \
+            --dart-define TRACKSTATE_GITHUB_AUTH_PROXY_URL="$TRACKSTATE_GITHUB_AUTH_PROXY_URL"
 
       - name: Upload web build artifact
         uses: actions/upload-artifact@v4
