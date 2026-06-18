@@ -59,7 +59,7 @@ module.exports = {
     // as well duplicates the mermaid diagram in every agent prompt.
     globalAdditionalInstructions: [],
     // SM parallelism: allow two active AI teammate runs while keeping a cap for Copilot rate-limit control.
-    smMaxWorkflows: 4,
+    smMaxWorkflows: 1,
 
     repository: {
         owner: 'IstiN',
