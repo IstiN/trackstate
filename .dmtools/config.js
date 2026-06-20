@@ -58,8 +58,9 @@ module.exports = {
     // Keep codegraph_tools only in globalCliPrompts; adding it to additionalInstructions
     // as well duplicates the mermaid diagram in every agent prompt.
     globalAdditionalInstructions: [],
-    // SM parallelism: allow two active AI teammate runs while keeping a cap for Copilot rate-limit control.
-    smMaxWorkflows: 4,
+    // SM parallelism: run only one AI teammate workflow at a time to keep PR review/rework first.
+    smMaxWorkflows: 1,
+    smRules: require('./sm_rules.js'),
 
     repository: {
         owner: 'IstiN',
