@@ -1,7 +1,37 @@
 module.exports = [
     {
+        "description": "In Testing Stories (pr_approved) \u2192 merge test automation PR",
+        "jql": "project = {jiraProject} AND issuetype in ('Story') AND status in ('In Testing') AND labels = 'pr_approved' ORDER BY created ASC",
+        "configFile": "agents/story_test_automation_merge.json",
+        "localExecution": true,
+        "enabled": true
+    },
+    {
+        "description": "In Testing Bugs (pr_approved) \u2192 merge test automation PR",
+        "jql": "project = {jiraProject} AND issuetype in ('Bug') AND status in ('In Testing') AND labels = 'pr_approved' ORDER BY created ASC",
+        "configFile": "agents/bug_test_automation_merge.json",
+        "localExecution": true,
+        "enabled": true
+    },
+    {
+        "description": "In Testing Stories (test_pr_rework_needed) \u2192 rework test automation",
+        "jql": "project = {jiraProject} AND issuetype in ('Story') AND status in ('In Testing') AND labels = 'test_pr_rework_needed' ORDER BY created ASC",
+        "configFile": "agents/story_test_automation_rework.json",
+        "skipIfLabel": "sm_story_test_rework_triggered",
+        "addLabel": "sm_story_test_rework_triggered",
+        "enabled": true
+    },
+    {
+        "description": "In Testing Bugs (test_pr_rework_needed) \u2192 rework test automation",
+        "jql": "project = {jiraProject} AND issuetype in ('Bug') AND status in ('In Testing') AND labels = 'test_pr_rework_needed' ORDER BY created ASC",
+        "configFile": "agents/bug_test_automation_rework.json",
+        "skipIfLabel": "sm_bug_test_rework_triggered",
+        "addLabel": "sm_bug_test_rework_triggered",
+        "enabled": true
+    },
+    {
         "description": "In Testing Stories with open test-automation PR \u2192 review",
-        "jql": "project = {jiraProject} AND issuetype in ('Story') AND status in ('In Testing') AND (labels is EMPTY OR labels NOT IN ('pr_approved')) ORDER BY created ASC",
+        "jql": "project = {jiraProject} AND issuetype in ('Story') AND status in ('In Testing') AND (labels is EMPTY OR labels NOT IN ('pr_approved','test_pr_rework_needed')) ORDER BY created ASC",
         "configFile": "agents/pr_story_test_automation_review.json",
         "skipIfLabel": "sm_story_test_review_triggered",
         "addLabel": "sm_story_test_review_triggered",
@@ -9,7 +39,7 @@ module.exports = [
     },
     {
         "description": "In Testing Bugs with open test-automation PR \u2192 review",
-        "jql": "project = {jiraProject} AND issuetype in ('Bug') AND status in ('In Testing') AND (labels is EMPTY OR labels NOT IN ('pr_approved')) ORDER BY created ASC",
+        "jql": "project = {jiraProject} AND issuetype in ('Bug') AND status in ('In Testing') AND (labels is EMPTY OR labels NOT IN ('pr_approved','test_pr_rework_needed')) ORDER BY created ASC",
         "configFile": "agents/pr_bug_test_automation_review.json",
         "skipIfLabel": "sm_bug_test_review_triggered",
         "addLabel": "sm_bug_test_review_triggered",
@@ -58,20 +88,6 @@ module.exports = [
         "description": "In Review Test Cases (pr_approved) \u2192 retry merge",
         "jql": "project = {jiraProject} AND issuetype in ('Test Case') AND status in ('In Review - Passed', 'In Review - Failed') AND labels = 'pr_approved' ORDER BY created ASC",
         "configFile": "agents/retry_merge_test.json",
-        "localExecution": true,
-        "enabled": true
-    },
-    {
-        "description": "In Testing Stories (pr_approved) \u2192 merge test automation PR",
-        "jql": "project = {jiraProject} AND issuetype in ('Story') AND status in ('In Testing') AND labels = 'pr_approved' ORDER BY created ASC",
-        "configFile": "agents/story_test_automation_merge.json",
-        "localExecution": true,
-        "enabled": true
-    },
-    {
-        "description": "In Testing Bugs (pr_approved) \u2192 merge test automation PR",
-        "jql": "project = {jiraProject} AND issuetype in ('Bug') AND status in ('In Testing') AND labels = 'pr_approved' ORDER BY created ASC",
-        "configFile": "agents/bug_test_automation_merge.json",
         "localExecution": true,
         "enabled": true
     },
