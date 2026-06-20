@@ -389,17 +389,15 @@ module.exports = {
         },
         story_test_automation_rework: {
             customParams: {
-                autoStartReview: true,
-                autoStartReviewConfigFile: 'agents/pr_story_test_automation_review.json',
+                autoStartReview: false,
+                removeLabel: 'test_pr_rework_needed',
                 feedbackLoop: POST_ACTION_FEEDBACK
             }
         },
         pr_story_test_automation_review: {
             customParams: {
-                autoStartMerge: true,
-                autoStartMergeConfigFile: 'agents/story_test_automation_merge.json',
-                autoStartRework: true,
-                autoStartReworkConfigFile: 'agents/story_test_automation_rework.json',
+                autoStartMerge: false,
+                autoStartRework: false,
                 maxReviewThreadsBeforeForceApprove: 100,
                 smFallback: true
             }
@@ -412,17 +410,15 @@ module.exports = {
         },
         bug_test_automation_rework: {
             customParams: {
-                autoStartReview: true,
-                autoStartReviewConfigFile: 'agents/pr_bug_test_automation_review.json',
+                autoStartReview: false,
+                removeLabel: 'test_pr_rework_needed',
                 feedbackLoop: POST_ACTION_FEEDBACK
             }
         },
         pr_bug_test_automation_review: {
             customParams: {
-                autoStartMerge: true,
-                autoStartMergeConfigFile: 'agents/bug_test_automation_merge.json',
-                autoStartRework: true,
-                autoStartReworkConfigFile: 'agents/bug_test_automation_rework.json',
+                autoStartMerge: false,
+                autoStartRework: false,
                 maxReviewThreadsBeforeForceApprove: 100,
                 smFallback: true
             }
