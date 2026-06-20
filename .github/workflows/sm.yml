@@ -90,7 +90,7 @@ jobs:
           SOURCE_GITHUB_REPOSITORY: trackstate
 
           CLI_ALLOWED_COMMANDS: "find,ls,cat,mkdir,bash,run-agent.sh"
-          DMTOOLS_FILE_READ_ALLOWED_PATHS: "../.dmtools/**"
+          DMTOOLS_FILE_READ_ALLOWED_PATHS: ".dmtools/**,../.dmtools/**"
         run: |
           CI_RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           echo "CI Run URL: ${CI_RUN_URL}"
