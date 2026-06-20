@@ -1,8 +1,9 @@
+from __future__ import annotations
+
 import fnmatch
 import json
 import os
 import platform
-import re
 import shutil
 import stat
 import subprocess
@@ -19,6 +20,27 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+
+from testing.components.services.live_setup_repository_service import (  # noqa: E402
+    LiveSetupRepositoryService,
+)
+from testing.components.services.trackstate_release_artifact_validator import (  # noqa: E402
+    TrackStateReleaseArtifactValidator,
+)
+from testing.core.config.live_setup_test_config import LiveSetupTestConfig  # noqa: E402
+from testing.core.config.trackstate_release_artifact_config import (  # noqa: E402
+    TrackStateReleaseArtifactConfig,
+)
+from testing.core.models.trackstate_release_artifact_result import (  # noqa: E402
+    TrackStateReleaseAssetObservation,
+    TrackStateReleaseArtifactObservation,
+)
+from testing.tests.support.github_release_tag_resolver_factory import (  # noqa: E402
+    create_github_release_tag_resolver,
+)
+from testing.tests.support.trackstate_release_artifact_probe_factory import (  # noqa: E402
+    create_trackstate_release_artifact_probe,
+)
 
 TICKET_KEY = "TS-1366"
 TICKET_SUMMARY = "CLI Archive Content Atomicity — binary-only packaging and executable bit"
@@ -57,7 +79,6 @@ class CliArchiveAtomicityTest(unittest.TestCase):
             "steps": [],
             "human_verification": [],
         }
-        self._github_env = self._github_token_env()
 
     def test_cli_archive_is_atomic_and_executable(self) -> None:
         OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -71,7 +92,20 @@ class CliArchiveAtomicityTest(unittest.TestCase):
             raise
 
     def _run_test(self) -> None:
-        release_tag = self._resolve_release_tag()
+        base_config = TrackStateReleaseArtifactConfig.from_file_without_release_tag(CONFIG_PATH)
+        resolver = create_github_release_tag_resolver(REPO_ROOT)
+        release_tag = resolver.resolve_release_tag(
+            repository=base_config.repository,
+            pattern=base_config.release_tag_pattern,
+            env_key="TS1366_RELEASE_TAG",
+        )
+        if release_tag is None:
+            raise unittest.SkipTest(
+                "No release tag could be determined. Set TS1366_RELEASE_TAG or run the test "
+                "from a GitHub Actions release/tag workflow."
+            )
+
+        config = base_config.with_release_tag(release_tag)
         self.result["release_tag"] = release_tag
         self._record_step(
             step=1,
@@ -80,33 +114,60 @@ class CliArchiveAtomicityTest(unittest.TestCase):
             observed=f"Selected release tag: {release_tag}",
         )
 
-        cli_asset = self._find_cli_asset(release_tag)
+        validator = TrackStateReleaseArtifactValidator(
+            create_trackstate_release_artifact_probe(REPO_ROOT, config=config)
+        )
+        observation = validator.validate(config=config)
+
+        if observation.selected_release is None:
+            self.result["blocked_reason"] = (
+                f"No published release matched the selected tag {release_tag}."
+            )
+            self._record_step(
+                step=2,
+                status="failed",
+                action="Locate the Linux x64 CLI archive on the selected release.",
+                observed=self.result["blocked_reason"],
+            )
+            raise unittest.SkipTest(self.result["blocked_reason"])
+
+        cli_asset = self._find_cli_asset(observation)
         if cli_asset is None:
+            pattern = self.config["cli_archive_pattern"]
             self._record_step(
                 step=2,
                 status="failed",
                 action="Locate the Linux x64 CLI archive on the selected release.",
                 observed=(
-                    f"No asset matching {self.config['cli_archive_pattern']} "
-                    f"was found on release {release_tag}."
+                    f"No asset matching {pattern} was found on release {release_tag}."
                 ),
             )
             raise unittest.SkipTest(
-                f"Release {release_tag} does not expose a CLI archive matching "
-                f"{self.config['cli_archive_pattern']}."
+                f"Release {release_tag} does not expose a CLI archive matching {pattern}."
             )
 
-        self.result["cli_archive_asset"] = cli_asset
+        self.result["cli_archive_asset"] = cli_asset.name
         self._record_step(
             step=2,
             status="passed",
             action="Locate the Linux x64 CLI archive on the selected release.",
-            observed=f"CLI archive asset: {cli_asset}",
+            observed=f"CLI archive asset: {cli_asset.name}",
+        )
+
+        repository_service = LiveSetupRepositoryService(
+            config=LiveSetupTestConfig(
+                app_url=config.releases_page_url,
+                repository=config.repository,
+                ref=config.default_branch,
+            )
         )
 
         with tempfile.TemporaryDirectory(prefix=f"trackstate-{TICKET_KEY.lower()}-") as tmp:
             temp_dir = Path(tmp)
-            archive_path = self._download_asset(release_tag, cli_asset, temp_dir)
+            archive_path = temp_dir / cli_asset.name
+            archive_path.write_bytes(
+                repository_service.download_release_asset_bytes(cli_asset.id)
+            )
             members = self._inspect_archive_members(archive_path)
             self.result["archive_members"] = [
                 {"name": m.name, "mode": oct(stat.S_IMODE(m.mode)), "isreg": m.isreg()}
@@ -137,157 +198,24 @@ class CliArchiveAtomicityTest(unittest.TestCase):
         )
         self._write_pass_outputs()
 
-    def _resolve_release_tag(self) -> str:
-        env_tag = os.getenv("TS1366_RELEASE_TAG", "").strip()
-        if env_tag:
-            if self._matches_release_pattern(env_tag):
-                return env_tag
-            raise AssertionError(
-                f"TS1366_RELEASE_TAG={env_tag!r} does not match the configured "
-                f"release tag pattern {self.config['release_tag_pattern']}."
-            )
-
-        ci_tag = self._read_ci_release_tag()
-        if ci_tag:
-            return ci_tag
-
-        latest_tag = self._latest_release_tag()
-        if latest_tag:
-            return latest_tag
-
-        raise unittest.SkipTest(
-            "No release tag could be determined. Set TS1366_RELEASE_TAG or run the test "
-            "from a GitHub Actions release/tag workflow."
-        )
-
-    def _matches_release_pattern(self, tag: str) -> bool:
-        return re.fullmatch(self.config["release_tag_pattern"], tag) is not None
-
-    def _read_ci_release_tag(self) -> str | None:
-        github_ref_name = os.getenv("GITHUB_REF_NAME", "").strip()
-        if github_ref_name and self._matches_release_pattern(github_ref_name):
-            return github_ref_name
-
-        event_path = os.getenv("GITHUB_EVENT_PATH")
-        if not event_path:
-            return None
-        try:
-            payload = json.loads(Path(event_path).read_text(encoding="utf-8"))
-        except (FileNotFoundError, json.JSONDecodeError, OSError):
-            return None
-        if not isinstance(payload, dict):
-            return None
-
-        candidates: list[str | None] = []
-        inputs = payload.get("inputs")
-        if isinstance(inputs, dict):
-            candidates.append(self._strip_string(inputs.get("release_ref")))
-        release = payload.get("release")
-        if isinstance(release, dict):
-            candidates.append(self._strip_string(release.get("tag_name")))
-        ref = self._strip_string(payload.get("ref"))
-        if ref and ref.startswith("refs/tags/"):
-            candidates.append(ref.removeprefix("refs/tags/").strip())
-
-        for candidate in candidates:
-            if candidate and self._matches_release_pattern(candidate):
-                return candidate
-        return None
-
-    @staticmethod
-    def _strip_string(value: Any) -> str | None:
-        if not isinstance(value, str):
-            return None
-        stripped = value.strip()
-        return stripped or None
-
-    def _latest_release_tag(self) -> str | None:
-        command = (
-            "gh",
-            "release",
-            "list",
-            "--repo",
-            self.config["repository"],
-            "--limit",
-            "50",
-            "--json",
-            "tagName",
-            "--jq",
-            ".[].tagName",
-        )
-        completed = self._run_gh(command)
-        if completed.returncode != 0:
-            return None
-        for line in completed.stdout.splitlines():
-            tag = line.strip()
-            if tag and self._matches_release_pattern(tag):
-                return tag
-        return None
-
-    def _find_cli_asset(self, release_tag: str) -> str | None:
-        command = (
-            "gh",
-            "release",
-            "view",
-            release_tag,
-            "--repo",
-            self.config["repository"],
-            "--json",
-            "assets",
-            "--jq",
-            ".assets[].name",
-        )
-        completed = self._run_gh(command)
-        if completed.returncode != 0:
-            raise AssertionError(
-                f"Could not list assets for release {release_tag}.\n"
-                f"stderr: {completed.stderr}"
-            )
+    def _find_cli_asset(
+        self,
+        observation: TrackStateReleaseArtifactObservation,
+    ) -> TrackStateReleaseAssetObservation | None:
         pattern = self.config["cli_archive_pattern"]
         matching = [
-            line.strip()
-            for line in completed.stdout.splitlines()
-            if fnmatch.fnmatch(line.strip(), pattern)
+            asset
+            for asset in observation.assets
+            if fnmatch.fnmatch(asset.name, pattern)
         ]
         if not matching:
             return None
         if len(matching) > 1:
             raise AssertionError(
-                f"Release {release_tag} exposed multiple CLI archives matching "
-                f"{pattern}: {matching}."
+                f"Release exposed multiple CLI archives matching {pattern}: "
+                f"{[asset.name for asset in matching]}."
             )
         return matching[0]
-
-    def _download_asset(
-        self,
-        release_tag: str,
-        asset_name: str,
-        destination_dir: Path,
-    ) -> Path:
-        command = (
-            "gh",
-            "release",
-            "download",
-            release_tag,
-            "--repo",
-            self.config["repository"],
-            "--pattern",
-            asset_name,
-            "--dir",
-            str(destination_dir),
-        )
-        completed = self._run_gh(command)
-        if completed.returncode != 0:
-            raise AssertionError(
-                f"Could not download asset {asset_name} from release {release_tag}.\n"
-                f"stderr: {completed.stderr}"
-            )
-        candidates = list(destination_dir.glob(asset_name))
-        if not candidates:
-            raise AssertionError(
-                f"Asset {asset_name} was not written to {destination_dir}."
-            )
-        return candidates[0]
 
     def _inspect_archive_members(self, archive_path: Path) -> list[tarfile.TarInfo]:
         try:
@@ -446,28 +374,6 @@ class CliArchiveAtomicityTest(unittest.TestCase):
             check="Executed the extracted binary with `--version` as a real user would after downloading.",
             observed=completed.stdout.strip()[:500],
         )
-
-    def _run_gh(self, command: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
-        env = {**os.environ, "GH_PAGER": "cat"}
-        token = self._github_env.get("GH_TOKEN") or self._github_env.get("GITHUB_TOKEN")
-        if token:
-            env["GH_TOKEN"] = token
-        return subprocess.run(
-            command,
-            cwd=REPO_ROOT,
-            env=env,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-
-    @staticmethod
-    def _github_token_env() -> dict[str, str]:
-        return {
-            key: value
-            for key, value in os.environ.items()
-            if key in {"GH_TOKEN", "GITHUB_TOKEN", "SOURCE_GITHUB_TOKEN"}
-        }
 
     @staticmethod
     def _load_config(path: Path) -> dict[str, Any]:
@@ -881,3 +787,7 @@ def _markdown_human_lines(checks: Any) -> list[str]:
             f"- **Check:** {entry.get('check')} **Observed:** `{entry.get('observed')}`"
         )
     return lines
+
+
+if __name__ == "__main__":
+    unittest.main()

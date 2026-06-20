@@ -1,15 +1,14 @@
+from __future__ import annotations
+
 import fnmatch
 import json
 import os
 import platform
-import re
 import subprocess
 import sys
-import tarfile
 import tempfile
 import traceback
 import unittest
-import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +17,27 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+
+from testing.components.services.live_setup_repository_service import (  # noqa: E402
+    LiveSetupRepositoryService,
+)
+from testing.components.services.trackstate_release_artifact_validator import (  # noqa: E402
+    TrackStateReleaseArtifactValidator,
+)
+from testing.core.config.live_setup_test_config import LiveSetupTestConfig  # noqa: E402
+from testing.core.config.trackstate_release_artifact_config import (  # noqa: E402
+    TrackStateReleaseArtifactConfig,
+)
+from testing.core.models.trackstate_release_artifact_result import (  # noqa: E402
+    TrackStateReleaseAssetObservation,
+    TrackStateReleaseArtifactObservation,
+)
+from testing.tests.support.github_release_tag_resolver_factory import (  # noqa: E402
+    create_github_release_tag_resolver,
+)
+from testing.tests.support.trackstate_release_artifact_probe_factory import (  # noqa: E402
+    create_trackstate_release_artifact_probe,
+)
 
 TICKET_KEY = "TS-1370"
 TICKET_SUMMARY = "Desktop Artifact Integrity — binary-level verification using unified checksum"
@@ -55,7 +75,6 @@ class DesktopArtifactIntegrityTest(unittest.TestCase):
             "steps": [],
             "human_verification": [],
         }
-        self._github_env = self._github_token_env()
 
     def test_unified_checksum_validates_all_desktop_and_cli_assets(self) -> None:
         OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -69,7 +88,20 @@ class DesktopArtifactIntegrityTest(unittest.TestCase):
             raise
 
     def _run_test(self) -> None:
-        release_tag = self._resolve_release_tag()
+        base_config = TrackStateReleaseArtifactConfig.from_file_without_release_tag(CONFIG_PATH)
+        resolver = create_github_release_tag_resolver(REPO_ROOT)
+        release_tag = resolver.resolve_release_tag(
+            repository=base_config.repository,
+            pattern=base_config.release_tag_pattern,
+            env_key="TS1370_RELEASE_TAG",
+        )
+        if release_tag is None:
+            raise unittest.SkipTest(
+                "No release tag could be determined. Set TS1370_RELEASE_TAG or run the test "
+                "from a GitHub Actions release/tag workflow."
+            )
+
+        config = base_config.with_release_tag(release_tag)
         self.result["release_tag"] = release_tag
         self._record_step(
             step=1,
@@ -78,41 +110,70 @@ class DesktopArtifactIntegrityTest(unittest.TestCase):
             observed=f"Selected release tag: {release_tag}",
         )
 
-        expected_assets = self._expand_expected_assets(release_tag)
-        assets = self._list_release_assets(release_tag)
-        missing_assets = [name for name in expected_assets if name not in assets]
-        self.result["missing_assets"] = missing_assets
+        validator = TrackStateReleaseArtifactValidator(
+            create_trackstate_release_artifact_probe(REPO_ROOT, config=config)
+        )
+        observation = validator.validate(config=config)
 
-        checksum_file = self._find_checksum_file(release_tag, assets)
-        if missing_assets or checksum_file is None:
-            missing_items = missing_assets.copy()
-            if checksum_file is None:
-                missing_items.append(self.config["checksum_file_pattern"].format(tag=release_tag))
+        if observation.selected_release is None:
+            self.result["blocked_reason"] = (
+                f"No published release matched the selected tag {release_tag}."
+            )
             self._record_step(
                 step=2,
                 status="failed",
                 action="Locate all required release assets and the unified checksum file.",
-                observed=f"Missing assets: {missing_items}. Available assets: {assets}",
+                observed=self.result["blocked_reason"],
+            )
+            raise unittest.SkipTest(self.result["blocked_reason"])
+
+        expected_assets = self._expand_expected_assets(release_tag)
+        checksum_pattern = self.config["checksum_file_pattern"].format(tag=release_tag)
+        asset_by_name = {asset.name: asset for asset in observation.assets}
+
+        missing_assets = [name for name in expected_assets if name not in asset_by_name]
+        checksum_asset = self._find_checksum_asset(asset_by_name, checksum_pattern)
+        if checksum_asset is not None:
+            self.result["checksum_file"] = checksum_asset.name
+
+        if missing_assets or checksum_asset is None:
+            missing_items = missing_assets.copy()
+            if checksum_asset is None:
+                missing_items.append(checksum_pattern)
+            self.result["missing_assets"] = missing_items
+            self._record_step(
+                step=2,
+                status="failed",
+                action="Locate all required release assets and the unified checksum file.",
+                observed=f"Missing assets: {missing_items}. Available assets: {list(asset_by_name.keys())}",
             )
             self.result["blocked_reason"] = (
                 f"Release {release_tag} is missing required assets: {missing_items}."
             )
             raise unittest.SkipTest(self.result["blocked_reason"])
 
-        self.result["checksum_file"] = checksum_file
         self.result["downloaded_assets"] = expected_assets
         self._record_step(
             step=2,
             status="passed",
             action="Locate all required release assets and the unified checksum file.",
-            observed=f"Found assets: {expected_assets}; checksum file: {checksum_file}",
+            observed=f"Found assets: {expected_assets}; checksum file: {checksum_asset.name}",
+        )
+
+        repository_service = LiveSetupRepositoryService(
+            config=LiveSetupTestConfig(
+                app_url=config.releases_page_url,
+                repository=config.repository,
+                ref=config.default_branch,
+            )
         )
 
         with tempfile.TemporaryDirectory(prefix=f"trackstate-{TICKET_KEY.lower()}-") as tmp:
             temp_dir = Path(tmp)
-            self._download_assets(release_tag, expected_assets, temp_dir)
-            self._download_asset(release_tag, checksum_file, temp_dir)
-            checksum_path = temp_dir / checksum_file
+            self._download_assets(repository_service, asset_by_name, expected_assets, temp_dir)
+            checksum_path = self._download_checksum_manifest(
+                repository_service, checksum_asset, temp_dir
+            )
             self._inspect_checksum_manifest(checksum_path)
             self._verify_checksums(temp_dir, checksum_path)
 
@@ -136,129 +197,29 @@ class DesktopArtifactIntegrityTest(unittest.TestCase):
             for template in self.config["expected_assets"]
         ]
 
-    def _resolve_release_tag(self) -> str:
-        env_tag = os.getenv("TS1370_RELEASE_TAG", "").strip()
-        if env_tag:
-            if self._matches_release_pattern(env_tag):
-                return env_tag
-            raise AssertionError(
-                f"TS1370_RELEASE_TAG={env_tag!r} does not match the configured "
-                f"release tag pattern {self.config['release_tag_pattern']}."
-            )
-
-        ci_tag = self._read_ci_release_tag()
-        if ci_tag:
-            return ci_tag
-
-        latest_tag = self._latest_release_tag()
-        if latest_tag:
-            return latest_tag
-
-        raise unittest.SkipTest(
-            "No release tag could be determined. Set TS1370_RELEASE_TAG or run the test "
-            "from a GitHub Actions release/tag workflow."
-        )
-
-    def _matches_release_pattern(self, tag: str) -> bool:
-        return re.fullmatch(self.config["release_tag_pattern"], tag) is not None
-
-    def _read_ci_release_tag(self) -> str | None:
-        github_ref_name = os.getenv("GITHUB_REF_NAME", "").strip()
-        if github_ref_name and self._matches_release_pattern(github_ref_name):
-            return github_ref_name
-
-        event_path = os.getenv("GITHUB_EVENT_PATH")
-        if not event_path:
-            return None
-        try:
-            payload = json.loads(Path(event_path).read_text(encoding="utf-8"))
-        except (FileNotFoundError, json.JSONDecodeError, OSError):
-            return None
-        if not isinstance(payload, dict):
-            return None
-
-        candidates: list[str | None] = []
-        inputs = payload.get("inputs")
-        if isinstance(inputs, dict):
-            candidates.append(self._strip_string(inputs.get("release_ref")))
-        release = payload.get("release")
-        if isinstance(release, dict):
-            candidates.append(self._strip_string(release.get("tag_name")))
-        ref = self._strip_string(payload.get("ref"))
-        if ref and ref.startswith("refs/tags/"):
-            candidates.append(ref.removeprefix("refs/tags/").strip())
-
-        for candidate in candidates:
-            if candidate and self._matches_release_pattern(candidate):
-                return candidate
-        return None
-
-    @staticmethod
-    def _strip_string(value: Any) -> str | None:
-        if not isinstance(value, str):
-            return None
-        stripped = value.strip()
-        return stripped or None
-
-    def _latest_release_tag(self) -> str | None:
-        command = (
-            "gh",
-            "release",
-            "list",
-            "--repo",
-            self.config["repository"],
-            "--limit",
-            "50",
-            "--json",
-            "tagName",
-            "--jq",
-            ".[].tagName",
-        )
-        completed = self._run_gh(command)
-        if completed.returncode != 0:
-            return None
-        for line in completed.stdout.splitlines():
-            tag = line.strip()
-            if tag and self._matches_release_pattern(tag):
-                return tag
-        return None
-
-    def _list_release_assets(self, release_tag: str) -> list[str]:
-        command = (
-            "gh",
-            "release",
-            "view",
-            release_tag,
-            "--repo",
-            self.config["repository"],
-            "--json",
-            "assets",
-            "--jq",
-            ".assets[].name",
-        )
-        completed = self._run_gh(command)
-        if completed.returncode != 0:
-            raise AssertionError(
-                f"Could not list assets for release {release_tag}.\n"
-                f"stderr: {completed.stderr}"
-            )
-        return [line.strip() for line in completed.stdout.splitlines() if line.strip()]
-
-    def _find_checksum_file(self, release_tag: str, assets: list[str]) -> str | None:
-        pattern = self.config["checksum_file_pattern"].format(tag=release_tag)
-        matching = [name for name in assets if fnmatch.fnmatch(name, pattern)]
+    def _find_checksum_asset(
+        self,
+        asset_by_name: dict[str, TrackStateReleaseAssetObservation],
+        pattern: str,
+    ) -> TrackStateReleaseAssetObservation | None:
+        matching = [name for name in asset_by_name if fnmatch.fnmatch(name, pattern)]
         if len(matching) == 1:
-            return matching[0]
+            return asset_by_name[matching[0]]
         return None
 
     def _download_assets(
         self,
-        release_tag: str,
+        repository_service: LiveSetupRepositoryService,
+        asset_by_name: dict[str, TrackStateReleaseAssetObservation],
         asset_names: list[str],
         destination_dir: Path,
     ) -> None:
         for asset_name in asset_names:
-            self._download_asset(release_tag, asset_name, destination_dir)
+            asset = asset_by_name[asset_name]
+            asset_path = destination_dir / asset_name
+            asset_path.write_bytes(
+                repository_service.download_release_asset_bytes(asset.id)
+            )
         self._record_step(
             step=3,
             status="passed",
@@ -266,36 +227,17 @@ class DesktopArtifactIntegrityTest(unittest.TestCase):
             observed=f"Downloaded {len(asset_names)} archives to {destination_dir}.",
         )
 
-    def _download_asset(
+    def _download_checksum_manifest(
         self,
-        release_tag: str,
-        asset_name: str,
+        repository_service: LiveSetupRepositoryService,
+        checksum_asset: TrackStateReleaseAssetObservation,
         destination_dir: Path,
     ) -> Path:
-        command = (
-            "gh",
-            "release",
-            "download",
-            release_tag,
-            "--repo",
-            self.config["repository"],
-            "--pattern",
-            asset_name,
-            "--dir",
-            str(destination_dir),
+        checksum_path = destination_dir / checksum_asset.name
+        checksum_path.write_bytes(
+            repository_service.download_release_asset_bytes(checksum_asset.id)
         )
-        completed = self._run_gh(command)
-        if completed.returncode != 0:
-            raise AssertionError(
-                f"Could not download asset {asset_name} from release {release_tag}.\n"
-                f"stderr: {completed.stderr}"
-            )
-        candidates = list(destination_dir.glob(asset_name))
-        if not candidates:
-            raise AssertionError(
-                f"Asset {asset_name} was not written to {destination_dir}."
-            )
-        return candidates[0]
+        return checksum_path
 
     def _inspect_checksum_manifest(self, checksum_path: Path) -> None:
         text = checksum_path.read_text(encoding="utf-8")
@@ -351,28 +293,6 @@ class DesktopArtifactIntegrityTest(unittest.TestCase):
             action="Verify every archive with sha256sum -c.",
             observed="All listed archives returned OK.",
         )
-
-    def _run_gh(self, command: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
-        env = {**os.environ, "GH_PAGER": "cat"}
-        token = self._github_env.get("GH_TOKEN") or self._github_env.get("GITHUB_TOKEN")
-        if token:
-            env["GH_TOKEN"] = token
-        return subprocess.run(
-            command,
-            cwd=REPO_ROOT,
-            env=env,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-
-    @staticmethod
-    def _github_token_env() -> dict[str, str]:
-        return {
-            key: value
-            for key, value in os.environ.items()
-            if key in {"GH_TOKEN", "GITHUB_TOKEN", "SOURCE_GITHUB_TOKEN"}
-        }
 
     @staticmethod
     def _load_config(path: Path) -> dict[str, Any]:
