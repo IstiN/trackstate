@@ -163,7 +163,7 @@ void main() {
       expect(workflow, contains('runs-on: ubuntu-latest'));
       expect(workflow, contains('flutter build linux --release'));
       expect(workflow, contains('name: Build Windows release artifacts'));
-      expect(workflow, contains('runs-on: windows-latest'));
+      expect(workflow, contains('runs-on: windows-2022'));
       expect(workflow, contains('flutter build windows --release'));
       expect(workflow, contains('name: Build macOS release artifacts'));
       expect(
