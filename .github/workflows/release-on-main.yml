@@ -201,7 +201,10 @@ jobs:
   build-windows:
     name: Build Windows release artifacts
     needs: [resolve-version, validate]
-    runs-on: windows-latest
+    # windows-latest currently resolves to a VS-2026 image that Flutter 3.35.3
+    # does not recognise (it falls back to the VS 2019 generator and fails).
+    # Pin to windows-2022 until the pinned Flutter version supports VS 2026.
+    runs-on: windows-2022
     timeout-minutes: 45
     permissions:
       contents: read
