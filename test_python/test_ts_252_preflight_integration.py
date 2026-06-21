@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import time
 import unittest
-from pathlib import Path
 
 from testing.core.config.non_default_branch_release_config import (
     NonDefaultBranchReleaseConfig,
@@ -11,9 +10,6 @@ from testing.core.interfaces.non_default_branch_release_repository import (
     NonDefaultBranchReleaseEnvironmentError,
 )
 from testing.frameworks.python.github_environment_preflight import verify_github_environment
-from testing.frameworks.python.gh_cli_non_default_branch_release_repository import (
-    GhCliNonDefaultBranchReleaseRepository,
-)
 
 
 class Ts252PreflightIntegrationTest(unittest.TestCase):
@@ -36,7 +32,6 @@ class Ts252PreflightIntegrationTest(unittest.TestCase):
             pull_request_body="test",
             semver_tag_pattern=r"^v\d+\.\d+\.\d+$",
         )
-        repository_root = Path(__file__).resolve().parents[1]
 
         # The repository no longer runs its own preflight; call it explicitly
         # so the test still exercises the fail-fast path (TS-1389).
@@ -52,5 +47,14 @@ class Ts252PreflightIntegrationTest(unittest.TestCase):
             f"but it took {elapsed:.1f} s.",
         )
 
-        # Verify the error message mentions the expected repository issue.
-        self.assertIn("cannot access repository", str(cm.exception).lower())
+        # The preflight can fail either because `gh` is not authenticated
+        # (typical in CI) or because the target repository is unreachable.
+        # Both mean live GitHub API interactions are unavailable, which is the
+        # fail-fast behaviour TS-1389 is protecting against.
+        error_message = str(cm.exception).lower()
+        self.assertTrue(
+            "cannot access repository" in error_message
+            or "not authenticated" in error_message
+            or "live github api interactions are unavailable" in error_message,
+            f"Expected an environment-unavailable error, but got: {cm.exception}",
+        )
