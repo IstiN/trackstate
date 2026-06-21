@@ -28,7 +28,6 @@ class TrackStateCliReadFieldsLocalConfig:
                 "orderable",
                 "navigable",
                 "searchable",
-                "clauseNames",
                 "schema",
             ),
             required_schema_keys=("type",),

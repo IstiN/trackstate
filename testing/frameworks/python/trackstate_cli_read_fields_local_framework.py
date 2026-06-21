@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import tempfile
 
@@ -40,7 +41,12 @@ class PythonTrackStateCliReadFieldsLocalFramework(
                     "checkout so TS-380 can run the exact read fields command from "
                     "the seeded Local Git repository as the current working directory."
                 )
-                executed_command = (str(executable_path), *config.requested_command[1:])
+                executed_command = (
+                    str(executable_path),
+                    *config.requested_command[1:],
+                    "--path",
+                    str(repository_path),
+                )
                 result = self._run(executed_command, cwd=repository_path)
                 fields: tuple[dict[str, object], ...] = ()
                 payload = result.json_payload
@@ -183,6 +189,11 @@ class PythonTrackStateCliReadFieldsLocalFramework(
             "[]\n",
         )
         self._write_file(repository_path / ".gitignore", ".dart_tool/\n")
+        (repository_path / f"{config.project_key}/TS-1").mkdir(parents=True, exist_ok=True)
+        self._write_file(
+            repository_path / f"{config.project_key}/TS-1/main.md",
+            "---\nkey: TS-1\nproject: TS\nissueType: story\nstatus: todo\npriority: medium\nsummary: Test issue\n---\n\n# Summary\n\nTest issue\n",
+        )
         self._git(repository_path, "init", "-b", config.branch)
         self._git(
             repository_path,
