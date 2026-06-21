@@ -1,0 +1,31 @@
+test_id: TS-1369
+type: release
+framework: unittest
+platform: github-release
+dependencies:
+  - Python 3.12+
+  - PyYAML
+  - gh CLI available on PATH
+runtime_inputs:
+  repository: IstiN/trackstate
+  default_branch: main
+  release_tag_pattern: "^v\\d+\\.\\d+\\.\\d+$"
+  expected_table_header: "Compiled artifacts"
+  expected_artifacts:
+    linux:
+      desktop: TrackState-linux-x64-{tag}.tar.gz
+      cli: trackstate-cli-linux-x64-{tag}.tar.gz
+      architecture: x64
+    windows:
+      desktop: TrackState-windows-x64-{tag}.zip
+      cli: trackstate-cli-windows-x64-{tag}.tar.gz
+      architecture: x64
+    macos:
+      desktop: TrackState-macos-arm64-{tag}.zip
+      cli: trackstate-cli-macos-arm64-{tag}.tar.gz
+      architecture: arm64
+notes:
+  - Verifies that generated release notes contain a structured table listing all desktop and CLI artifacts with platform and architecture details.
+  - Fetches the release body via the GitHub CLI and searches for the compiled artifacts table.
+  - Asserts the table contains Linux, Windows, and macOS rows with correct artifact names and architectures.
+  - Reports blocked_by_human when the selected release cannot be inspected.

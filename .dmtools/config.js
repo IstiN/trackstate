@@ -58,8 +58,316 @@ module.exports = {
     // Keep codegraph_tools only in globalCliPrompts; adding it to additionalInstructions
     // as well duplicates the mermaid diagram in every agent prompt.
     globalAdditionalInstructions: [],
-    // SM parallelism: allow two active AI teammate runs while keeping a cap for Copilot rate-limit control.
-    smMaxWorkflows: 2,
+    // SM parallelism: run only one AI teammate workflow at a time to keep PR review/rework first.
+    smMaxWorkflows: 1,
+    smRules: [
+    {
+        "description": "In Testing Stories (pr_approved) \u2192 merge test automation PR",
+        "jql": "project = {jiraProject} AND issuetype in ('Story') AND status in ('In Testing') AND labels = 'pr_approved' ORDER BY created ASC",
+        "configFile": "agents/story_test_automation_merge.json",
+        "localExecution": true,
+        "enabled": true
+    },
+    {
+        "description": "In Testing Bugs (pr_approved) \u2192 merge test automation PR",
+        "jql": "project = {jiraProject} AND issuetype in ('Bug') AND status in ('In Testing') AND labels = 'pr_approved' ORDER BY created ASC",
+        "configFile": "agents/bug_test_automation_merge.json",
+        "localExecution": true,
+        "enabled": true
+    },
+    {
+        "description": "In Testing Stories (test_pr_rework_needed) \u2192 rework test automation",
+        "jql": "project = {jiraProject} AND issuetype in ('Story') AND status in ('In Testing') AND labels = 'test_pr_rework_needed' ORDER BY created ASC",
+        "configFile": "agents/story_test_automation_rework.json",
+        "skipIfLabel": "sm_story_test_rework_triggered",
+        "addLabel": "sm_story_test_rework_triggered",
+        "enabled": true
+    },
+    {
+        "description": "In Testing Bugs (test_pr_rework_needed) \u2192 rework test automation",
+        "jql": "project = {jiraProject} AND issuetype in ('Bug') AND status in ('In Testing') AND labels = 'test_pr_rework_needed' ORDER BY created ASC",
+        "configFile": "agents/bug_test_automation_rework.json",
+        "skipIfLabel": "sm_bug_test_rework_triggered",
+        "addLabel": "sm_bug_test_rework_triggered",
+        "enabled": true
+    },
+    {
+        "description": "In Testing Stories with open test-automation PR \u2192 review",
+        "jql": "project = {jiraProject} AND issuetype in ('Story') AND status in ('In Testing') AND (labels is EMPTY OR labels NOT IN ('pr_approved','test_pr_rework_needed')) ORDER BY created ASC",
+        "configFile": "agents/pr_story_test_automation_review.json",
+        "skipIfLabel": "sm_story_test_review_triggered",
+        "addLabel": "sm_story_test_review_triggered",
+        "enabled": true
+    },
+    {
+        "description": "In Testing Bugs with open test-automation PR \u2192 review",
+        "jql": "project = {jiraProject} AND issuetype in ('Bug') AND status in ('In Testing') AND (labels is EMPTY OR labels NOT IN ('pr_approved','test_pr_rework_needed')) ORDER BY created ASC",
+        "configFile": "agents/pr_bug_test_automation_review.json",
+        "skipIfLabel": "sm_bug_test_review_triggered",
+        "addLabel": "sm_bug_test_review_triggered",
+        "enabled": true
+    },
+    {
+        "description": "In Review Stories & Bugs \u2192 trigger pr_review",
+        "jql": "project = {jiraProject} AND issuetype in ('Story', 'Bug') AND status in ('In Review') AND (labels is EMPTY OR labels NOT IN ('pr_approved'))",
+        "configFile": "agents/pr_review.json",
+        "skipIfLabel": "sm_story_review_triggered",
+        "addLabel": "sm_story_review_triggered",
+        "enabled": true
+    },
+    {
+        "description": "In Rework Stories & Bugs \u2192 trigger pr_rework",
+        "jql": "project = {jiraProject} AND issuetype in ('Story', 'Bug') AND status in ('In Rework')",
+        "configFile": "agents/pr_rework.json",
+        "skipIfLabel": "sm_story_rework_triggered",
+        "addLabel": "sm_story_rework_triggered",
+        "enabled": true
+    },
+    {
+        "description": "In Review Test Cases \u2192 trigger pr_test_automation_review",
+        "jql": "project = {jiraProject} AND issuetype in ('Test Case') AND status in ('In Review - Passed', 'In Review - Failed') AND (labels is EMPTY OR labels NOT IN ('pr_approved'))",
+        "configFile": "agents/pr_test_automation_review.json",
+        "skipIfLabel": "sm_test_review_triggered",
+        "addLabel": "sm_test_review_triggered",
+        "enabled": true
+    },
+    {
+        "description": "In Rework Test Cases \u2192 trigger pr_test_automation_rework",
+        "jql": "project = {jiraProject} AND issuetype in ('Test Case') AND status in ('In Rework')",
+        "configFile": "agents/pr_test_automation_rework.json",
+        "skipIfLabel": "sm_test_rework_triggered",
+        "addLabel": "sm_test_rework_triggered",
+        "enabled": true
+    },
+    {
+        "description": "In Review Stories & Bugs (pr_approved) \u2192 retry merge",
+        "jql": "project = {jiraProject} AND issuetype in ('Story', 'Bug') AND status in ('In Review') AND labels = 'pr_approved' ORDER BY created ASC",
+        "configFile": "agents/retry_merge.json",
+        "localExecution": true,
+        "enabled": true
+    },
+    {
+        "description": "In Review Test Cases (pr_approved) \u2192 retry merge",
+        "jql": "project = {jiraProject} AND issuetype in ('Test Case') AND status in ('In Review - Passed', 'In Review - Failed') AND labels = 'pr_approved' ORDER BY created ASC",
+        "configFile": "agents/retry_merge_test.json",
+        "localExecution": true,
+        "enabled": true
+    },
+    {
+        "description": "Review/Rework/Blocked Stories & Bugs with already merged PR \u2192 recover Merged status",
+        "jql": "project = {jiraProject} AND issuetype in ('Story', 'Bug') AND status in ('In Review', 'In Rework', 'Blocked') ORDER BY updated ASC",
+        "configFile": "agents/recover_merged_pr.json",
+        "localExecution": true,
+        "enabled": true
+    },
+    {
+        "description": "Blocked Stories & Bugs with all resolved dependencies \u2192 move to Backlog",
+        "jql": "project = {jiraProject} AND issuetype in ('Story', 'Bug') AND status in ('Blocked') ORDER BY updated ASC",
+        "configFile": "agents/unblock_resolved_dependencies.json",
+        "localExecution": true,
+        "enabled": true
+    },
+    {
+        "description": "In Review Test Cases with dirty PR \u2192 move to In Rework",
+        "jql": "project = {jiraProject} AND issuetype in ('Test Case') AND status in ('In Review - Passed', 'In Review - Failed')",
+        "configFile": "agents/recover_dirty_review_test_case.json",
+        "localExecution": true,
+        "enabled": true
+    },
+    {
+        "description": "Merged Stories \u2192 Ready For Testing + generate test cases",
+        "jql": "project = {jiraProject} AND issuetype in ('Story') AND status in ('Merged')",
+        "targetStatus": "Ready For Testing",
+        "configFile": "agents/test_cases_generator.json",
+        "skipIfLabel": "sm_test_cases_triggered",
+        "addLabel": "sm_test_cases_triggered",
+        "enabled": true
+    },
+    {
+        "description": "Merged Bugs \u2192 Ready For Testing",
+        "jql": "project = {jiraProject} AND issuetype in ('Bug') AND status in ('Merged')",
+        "targetStatus": "Ready For Testing",
+        "configFile": "agents/bug_merged.json",
+        "skipIfLabel": "sm_bug_merged_triggered",
+        "enabled": true,
+        "localExecution": true
+    },
+    {
+        "description": "Ready For Testing Bugs \u2192 generate test cases",
+        "jql": "project = {jiraProject} AND issuetype in ('Bug') AND status in ('Ready For Testing') AND (labels is EMPTY OR labels NOT IN ('sm_bug_test_cases_triggered'))",
+        "configFile": "agents/bug_test_cases_generator.json",
+        "skipIfLabel": "sm_bug_test_cases_triggered",
+        "addLabel": "sm_bug_test_cases_triggered",
+        "enabled": true
+    },
+    {
+        "description": "Ready For Testing Bugs \u2192 automate linked test cases in bulk",
+        "jql": "project = {jiraProject} AND issuetype in ('Bug') AND status in ('Ready For Testing')",
+        "configFile": "agents/bug_test_automation.json",
+        "skipIfLabel": "sm_bug_test_automation_triggered",
+        "addLabel": "sm_bug_test_automation_triggered",
+        "enabled": true
+    },
+    {
+        "description": "Ready For Testing Stories \u2192 automate linked test cases in bulk",
+        "jql": "project = {jiraProject} AND issuetype in ('Story') AND status in ('Ready For Testing')",
+        "configFile": "agents/story_test_automation.json",
+        "skipIfLabel": "sm_story_test_automation_triggered",
+        "skipIfLabels": [
+            "sm_test_cases_triggered"
+        ],
+        "addLabel": "sm_story_test_automation_triggered",
+        "enabled": true
+    },
+    {
+        "description": "In Testing Stories \u2192 check all TCs passed \u2192 Done",
+        "jql": "project = {jiraProject} AND issuetype in ('Story') AND status in ('In Testing')",
+        "configFile": "agents/story_done_check.json",
+        "skipIfLabel": "sm_story_done_check_triggered",
+        "enabled": true,
+        "localExecution": true
+    },
+    {
+        "description": "In Testing Bugs \u2192 check all TCs passed \u2192 Done",
+        "jql": "project = {jiraProject} AND issuetype in ('Bug') AND status in ('In Testing')",
+        "configFile": "agents/bug_done_check.json",
+        "skipIfLabel": "sm_bug_done_check_triggered",
+        "enabled": true,
+        "localExecution": true
+    },
+    {
+        "description": "Failed Test Cases with linked Bugs \u2192 recover Bug To Fix",
+        "jql": "project = {jiraProject} AND issuetype in ('Test Case') AND status in ('Failed') ORDER BY updated ASC",
+        "configFile": "agents/recover_failed_tc_bug_status.json",
+        "localExecution": true,
+        "enabled": true
+    },
+    {
+        "description": "Failed Test Cases \u2192 create or link bugs in batch",
+        "jql": "project = {jiraProject} AND issuetype in ('Test Case') AND status in ('Failed') AND (labels is EMPTY OR labels NOT IN ('sm_bug_creation_triggered')) ORDER BY created ASC",
+        "configFile": "agents/bulk_bugs_creation.json",
+        "concurrencyKey": "bulk_bugs_creation",
+        "skipIfLabel": "sm_bulk_bugs_creation_triggered",
+        "addLabel": "sm_bulk_bugs_creation_triggered",
+        "recoverStaleTriggerLabel": true,
+        "limit": 1,
+        "enabled": true
+    },
+    {
+        "description": "Backlog / To Do / Ready For Development / In Development Bugs \u2192 trigger bug_development",
+        "jql": "project = {jiraProject} AND issuetype in ('Bug') AND status in ('Backlog', 'To Do', 'Ready For Development', 'In Development', 'In Progress') AND updated <= -15m ORDER BY updated ASC",
+        "configFile": "agents/bug_development.json",
+        "concurrencyKey": "bug_development",
+        "skipIfLabel": "sm_bug_development_triggered",
+        "addLabel": "sm_bug_development_triggered",
+        "limit": 1,
+        "enabled": true
+    },
+    {
+        "description": "Bug To Fix Tickets \u2192 all linked Bugs Done \u2192 move to Backlog / Ready For Testing",
+        "jql": "project = {jiraProject} AND issuetype in ('Test Case', 'Story') AND status in ('Bug To Fix')",
+        "configFile": "agents/bug_to_fix_check.json",
+        "skipIfLabel": "sm_bug_to_fix_check_triggered",
+        "localExecution": true,
+        "enabled": true
+    },
+    {
+        "description": "Intake/In Development Tasks \u2192 all linked Stories/Bugs Done \u2192 Ready For Testing",
+        "jql": "project = {jiraProject} AND issuetype in ('Task') AND status in ('In Development', 'In Progress') AND (parent = {parentTicket} OR labels in ('ai_intake'))",
+        "configFile": "agents/task_done_check.json",
+        "skipIfLabel": "sm_task_done_check_triggered",
+        "localExecution": true,
+        "enabled": true
+    },
+    {
+        "description": "Stuck In Development Test Cases \u2192 recover (check PR, route to Rework/Review/Backlog)",
+        "jql": "project = {jiraProject} AND issuetype in ('Test Case') AND status in ('In Development') AND updated <= -15m",
+        "configFile": "agents/recover_stuck_test_case.json",
+        "localExecution": true,
+        "enabled": true
+    },
+    {
+        "description": "Failed Test Cases \u2192 create or link bug (single, disabled by default \u2014 use bulk_bugs_creation instead)",
+        "jql": "project = {jiraProject} AND issuetype in ('Test Case') AND status in ('Failed')",
+        "configFile": "agents/bug_creation.json",
+        "skipIfLabel": "sm_bug_creation_triggered",
+        "addLabel": "sm_bug_creation_triggered",
+        "limit": 5,
+        "enabled": true
+    },
+    {
+        "description": "Backlog / To Do / Ready For Development Test Cases \u2192 In Development + automate",
+        "jql": "project = {jiraProject} AND issuetype in ('Test Case') AND status in ('Backlog', 'To Do', 'Ready For Development')",
+        "targetStatus": "In Development",
+        "configFile": "agents/test_case_automation.json",
+        "skipIfLabel": "sm_test_automation_triggered",
+        "addLabel": "sm_test_automation_triggered",
+        "enabled": true
+    },
+    {
+        "description": "PO Review Stories with all subtasks Done \u2192 BA Analysis",
+        "jql": "project = {jiraProject} AND issuetype in ('Story') AND status in ('PO Review')",
+        "configFile": "agents/story_ba_check.json",
+        "skipIfLabel": "sm_story_ba_check_triggered",
+        "localExecution": true,
+        "enabled": true
+    },
+    {
+        "description": "BA Analysis Stories \u2192 generate Acceptance Criteria",
+        "jql": "project = {jiraProject} AND issuetype in ('Story') AND status in ('BA Analysis')",
+        "configFile": "agents/story_acceptance_criteria.json",
+        "skipIfLabels": [
+            "sm_story_acceptance_criteria_triggered",
+            "sm_story_acceptance_criterias_triggered"
+        ],
+        "addLabel": "sm_story_acceptance_criteria_triggered",
+        "enabled": true
+    },
+    {
+        "description": "Solution Architecture Stories \u2192 generate Solution Design",
+        "jql": "project = {jiraProject} AND issuetype in ('Story') AND status in ('Solution Architecture')",
+        "configFile": "agents/story_solution.json",
+        "skipIfLabel": "sm_story_solution_triggered",
+        "addLabel": "sm_story_solution_triggered",
+        "enabled": true
+    },
+    {
+        "description": "Subtasks with 'q' label \u2192 trigger PO refinement",
+        "jql": "project = {jiraProject} AND issuetype in ('Subtask') AND labels in ('q') and status not in (Done)",
+        "configFile": "agents/po_refinement.json",
+        "skipIfLabel": "sm_po_refinement_triggered",
+        "addLabel": "sm_po_refinement_triggered",
+        "enabled": true
+    },
+    {
+        "description": "Backlog / To Do Stories \u2192 ask clarification questions",
+        "jql": "project = {jiraProject} AND issuetype in ('Story') AND status in ('Backlog', 'To Do')",
+        "configFile": "agents/story_questions.json",
+        "skipIfLabels": [
+            "sm_story_questions_triggered",
+            "ai_questions_asked"
+        ],
+        "addLabel": "sm_story_questions_triggered",
+        "limit": 1
+    },
+    {
+        "description": "Backlog / To Do Tasks (children of parent ticket) \u2192 run intake agent",
+        "jql": "project = {jiraProject} AND issuetype in ('Task') AND status in ('Backlog', 'To Do') AND parent = {parentTicket}",
+        "targetStatus": "In Development",
+        "configFile": "agents/intake.json",
+        "skipIfLabel": "sm_task_intake_triggered",
+        "addLabel": "sm_task_intake_triggered",
+        "enabled": true
+    },
+    {
+        "description": "Ready For Development Stories \u2192 trigger story_development",
+        "jql": "project = {jiraProject} AND issuetype in ('Story') AND status in ('Ready For Development')",
+        "configFile": "agents/story_development.json",
+        "skipIfLabel": "sm_story_development_triggered",
+        "addLabel": "sm_story_development_triggered",
+        "enabled": true
+    }
+],
 
     repository: {
         owner: 'IstiN',
@@ -388,18 +696,17 @@ module.exports = {
         },
         story_test_automation_rework: {
             customParams: {
-                autoStartReview: true,
-                autoStartReviewConfigFile: 'agents/pr_story_test_automation_review.json',
+                autoStartReview: false,
+                removeLabel: 'sm_story_test_rework_triggered',
                 feedbackLoop: POST_ACTION_FEEDBACK
             }
         },
         pr_story_test_automation_review: {
             customParams: {
-                autoStartMerge: true,
-                autoStartMergeConfigFile: 'agents/story_test_automation_merge.json',
-                autoStartRework: true,
-                autoStartReworkConfigFile: 'agents/story_test_automation_rework.json',
-                maxReviewThreadsBeforeForceApprove: 100
+                autoStartMerge: false,
+                autoStartRework: false,
+                maxReviewThreadsBeforeForceApprove: 100,
+                smFallback: true
             }
         },
         bug_test_automation: {
@@ -410,18 +717,17 @@ module.exports = {
         },
         bug_test_automation_rework: {
             customParams: {
-                autoStartReview: true,
-                autoStartReviewConfigFile: 'agents/pr_bug_test_automation_review.json',
+                autoStartReview: false,
+                removeLabel: 'sm_bug_test_rework_triggered',
                 feedbackLoop: POST_ACTION_FEEDBACK
             }
         },
         pr_bug_test_automation_review: {
             customParams: {
-                autoStartMerge: true,
-                autoStartMergeConfigFile: 'agents/bug_test_automation_merge.json',
-                autoStartRework: true,
-                autoStartReworkConfigFile: 'agents/bug_test_automation_rework.json',
-                maxReviewThreadsBeforeForceApprove: 100
+                autoStartMerge: false,
+                autoStartRework: false,
+                maxReviewThreadsBeforeForceApprove: 100,
+                smFallback: true
             }
         },
         retry_merge: {

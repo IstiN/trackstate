@@ -80,11 +80,15 @@ class _MockGitHubHandler(BaseHTTPRequestHandler):
         self,
         assets: MockReleaseAssets,
         repo: str,
+        latest_status: int,
+        latest_body: bytes | None,
         *args: Any,
         **kwargs: Any,
     ) -> None:
         self.assets = assets
         self.repo = repo
+        self.latest_status = latest_status
+        self.latest_body = latest_body
         super().__init__(*args, **kwargs)
 
     def log_message(self, format: str, *args: Any) -> None:
@@ -97,8 +101,10 @@ class _MockGitHubHandler(BaseHTTPRequestHandler):
         expected_checksum = f"/{self.repo}/releases/download/{self.assets.tag}/{self.assets.checksum_name}"
 
         if path == expected_latest:
-            body = f'{{"tag_name": "{self.assets.tag}"}}'.encode("utf-8")
-            self._send(200, "application/json", body)
+            body = self.latest_body
+            if body is None:
+                body = f'{{"tag_name": "{self.assets.tag}"}}'.encode("utf-8")
+            self._send(self.latest_status, "application/json", body)
             return
 
         if path == expected_archive:
@@ -120,16 +126,31 @@ class _MockGitHubHandler(BaseHTTPRequestHandler):
 
 
 class MockGitHubReleaseServer:
-    def __init__(self, assets: MockReleaseAssets, repo: str = "test/repo") -> None:
+    def __init__(
+        self,
+        assets: MockReleaseAssets,
+        repo: str = "test/repo",
+        latest_status: int = 200,
+        latest_body: bytes | None = None,
+    ) -> None:
         self.assets = assets
         self.repo = repo
+        self.latest_status = latest_status
+        self.latest_body = latest_body
         self.server: HTTPServer | None = None
         self.port: int = 0
         self.thread: threading.Thread | None = None
 
     def __enter__(self) -> "MockGitHubReleaseServer":
         def handler_factory(*args: Any, **kwargs: Any) -> _MockGitHubHandler:
-            return _MockGitHubHandler(self.assets, self.repo, *args, **kwargs)
+            return _MockGitHubHandler(
+                self.assets,
+                self.repo,
+                self.latest_status,
+                self.latest_body,
+                *args,
+                **kwargs,
+            )
 
         self.server = HTTPServer(("127.0.0.1", 0), handler_factory)
         self.port = self.server.server_address[1]
@@ -190,11 +211,14 @@ def patch_install_sh(
 def run_install_sh(
     script_path: Path,
     version: str | None = None,
+    flags: list[str] | None = None,
     env: dict[str, str] | None = None,
     cwd: Path | None = None,
     timeout: int = 60,
 ) -> subprocess.CompletedProcess[str]:
     command = ["bash", str(script_path)]
+    if flags:
+        command.extend(flags)
     if version is not None:
         command.append(version)
     merged_env = os.environ.copy()
@@ -228,3 +252,151 @@ def path_entry_count(profile_path: Path, install_dir: Path) -> int:
 
 def install_dir_on_path_env(env_path: str, install_dir: Path) -> bool:
     return str(install_dir) in env_path.split(os.pathsep)
+
+
+def patch_install_ps1(
+    source_path: Path,
+    patched_path: Path,
+    server: MockGitHubReleaseServer,
+    local_app_data: Path,
+    path_store: Path,
+) -> None:
+    """Patch install.ps1 so it can run in an isolated, cross-platform test.
+
+    The script is redirected to the mock GitHub release server, forced to the
+    windows-x64 platform, and uses a file-backed user PATH store so the test
+    does not touch the host registry or require a Windows user profile.
+    """
+    original = source_path.read_text(encoding="utf-8")
+    patched = original
+
+    patched = patched.replace('__REPO_PLACEHOLDER__', server.repo)
+    patched = patched.replace(
+        "https://api.github.com/repos/",
+        f"{server.base_url}/repos/",
+    )
+    patched = patched.replace(
+        "https://github.com/$Repo/",
+        f"{server.base_url}/{server.repo}/",
+    )
+    patched = patched.replace(
+        "https://github.com/${Repo}/",
+        f"{server.base_url}/{server.repo}/",
+    )
+    patched = patched.replace(
+        "https://github.com/${REPO}/",
+        f"{server.base_url}/{server.repo}/",
+    )
+
+    # Force the platform detection to windows-x64 so the test can run on Linux.
+    patched = patched.replace(
+        'function Get-PlatformSuffix {\n'
+        '    $os = $PSVersion.Platform\n'
+        '    $arch = [System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture\n'
+        '\n'
+        '    if ($IsWindows -or ($os -eq "Win32NT")) {\n'
+        '        if ($arch -eq [System.Runtime.InteropServices.Architecture]::X64) {\n'
+        '            return "windows-x64"\n'
+        '        }\n'
+        '        Write-ErrorAndExit "Unsupported architecture on Windows: $arch. Supported: X64."\n'
+        '    }\n'
+        '\n'
+        '    Write-ErrorAndExit "Unsupported operating system: $os. This PowerShell installer supports Windows only."\n'
+        '}',
+        'function Get-PlatformSuffix { return "windows-x64" }',
+    )
+
+    # Redirect user PATH reads/writes to a file so the test is isolated and
+    # works on hosts where the User scope is not backed by the registry.
+    patched = patched.replace(
+        '$userPath = [Environment]::GetEnvironmentVariable("Path", "User")',
+        f'$userPath = if (Test-Path "{path_store}") '
+        f'{{ (Get-Content -Path "{path_store}" -Raw).Trim() }} '
+        f'else {{ "" }}',
+    )
+    patched = patched.replace(
+        '[Environment]::SetEnvironmentVariable(\n'
+        '            "Path",\n'
+        '            "$InstallDir;$userPath",\n'
+        '            "User"\n'
+        '        )',
+        f'Set-Content -Path "{path_store}" '
+        f'-Value "$InstallDir;$userPath" -NoNewline -Encoding UTF8',
+    )
+
+    patched_path.write_text(patched, encoding="utf-8")
+
+
+def run_install_ps1(
+    script_path: Path,
+    version: str | None = None,
+    flags: list[str] | None = None,
+    env: dict[str, str] | None = None,
+    cwd: Path | None = None,
+    timeout: int = 60,
+) -> subprocess.CompletedProcess[str]:
+    command = [
+        "pwsh",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-NoProfile",
+        "-File",
+        str(script_path),
+    ]
+    if flags:
+        command.extend(flags)
+    if version is not None:
+        command.extend(["-Version", version])
+    merged_env = os.environ.copy()
+    if env:
+        merged_env.update(env)
+    return subprocess.run(
+        command,
+        cwd=cwd or Path.cwd(),
+        capture_output=True,
+        text=True,
+        env=merged_env,
+        timeout=timeout,
+    )
+
+
+def run_patched_install_ps1(
+    install_script: Path,
+    tmpdir: Path,
+    assets: MockReleaseAssets,
+    version: str | None = None,
+    flags: list[str] | None = None,
+    path_prefix: str | None = None,
+    timeout: int = 60,
+    repo: str = "test/repo",
+    latest_status: int = 200,
+    latest_body: bytes | None = None,
+) -> tuple[Path, Path, Path, subprocess.CompletedProcess[str]]:
+    """Patch install.ps1 and execute it in an isolated environment.
+
+    Returns the mocked LocalAppData directory, the install directory, the
+    path-store file, and the completed process.
+    """
+    local_app_data = tmpdir / "localappdata"
+    local_app_data.mkdir(exist_ok=True)
+    install_dir = local_app_data / "trackstate" / "bin"
+    path_store = tmpdir / "user_path.txt"
+    temp_dir = tmpdir / "temp"
+    temp_dir.mkdir(exist_ok=True)
+
+    with MockGitHubReleaseServer(
+        assets, repo=repo, latest_status=latest_status, latest_body=latest_body
+    ) as server:
+        patched = tmpdir / "install.ps1"
+        patch_install_ps1(install_script, patched, server, local_app_data, path_store)
+
+        base_path = os.environ.get("PATH", "")
+        env_path = base_path if path_prefix is None else f"{path_prefix}{os.pathsep}{base_path}"
+        env = {
+            "LOCALAPPDATA": str(local_app_data),
+            "TEMP": str(temp_dir),
+            "PATH": env_path,
+        }
+        result = run_install_ps1(patched, version=version, flags=flags, timeout=timeout, env=env)
+
+    return local_app_data, install_dir, path_store, result

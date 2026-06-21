@@ -45,6 +45,7 @@ class TrackStateReleaseArtifactObservation:
     gh_release_view_stdout: str
     gh_release_view_stderr: str
     checksum_manifest_text: str | None
+    release_body: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

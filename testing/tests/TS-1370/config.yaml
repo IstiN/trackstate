@@ -1,0 +1,26 @@
+test_id: TS-1370
+type: release
+framework: unittest
+platform: github-release
+dependencies:
+  - Python 3.12+
+  - PyYAML
+  - gh CLI available on PATH
+  - sha256sum utility available on PATH
+runtime_inputs:
+  repository: IstiN/trackstate
+  default_branch: main
+  release_tag_pattern: "^v\\d+\\.\\d+\\.\\d+$"
+  expected_assets:
+    - trackstate-cli-linux-x64-{tag}.tar.gz
+    - TrackState-linux-x64-{tag}.tar.gz
+    - trackstate-cli-windows-x64-{tag}.tar.gz
+    - TrackState-windows-x64-{tag}.zip
+    - trackstate-cli-macos-arm64-{tag}.tar.gz
+    - TrackState-macos-arm64-{tag}.zip
+  checksum_file_pattern: "trackstate-{tag}.sha256"
+notes:
+  - Verifies that the unified SHA256 checksum file correctly validates the integrity of all published desktop and CLI assets.
+  - Downloads all six platform-specific archives and the unified checksum file from the selected GitHub release.
+  - Runs sha256sum -c to confirm every listed file returns OK.
+  - Reports blocked_by_human when the selected release does not expose all required assets or the checksum file.
