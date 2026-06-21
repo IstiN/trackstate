@@ -269,19 +269,18 @@ jobs:
           dart compile exe bin/trackstate.dart -o build/release/trackstate.exe
 
       - name: Package Windows desktop and CLI artifacts
-        shell: bash
+        shell: powershell
         env:
           DESKTOP_ARCHIVE: ${{ steps.metadata.outputs.desktop_archive }}
           CLI_ARCHIVE: ${{ steps.metadata.outputs.cli_archive }}
         run: |
-          set -euo pipefail
+          $desktop = Join-Path $env:GITHUB_WORKSPACE "build" $env:DESKTOP_ARCHIVE
+          $cli = Join-Path $env:GITHUB_WORKSPACE "build" $env:CLI_ARCHIVE
+          $releaseDir = Join-Path $env:GITHUB_WORKSPACE "build" "release"
+          $desktopSource = Join-Path $env:GITHUB_WORKSPACE "build" "windows" "x64" "runner" "Release" "*"
 
-          cd build/windows/x64/runner/Release
-          zip -r "${GITHUB_WORKSPACE}/build/$DESKTOP_ARCHIVE" .
-
-          tar -czf "${GITHUB_WORKSPACE}/build/$CLI_ARCHIVE" \
-            -C "${GITHUB_WORKSPACE}/build/release" \
-            trackstate.exe
+          Compress-Archive -Path $desktopSource -DestinationPath $desktop -Force
+          tar -czf $cli -C $releaseDir trackstate.exe
 
       - name: Upload Windows workflow artifacts
         uses: actions/upload-artifact@v4

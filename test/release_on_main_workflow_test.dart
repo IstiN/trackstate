@@ -284,16 +284,18 @@ void main() {
         contains(r'CLI_ARCHIVE: ${{ steps.metadata.outputs.cli_archive }}'),
       );
 
+      expect(windowsPackageStep, contains('shell: powershell'));
+
       final windowsRunBlock = windowsPackageStep.substring(
         windowsPackageStep.indexOf('run: |'),
       );
       expect(
         windowsRunBlock,
-        contains(r'zip -r "${GITHUB_WORKSPACE}/build/$DESKTOP_ARCHIVE"'),
+        contains(r'Compress-Archive -Path $desktopSource -DestinationPath $desktop -Force'),
       );
       expect(
         windowsRunBlock,
-        contains(r'tar -czf "${GITHUB_WORKSPACE}/build/$CLI_ARCHIVE"'),
+        contains(r'tar -czf $cli -C $releaseDir trackstate.exe'),
       );
       expect(
         windowsRunBlock,
