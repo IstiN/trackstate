@@ -62,15 +62,15 @@ module.exports = {
     smMaxWorkflows: 1,
     smRules: [
     {
-        "description": "In Testing Stories (pr_approved) \u2192 merge test automation PR",
-        "jql": "project = {jiraProject} AND issuetype in ('Story') AND status in ('In Testing') AND labels = 'pr_approved' ORDER BY created ASC",
+        "description": "In Testing Stories (pr_approved or already-merged test PR) \u2192 merge test automation PR",
+        "jql": "project = {jiraProject} AND issuetype in ('Story') AND status in ('In Testing') AND labels in ('pr_approved','test_pr_merged') ORDER BY created ASC",
         "configFile": "agents/story_test_automation_merge.json",
         "localExecution": true,
         "enabled": true
     },
     {
-        "description": "In Testing Bugs (pr_approved) \u2192 merge test automation PR",
-        "jql": "project = {jiraProject} AND issuetype in ('Bug') AND status in ('In Testing') AND labels = 'pr_approved' ORDER BY created ASC",
+        "description": "In Testing Bugs (pr_approved or already-merged test PR) \u2192 merge test automation PR",
+        "jql": "project = {jiraProject} AND issuetype in ('Bug') AND status in ('In Testing') AND labels in ('pr_approved','test_pr_merged') ORDER BY created ASC",
         "configFile": "agents/bug_test_automation_merge.json",
         "localExecution": true,
         "enabled": true
@@ -93,7 +93,7 @@ module.exports = {
     },
     {
         "description": "In Testing Stories with open test-automation PR \u2192 review",
-        "jql": "project = {jiraProject} AND issuetype in ('Story') AND status in ('In Testing') AND (labels is EMPTY OR labels NOT IN ('pr_approved','test_pr_rework_needed')) ORDER BY created ASC",
+        "jql": "project = {jiraProject} AND issuetype in ('Story') AND status in ('In Testing') AND (labels is EMPTY OR labels NOT IN ('pr_approved','test_pr_rework_needed','test_pr_merged')) ORDER BY created ASC",
         "configFile": "agents/pr_story_test_automation_review.json",
         "skipIfLabel": "sm_story_test_review_triggered",
         "addLabel": "sm_story_test_review_triggered",
@@ -101,7 +101,7 @@ module.exports = {
     },
     {
         "description": "In Testing Bugs with open test-automation PR \u2192 review",
-        "jql": "project = {jiraProject} AND issuetype in ('Bug') AND status in ('In Testing') AND (labels is EMPTY OR labels NOT IN ('pr_approved','test_pr_rework_needed')) ORDER BY created ASC",
+        "jql": "project = {jiraProject} AND issuetype in ('Bug') AND status in ('In Testing') AND (labels is EMPTY OR labels NOT IN ('pr_approved','test_pr_rework_needed','test_pr_merged')) ORDER BY created ASC",
         "configFile": "agents/pr_bug_test_automation_review.json",
         "skipIfLabel": "sm_bug_test_review_triggered",
         "addLabel": "sm_bug_test_review_triggered",
