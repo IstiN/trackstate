@@ -76,8 +76,8 @@ module.exports = {
         "enabled": true
     },
     {
-        "description": "In Review Test Cases with dirty PR \u2192 move to In Rework",
-        "jql": "project = {jiraProject} AND issuetype in ('Test Case') AND status in ('In Review - Passed', 'In Review - Failed') ORDER BY created ASC",
+        "description": "Test Cases with dirty open PR \u2192 move to In Rework",
+        "jql": "project = {jiraProject} AND issuetype in ('Test Case') AND status in ('In Review - Passed', 'In Review - Failed', 'Passed', 'Failed', 'Pull Request Review', 'Merged') AND labels NOT IN ('sm_test_rework_triggered') ORDER BY created ASC",
         "configFile": "agents/recover_dirty_review_test_case.json",
         "localExecution": true,
         "enabled": true
