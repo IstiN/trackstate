@@ -291,6 +291,10 @@ void main() {
       );
       expect(
         windowsRunBlock,
+        contains(r'$desktopSource = [System.IO.Path]::Combine($buildDir, "windows", "x64", "runner", "Release", "*")'),
+      );
+      expect(
+        windowsRunBlock,
         contains(r'Compress-Archive -Path $desktopSource -DestinationPath $desktop -Force'),
       );
       expect(
