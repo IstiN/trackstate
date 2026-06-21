@@ -697,7 +697,7 @@ module.exports = {
         story_test_automation_rework: {
             customParams: {
                 autoStartReview: false,
-                removeLabel: 'test_pr_rework_needed',
+                removeLabel: 'sm_story_test_rework_triggered',
                 feedbackLoop: POST_ACTION_FEEDBACK
             }
         },
@@ -718,7 +718,7 @@ module.exports = {
         bug_test_automation_rework: {
             customParams: {
                 autoStartReview: false,
-                removeLabel: 'test_pr_rework_needed',
+                removeLabel: 'sm_bug_test_rework_triggered',
                 feedbackLoop: POST_ACTION_FEEDBACK
             }
         },
