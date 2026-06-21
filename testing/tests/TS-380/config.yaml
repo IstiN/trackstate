@@ -16,7 +16,6 @@ runtime_inputs:
     - orderable
     - navigable
     - searchable
-    - clauseNames
     - schema
 notes:
   - Verifies that the TrackState CLI read fields command returns a flat array of field objects with the Jira-standard schema.
