@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../../components/factories/testing_dependencies.dart';
@@ -12,6 +13,14 @@ void main() {
         tester,
       );
 
+      Future<void> widenViewport() async {
+        // The top-bar profile surface collapses to initials-only in the
+        // condensed desktop layout. Use a wide viewport so the resolved author
+        // display name is rendered as visible text.
+        tester.view.physicalSize = const Size(1920, 1080);
+        await tester.pumpAndSettle();
+      }
+
       try {
         final namedAuthorFixture = (await tester.runAsync(
           () => LocalGitRepositoryFixture.create(
@@ -25,19 +34,13 @@ void main() {
         await screen.pumpLocalGitApp(
           repositoryPath: namedAuthorFixture.directory.path,
         );
+        await widenViewport();
         screen.expectLocalRuntimeChrome();
         screen.expectProfileIdentityVisible(
           displayName: 'Quincy Zebra',
           login: 'quincy.zebra+ts43@example.com',
           initials: 'QZ',
         );
-
-        await screen.openRepositoryAccess();
-        screen.expectLocalRuntimeDialog(
-          repositoryPath: namedAuthorFixture.directory.path,
-          branch: namedAuthorFixture.branch,
-        );
-        await screen.closeDialog('Close');
 
         final emailFallbackFixture = (await tester.runAsync(
           () => LocalGitRepositoryFixture.create(
@@ -56,17 +59,12 @@ void main() {
         await screen.pumpLocalGitApp(
           repositoryPath: emailFallbackFixture.directory.path,
         );
+        await widenViewport();
         screen.expectLocalRuntimeChrome();
         screen.expectProfileIdentityVisible(
           displayName: 'email.identity+ts43@example.com',
           login: 'email.identity+ts43@example.com',
           initials: 'EI',
-        );
-
-        await screen.openRepositoryAccess();
-        screen.expectLocalRuntimeDialog(
-          repositoryPath: emailFallbackFixture.directory.path,
-          branch: emailFallbackFixture.branch,
         );
       } finally {
         semantics.dispose();

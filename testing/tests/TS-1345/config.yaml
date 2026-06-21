@@ -9,19 +9,26 @@ runtime_inputs:
   workflow_path: .github/workflows/release-on-main.yml
   required_jobs:
     - publish-release
+    - publish-macos-release
   required_job_dependencies:
     publish-release:
       - resolve-version
       - build-linux
       - build-windows
+    publish-macos-release:
+      - resolve-version
       - build-macos
+      - publish-release
   required_steps_by_job:
     publish-release:
       - Download Linux artifacts
       - Download Windows artifacts
-      - Download macOS artifacts
-      - Generate unified SHA256 checksums
+      - Generate SHA256 checksums
       - Publish release
+    publish-macos-release:
+      - Download macOS artifacts
+      - Generate macOS SHA256 checksums
+      - Publish macOS release assets
   required_markers_in_job:
     publish-release:
       - gh release create
@@ -35,14 +42,16 @@ runtime_inputs:
       - "linux/$CLI_LINUX"
       - "windows/$DESKTOP_WINDOWS"
       - "windows/$CLI_WINDOWS"
-      - "macos/$DESKTOP_MACOS"
-      - "macos/$CLI_MACOS"
       - "build/linux/$DESKTOP_LINUX"
       - "build/linux/$CLI_LINUX"
       - "build/windows/$DESKTOP_WINDOWS"
       - "build/windows/$CLI_WINDOWS"
+    publish-macos-release:
       - "build/macos/$DESKTOP_MACOS"
       - "build/macos/$CLI_MACOS"
+      - trackstate-apple-${release_tag}.sha256
+      - gh release upload
 notes:
-  - Statically validates that the publish-release job aggregates all platform artifacts, generates a unified checksum file, and creates a non-draft, non-prerelease GitHub release.
+  - Statically validates that the publish-release job aggregates Linux and Windows artifacts, generates a unified checksum file, and creates a non-draft, non-prerelease GitHub release.
+  - Validates that publish-macos-release downloads macOS artifacts, generates a separate macOS checksum, and uploads macOS assets to the same release.
   - Does not publish an actual release.
