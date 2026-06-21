@@ -62,15 +62,15 @@ module.exports = {
     smMaxWorkflows: 1,
     smRules: [
     {
-        "description": "In Testing Stories (pr_approved) \u2192 merge test automation PR",
-        "jql": "project = {jiraProject} AND issuetype in ('Story') AND status in ('In Testing') AND labels = 'pr_approved' ORDER BY created ASC",
+        "description": "In Testing Stories (pr_approved or already-merged test PR) \u2192 merge test automation PR",
+        "jql": "project = {jiraProject} AND issuetype in ('Story') AND status in ('In Testing') AND labels in ('pr_approved','test_pr_merged') AND labels NOT IN ('test_pr_finalized') ORDER BY created ASC",
         "configFile": "agents/story_test_automation_merge.json",
         "localExecution": true,
         "enabled": true
     },
     {
-        "description": "In Testing Bugs (pr_approved) \u2192 merge test automation PR",
-        "jql": "project = {jiraProject} AND issuetype in ('Bug') AND status in ('In Testing') AND labels = 'pr_approved' ORDER BY created ASC",
+        "description": "In Testing Bugs (pr_approved or already-merged test PR) \u2192 merge test automation PR",
+        "jql": "project = {jiraProject} AND issuetype in ('Bug') AND status in ('In Testing') AND labels in ('pr_approved','test_pr_merged') AND labels NOT IN ('test_pr_finalized') ORDER BY created ASC",
         "configFile": "agents/bug_test_automation_merge.json",
         "localExecution": true,
         "enabled": true
@@ -93,7 +93,7 @@ module.exports = {
     },
     {
         "description": "In Testing Stories with open test-automation PR \u2192 review",
-        "jql": "project = {jiraProject} AND issuetype in ('Story') AND status in ('In Testing') AND (labels is EMPTY OR labels NOT IN ('pr_approved','test_pr_rework_needed')) ORDER BY created ASC",
+        "jql": "project = {jiraProject} AND issuetype in ('Story') AND status in ('In Testing') AND (labels is EMPTY OR labels NOT IN ('pr_approved','test_pr_rework_needed','test_pr_merged','test_pr_finalized')) ORDER BY created ASC",
         "configFile": "agents/pr_story_test_automation_review.json",
         "skipIfLabel": "sm_story_test_review_triggered",
         "addLabel": "sm_story_test_review_triggered",
@@ -101,7 +101,7 @@ module.exports = {
     },
     {
         "description": "In Testing Bugs with open test-automation PR \u2192 review",
-        "jql": "project = {jiraProject} AND issuetype in ('Bug') AND status in ('In Testing') AND (labels is EMPTY OR labels NOT IN ('pr_approved','test_pr_rework_needed')) ORDER BY created ASC",
+        "jql": "project = {jiraProject} AND issuetype in ('Bug') AND status in ('In Testing') AND (labels is EMPTY OR labels NOT IN ('pr_approved','test_pr_rework_needed','test_pr_merged','test_pr_finalized')) ORDER BY created ASC",
         "configFile": "agents/pr_bug_test_automation_review.json",
         "skipIfLabel": "sm_bug_test_review_triggered",
         "addLabel": "sm_bug_test_review_triggered",
@@ -129,7 +129,7 @@ module.exports = {
         "configFile": "agents/pr_test_automation_review.json",
         "skipIfLabel": "sm_test_review_triggered",
         "addLabel": "sm_test_review_triggered",
-        "enabled": true
+        "enabled": false
     },
     {
         "description": "In Rework Test Cases \u2192 trigger pr_test_automation_rework",
@@ -137,7 +137,7 @@ module.exports = {
         "configFile": "agents/pr_test_automation_rework.json",
         "skipIfLabel": "sm_test_rework_triggered",
         "addLabel": "sm_test_rework_triggered",
-        "enabled": true
+        "enabled": false
     },
     {
         "description": "In Review Stories & Bugs (pr_approved) \u2192 retry merge",
@@ -151,7 +151,7 @@ module.exports = {
         "jql": "project = {jiraProject} AND issuetype in ('Test Case') AND status in ('In Review - Passed', 'In Review - Failed') AND labels = 'pr_approved' ORDER BY created ASC",
         "configFile": "agents/retry_merge_test.json",
         "localExecution": true,
-        "enabled": true
+        "enabled": false
     },
     {
         "description": "Review/Rework/Blocked Stories & Bugs with already merged PR \u2192 recover Merged status",
@@ -172,7 +172,7 @@ module.exports = {
         "jql": "project = {jiraProject} AND issuetype in ('Test Case') AND status in ('In Review - Passed', 'In Review - Failed')",
         "configFile": "agents/recover_dirty_review_test_case.json",
         "localExecution": true,
-        "enabled": true
+        "enabled": false
     },
     {
         "description": "Merged Stories \u2192 Ready For Testing + generate test cases",
@@ -690,8 +690,7 @@ module.exports = {
         },
         story_test_automation: {
             customParams: {
-                autoStartReview: true,
-                autoStartReviewConfigFile: 'agents/pr_story_test_automation_review.json'
+                autoStartReview: false
             }
         },
         story_test_automation_rework: {
@@ -711,8 +710,7 @@ module.exports = {
         },
         bug_test_automation: {
             customParams: {
-                autoStartReview: true,
-                autoStartReviewConfigFile: 'agents/pr_bug_test_automation_review.json'
+                autoStartReview: false
             }
         },
         bug_test_automation_rework: {
