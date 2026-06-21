@@ -113,7 +113,7 @@ class QuickStartCliManualWalkthroughTest(unittest.TestCase):
         )
 
         self.assertIn(
-            "gh api repos/<repository>/contents/<project-path>?ref=<default-branch>",
+            "gh api repos/<fork>/contents/<project-path>?ref=<default-branch>",
             result.positive_command.template,
             "Step 2 failed: the README no longer documents the positive quick-start "
             "command in the expected shape.\n"

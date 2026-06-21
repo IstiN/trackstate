@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
+import traceback
 import unittest
 
 from testing.components.services.hosted_auth_precedence_cli_validator import (
@@ -13,6 +15,16 @@ from testing.tests.support.hosted_auth_precedence_cli_probe_factory import (
     create_hosted_auth_precedence_cli_probe,
 )
 
+TICKET_KEY = "TS-271"
+TEST_CASE_TITLE = (
+    "Hosted Auth Precedence — Token argument overrides environment variables"
+)
+OUTPUTS_DIR = Path(__file__).resolve().parents[3] / "outputs"
+PR_BODY_PATH = OUTPUTS_DIR / "pr_body.md"
+RESPONSE_PATH = OUTPUTS_DIR / "response.md"
+RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
+BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
+
 
 class HostedAuthPrecedenceExplicitTokenOverrideTest(unittest.TestCase):
     def setUp(self) -> None:
@@ -22,8 +34,17 @@ class HostedAuthPrecedenceExplicitTokenOverrideTest(unittest.TestCase):
             repository_root=self.repository_root,
             probe=create_hosted_auth_precedence_cli_probe(self.repository_root),
         )
+        OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
 
     def test_explicit_invalid_token_overrides_valid_environment_token(self) -> None:
+        try:
+            self._run_test()
+            self._write_pass_outputs()
+        except Exception as error:
+            self._write_failure_outputs(error)
+            raise
+
+    def _run_test(self) -> None:
         result = self.validator.validate(config=self.config)
         token_probe = result.token_resolution.probe_result
 
@@ -242,6 +263,145 @@ class HostedAuthPrecedenceExplicitTokenOverrideTest(unittest.TestCase):
                 f"Missing fragment: {visible_fragment}\n"
                 f"Observed output:\n{explicit_override.output}",
             )
+
+    def _write_pass_outputs(self) -> None:
+        BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
+        RESULT_PATH.write_text(
+            json.dumps(
+                {
+                    "status": "passed",
+                    "passed": 1,
+                    "failed": 0,
+                    "skipped": 0,
+                    "summary": "1 passed, 0 failed",
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        RESPONSE_PATH.write_text(
+            self._build_response_summary(passed=True),
+            encoding="utf-8",
+        )
+        PR_BODY_PATH.write_text(
+            self._build_pr_body(passed=True),
+            encoding="utf-8",
+        )
+
+    def _write_failure_outputs(self, error: Exception) -> None:
+        error_text = str(error)
+        traceback_text = traceback.format_exc()
+        RESULT_PATH.write_text(
+            json.dumps(
+                {
+                    "status": "failed",
+                    "passed": 0,
+                    "failed": 1,
+                    "skipped": 0,
+                    "summary": "0 passed, 1 failed",
+                    "error": error_text,
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        RESPONSE_PATH.write_text(
+            self._build_response_summary(passed=False, error=error_text),
+            encoding="utf-8",
+        )
+        PR_BODY_PATH.write_text(
+            self._build_pr_body(passed=False, error=error_text),
+            encoding="utf-8",
+        )
+        BUG_DESCRIPTION_PATH.write_text(
+            self._build_bug_description(error=error_text, traceback=traceback_text),
+            encoding="utf-8",
+        )
+
+    def _build_response_summary(self, *, passed: bool, error: str | None = None) -> str:
+        if passed:
+            return (
+                f"h3. ✅ Automated test PASSED — {TICKET_KEY}\n"
+                "\n"
+                f"*{TICKET_KEY}* {TEST_CASE_TITLE} passed.\n"
+                "\n"
+                "The hosted CLI correctly reported *authSource: env* when only the "
+                "environment token was present, and returned *AUTHENTICATION_FAILED* "
+                "(exit code 3) once the explicit invalid *--token* argument was added. "
+                "This confirms the credential precedence required by AC3.\n"
+            )
+        return (
+            f"h3. ❌ Automated test FAILED — {TICKET_KEY}\n"
+            "\n"
+            f"*{TICKET_KEY}* {TEST_CASE_TITLE} failed.\n"
+            "\n"
+            "h4. Error\n"
+            f"{{code}}{error or 'unknown failure'}{{code}}\n"
+        )
+
+    def _build_pr_body(self, *, passed: bool, error: str | None = None) -> str:
+        status = "passed" if passed else "failed"
+        lines = [
+            f"## {TICKET_KEY} {status}",
+            "",
+            f"**Test case:** {TEST_CASE_TITLE}",
+            f"**Repository:** `{self.config.repository}`",
+            f"**Provider:** `{self.config.provider}`",
+            "",
+            "## What was automated",
+            "- Resolved a valid hosted token from `TS271_VALID_TRACKSTATE_TOKEN`, `TRACKSTATE_TOKEN`, or `gh auth token`.",
+            "- Verified the baseline hosted session succeeds and reports `authSource: env`.",
+            "- Re-ran the same hosted session with `--token DIFFERENT_INVALID_TOKEN` and verified `AUTHENTICATION_FAILED` (exit code 3).",
+            "",
+            "## Expected result",
+            "The explicit invalid `--token` argument overrides the valid environment credential.",
+            "",
+            "## Actual result",
+            (
+                "The hosted CLI honored the explicit invalid token and failed with the expected authentication error."
+                if passed
+                else f"The test failed: {error or 'unknown failure'}."
+            ),
+        ]
+        if not passed:
+            lines.extend(
+                [
+                    "",
+                    "## Traceback",
+                    "```text",
+                    traceback.format_exc(),
+                    "```",
+                ]
+            )
+        return "\n".join(lines) + "\n"
+
+    def _build_bug_description(
+        self,
+        *,
+        error: str,
+        traceback: str,
+    ) -> str:
+        return (
+            f"h1. {TICKET_KEY} automated test failure\n"
+            "\n"
+            f"h4. Test case\n"
+            f"{TEST_CASE_TITLE}\n"
+            "\n"
+            "h4. Steps to reproduce\n"
+            "# Set a valid token in `TRACKSTATE_TOKEN`.\n"
+            f"# Run `python3 -m unittest discover -s testing/tests/{TICKET_KEY} -p 'test_*.py'`.\n"
+            "\n"
+            "h4. Expected result\n"
+            "The baseline hosted session succeeds with `authSource: env`, and the explicit invalid-token override fails with `AUTHENTICATION_FAILED`.\n"
+            "\n"
+            "h4. Actual result\n"
+            f"{error}\n"
+            "\n"
+            "h4. Traceback\n"
+            f"{{code}}{traceback}{{code}}\n"
+        )
 
 
 if __name__ == "__main__":

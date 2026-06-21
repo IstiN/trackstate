@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import atexit
 import base64
 import json
 import os
@@ -27,6 +28,10 @@ class ThemeTokenCiError(RuntimeError):
 
 
 class ThemeTokenCiWorkflowProbe:
+    # Branches created by earlier probe runs are treated as stale after this
+    # many seconds and cleaned up before a new disposable PR is created.
+    _STALE_BRANCH_THRESHOLD_SECONDS = 600
+
     def __init__(
         self,
         config: ThemeTokenCiConfig,
@@ -35,6 +40,11 @@ class ThemeTokenCiWorkflowProbe:
     ) -> None:
         self._config = config
         self._github_api_client = github_api_client
+        self._current_branch_name: str | None = None
+        self._current_pull_request_number: int | None = None
+        self._current_temp_repository_root: Path | None = None
+        self._cleanup_registered = False
+        self._cleanup_done = False
 
     def validate(self) -> ThemeTokenCiObservation:
         repository_info = self._read_json_object(f"/repos/{self._config.repository}")
@@ -118,6 +128,11 @@ class ThemeTokenCiWorkflowProbe:
         )
 
     def _create_and_observe_pull_request(self, workflow_id: int) -> dict[str, object]:
+        # Clean up branches/PRs left behind by earlier interrupted runs before
+        # creating a new disposable branch. This is best-effort; failures are
+        # logged but do not block the current probe run.
+        self._cleanup_stale_disposables()
+
         temp_repository_root = Path(tempfile.mkdtemp(prefix="ts131-"))
         pull_request_number: int | None = None
         branch_name = self._unique_branch_name()
@@ -201,6 +216,12 @@ class ThemeTokenCiWorkflowProbe:
             ).stdout.strip()
             pull_request_number = self._extract_pull_request_number(pr_url)
 
+            self._track_current_disposable(
+                branch_name=branch_name,
+                pull_request_number=pull_request_number,
+                temp_repository_root=temp_repository_root,
+            )
+
             run = self._wait_for_pull_request_run(
                 workflow_id,
                 branch_name,
@@ -248,6 +269,8 @@ class ThemeTokenCiWorkflowProbe:
             if temp_repository_root.exists():
                 shutil.rmtree(temp_repository_root)
 
+            self._untrack_current_disposable()
+
             if pull_request_observation is not None:
                 pull_request_observation["cleanup_closed_pull_request"] = (
                     cleanup_closed_pull_request
@@ -261,6 +284,125 @@ class ThemeTokenCiWorkflowProbe:
                 "TS-131 did not produce a disposable pull request observation."
             )
         return pull_request_observation
+
+    def _track_current_disposable(
+        self,
+        *,
+        branch_name: str,
+        pull_request_number: int,
+        temp_repository_root: Path,
+    ) -> None:
+        self._current_branch_name = branch_name
+        self._current_pull_request_number = pull_request_number
+        self._current_temp_repository_root = temp_repository_root
+        self._cleanup_done = False
+        self._register_emergency_cleanup()
+
+    def _untrack_current_disposable(self) -> None:
+        self._current_branch_name = None
+        self._current_pull_request_number = None
+        self._current_temp_repository_root = None
+        self._cleanup_done = False
+
+    def _register_emergency_cleanup(self) -> None:
+        if self._cleanup_registered:
+            return
+        atexit.register(self._cleanup_now)
+        self._cleanup_registered = True
+
+    def _cleanup_now(self) -> None:
+        # Idempotent best-effort cleanup used by the normal finally block and by
+        # atexit if the process exits without running the finally block.
+        if self._cleanup_done:
+            return
+        self._cleanup_done = True
+
+        branch_name = self._current_branch_name
+        pull_request_number = self._current_pull_request_number
+        repo_root = self._current_temp_repository_root
+
+        if pull_request_number is not None:
+            self._close_pull_request(pull_request_number, repo_root)
+        if branch_name is not None:
+            self._delete_branch(branch_name, repo_root)
+
+    def _cleanup_stale_disposables(self) -> None:
+        # Close and delete disposable branches/PRs left behind by previous
+        # interrupted runs. Only branches whose embedded timestamp is older than
+        # the threshold are touched, so concurrent runs are not accidentally
+        # destroyed.
+        prefix = self._config.branch_prefix
+        threshold = time.time() - self._STALE_BRANCH_THRESHOLD_SECONDS
+        owner = self._repository_owner()
+
+        try:
+            refs = self._read_json_object(
+                f"/repos/{self._config.repository}/git/matching-refs/heads/"
+                f"{quote(prefix, safe='')}"
+            )
+        except ThemeTokenCiError as error:
+            print(
+                f"Could not list stale TS-131 branches for cleanup: {error}",
+                file=sys.stderr,
+            )
+            return
+
+        refs_list = refs.get("refs") if isinstance(refs, dict) else refs
+        if not isinstance(refs_list, list):
+            return
+
+        for ref_payload in refs_list:
+            if not isinstance(ref_payload, dict):
+                continue
+            ref_name = self._optional_string(ref_payload.get("ref"))
+            if ref_name is None or not ref_name.startswith("refs/heads/"):
+                continue
+            branch_name = ref_name[len("refs/heads/") :]
+            if not branch_name.startswith(prefix):
+                continue
+
+            branch_timestamp = self._extract_branch_timestamp(branch_name)
+            if branch_timestamp is None or branch_timestamp >= threshold:
+                continue
+
+            try:
+                open_prs = self._read_json_object(
+                    f"/repos/{self._config.repository}/pulls?state=open"
+                    f"&head={quote(owner, safe='')}:{quote(branch_name, safe='')}"
+                    f"&per_page=10"
+                )
+                if isinstance(open_prs, list):
+                    for pr in open_prs:
+                        if not isinstance(pr, dict):
+                            continue
+                        pr_number = pr.get("number")
+                        if isinstance(pr_number, int):
+                            self._close_pull_request(pr_number)
+            except ThemeTokenCiError as error:
+                print(
+                    f"Could not close stale PR for {branch_name}: {error}",
+                    file=sys.stderr,
+                )
+
+            self._delete_branch(branch_name)
+
+    def _extract_branch_timestamp(self, branch_name: str) -> float | None:
+        prefix = self._config.branch_prefix
+        match = re.search(
+            rf"^{re.escape(prefix)}-(\d{{14}})$",
+            branch_name,
+        )
+        if match is None:
+            return None
+        try:
+            timestamp = datetime.strptime(match.group(1), "%Y%m%d%H%M%S")
+        except ValueError:
+            return None
+        return timestamp.replace(tzinfo=timezone.utc).timestamp()
+
+    def _repository_owner(self) -> str:
+        owner, _, _ = self._config.repository.partition("/")
+        return owner
 
     def _select_workflow(self) -> dict[str, Any]:
         payload = self._read_json_object(f"/repos/{self._config.repository}/actions/workflows")
@@ -492,11 +634,14 @@ class ThemeTokenCiWorkflowProbe:
         return self._optional_string(payload.get("state"))
 
     def _close_pull_request(
-        self, pull_request_number: int, repo_root: Path
+        self,
+        pull_request_number: int,
+        repo_root: Path | None = None,
     ) -> bool:
+        # Prefer gh CLI, but fall back to the REST API so a transient CLI glitch
+        # does not leave an open disposable PR behind.
+        cwd = repo_root if repo_root is not None and repo_root.exists() else None
         try:
-            # Use the gh CLI from inside the cloned repo so authentication
-            # and repository context are consistent with the rest of the probe.
             self._run_command(
                 [
                     "gh",
@@ -506,29 +651,66 @@ class ThemeTokenCiWorkflowProbe:
                     "--repo",
                     self._config.repository,
                 ],
-                cwd=repo_root,
+                cwd=cwd,
             )
-        except ThemeTokenCiError as error:
+            return True
+        except ThemeTokenCiError as cli_error:
             print(
-                f"Failed to close disposable PR #{pull_request_number}: {error}",
+                f"gh pr close failed for #{pull_request_number}; trying API fallback: "
+                f"{cli_error}",
                 file=sys.stderr,
             )
-            return False
-        return True
 
-    def _delete_branch(self, branch_name: str, repo_root: Path) -> bool:
         try:
-            self._run_command(
-                ["git", "push", "origin", "--delete", branch_name],
-                cwd=repo_root,
+            self._read_json_object(
+                f"/repos/{self._config.repository}/pulls/{pull_request_number}",
+                method="PATCH",
+                field_args=["-f", "state=closed"],
             )
-        except ThemeTokenCiError as error:
+            return True
+        except ThemeTokenCiError as api_error:
             print(
-                f"Failed to delete disposable branch {branch_name}: {error}",
+                f"Failed to close disposable PR #{pull_request_number}: {api_error}",
                 file=sys.stderr,
             )
-            return False
-        return True
+        return False
+
+    def _delete_branch(
+        self,
+        branch_name: str,
+        repo_root: Path | None = None,
+    ) -> bool:
+        # Prefer deleting through the local clone, but fall back to the Git
+        # database API so a missing clone or network hiccup does not leak the
+        # remote branch.
+        cwd = repo_root if repo_root is not None and repo_root.exists() else None
+        if cwd is not None:
+            try:
+                self._run_command(
+                    ["git", "push", "origin", "--delete", branch_name],
+                    cwd=cwd,
+                )
+                return True
+            except ThemeTokenCiError as cli_error:
+                print(
+                    f"git push --delete failed for {branch_name}; trying API fallback: "
+                    f"{cli_error}",
+                    file=sys.stderr,
+                )
+
+        try:
+            self._github_api_client.request_text(
+                endpoint=f"/repos/{self._config.repository}/git/refs/heads/"
+                f"{quote(branch_name, safe='')}",
+                method="DELETE",
+            )
+            return True
+        except GitHubApiClientError as api_error:
+            print(
+                f"Failed to delete disposable branch {branch_name}: {api_error}",
+                file=sys.stderr,
+            )
+        return False
 
     def _origin_clone_url(self) -> str:
         repository = self._config.repository
