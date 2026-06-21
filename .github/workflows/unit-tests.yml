@@ -61,6 +61,10 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Install Python dependencies
+        if: steps.changes.outputs.python-tests == 'true'
+        run: pip install pyyaml
+
       - name: Run Python unit tests
         if: steps.changes.outputs.python-tests == 'true'
         run: |

@@ -11,7 +11,6 @@ from testing.core.interfaces.non_default_branch_release_repository import (
     NonDefaultBranchReleaseEnvironmentError,
 )
 from testing.frameworks.python.github_environment_preflight import verify_github_environment
-from testing.frameworks.python.gh_cli_api_client import GhCliApiClient, _resolve_gh_executable
 from testing.frameworks.python.gh_cli_non_default_branch_release_repository import (
     GhCliNonDefaultBranchReleaseRepository,
 )
@@ -38,11 +37,6 @@ class Ts252PreflightIntegrationTest(unittest.TestCase):
             semver_tag_pattern=r"^v\d+\.\d+\.\d+$",
         )
         repository_root = Path(__file__).resolve().parents[1]
-        client = GhCliApiClient(repository_root)
-        repository = GhCliNonDefaultBranchReleaseRepository(
-            repository_root,
-            github_api_client=client,
-        )
 
         # The repository no longer runs its own preflight; call it explicitly
         # so the test still exercises the fail-fast path (TS-1389).

@@ -26,6 +26,14 @@ def verify_github_environment(
       2. the GitHub CLI is authenticated;
       3. the GitHub API can read the configured repository.
 
+    Args:
+        repository: The "owner/repo" string to verify API access against.
+        gh_executable: Optional path to the `gh` binary. If omitted, the
+            shared resolver (``_resolve_gh_executable``) is used.
+        command_timeout_seconds: Maximum seconds to wait for each ``gh``
+            subprocess. Defaults to ``DEFAULT_COMMAND_TIMEOUT_SECONDS`` (30.0).
+            Callers may pass a smaller value for faster fail-fast behaviour.
+
     Raises:
         NonDefaultBranchReleaseEnvironmentError: when any precondition is not met.
     """
