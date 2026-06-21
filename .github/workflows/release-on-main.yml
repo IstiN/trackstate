@@ -373,6 +373,8 @@ jobs:
           cp "scripts/install/$INSTALL_SH" "$install_assets_dir/$INSTALL_SH"
           cp "scripts/install/$INSTALL_PS1" "$install_assets_dir/$INSTALL_PS1"
           cp "scripts/install/$INSTALL_CMD" "$install_assets_dir/$INSTALL_CMD"
+          cp "assets/assistant/trackstate-github.skill" "$install_assets_dir/trackstate-github.skill"
+          cp "assets/assistant/trackstate-claude.skill" "$install_assets_dir/trackstate-claude.skill"
           chmod +x "$install_assets_dir/$INSTALL_SH"
           sed -i "s|__REPO_PLACEHOLDER__|$GITHUB_REPOSITORY|g" "$install_assets_dir/$INSTALL_SH"
           sed -i "s|__REPO_PLACEHOLDER__|$GITHUB_REPOSITORY|g" "$install_assets_dir/$INSTALL_PS1"
@@ -389,6 +391,8 @@ jobs:
           INSTALL_SH: install.sh
           INSTALL_PS1: install.ps1
           INSTALL_CMD: install.cmd
+          GITHUB_SKILL: trackstate-github.skill
+          CLAUDE_SKILL: trackstate-claude.skill
         run: |
           set -euo pipefail
 
@@ -458,6 +462,20 @@ jobs:
             echo "install.cmd"
             echo "\`\`\`"
             echo ""
+            echo "## Assistant install surface"
+            echo ""
+            echo "GitHub and Claude assistant manifests are attached as release assets. Download the matching \`.skill\` file or run the assistant command after installing the CLI:"
+            echo ""
+            echo "\`\`\`bash"
+            echo "trackstate assistant github"
+            echo "trackstate assistant claude"
+            echo "\`\`\`"
+            echo ""
+            echo "| Assistant | Release asset | Invocation |"
+            echo "|---|---|---|"
+            echo "| GitHub | trackstate-github.skill | \`trackstate assistant github\` |"
+            echo "| Claude | trackstate-claude.skill | \`trackstate assistant claude\` |"
+            echo ""
             echo "> **Desktop auth:** These desktop builds authenticate with a GitHub fine-grained PAT or a token from \`gh auth token\`. GitHub App OAuth is supported in the web build only."
             echo ""
             echo "> **macOS requirement:** The macOS desktop package is built for Apple Silicon (arm64) and requires an Apple Silicon Mac. macOS assets are published by a separate job when the TrackState release runner is available; verify them with \`trackstate-apple-${release_tag}.sha256\`."
@@ -494,6 +512,8 @@ jobs:
             "build/install/$INSTALL_SH" \
             "build/install/$INSTALL_PS1" \
             "build/install/$INSTALL_CMD" \
+            "build/install/$GITHUB_SKILL" \
+            "build/install/$CLAUDE_SKILL" \
             --clobber
 
           gh release edit "$release_tag" \
