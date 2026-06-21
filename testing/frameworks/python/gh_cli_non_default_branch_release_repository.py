@@ -41,6 +41,17 @@ class GhCliNonDefaultBranchReleaseRepository(NonDefaultBranchReleaseRepository):
         config: NonDefaultBranchReleaseConfig,
         default_branch: str,
     ) -> NonDefaultBranchMergedPullRequest:
+        # NOTE: The preflight is intentionally NOT repeated here.
+        # NonDefaultBranchReleaseProbeService.validate() already runs
+        # verify_github_environment() before invoking this repository. Callers
+        # that use the repository directly (e.g. integration tests) should call
+        # verify_github_environment() explicitly if needed.
+        #
+        # WARNING: The _run_command helper below invokes `gh` and `git`
+        # subprocesses without an explicit timeout. The probe-level preflight is
+        # the only bounded-timeout gate; once it passes, repository-level
+        # commands are expected to succeed. If the environment degrades after
+        # the preflight (e.g. network partition), the test may hang.
         temp_repository_root = Path(tempfile.mkdtemp(prefix="ts252-"))
         target_branch_name, source_branch_name = self._unique_branch_names(config)
         pull_request_number: int | None = None

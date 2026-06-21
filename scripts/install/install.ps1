@@ -47,10 +47,23 @@ function Get-ConflictingTrackStateBinary {
             continue
         }
 
-        $candidate = Join-Path $dir "trackstate.exe"
         $normalizedDir = [System.IO.Path]::GetFullPath($dir).TrimEnd('\','/').ToLowerInvariant()
-        if ((Test-Path $candidate -PathType Leaf) -and ($normalizedDir -ne $normalizedInstallDir)) {
-            return $candidate
+        if ($normalizedDir -eq $normalizedInstallDir) {
+            continue
+        }
+
+        $extensions = $env:PATHEXT -split ';'
+        # On non-Windows hosts PATHEXT may be empty; always check .exe as fallback.
+        if ($extensions.Count -eq 1 -and [string]::IsNullOrWhiteSpace($extensions[0])) {
+            $extensions = @('.exe')
+        }
+        foreach ($ext in $extensions) {
+            $ext = $ext.Trim()
+            if (-not $ext) { continue }
+            $candidate = Join-Path $dir ("trackstate" + $ext)
+            if (Test-Path $candidate -PathType Leaf) {
+                return $candidate
+            }
         }
     }
 
@@ -67,7 +80,7 @@ function Resolve-ReleaseTag {
     try {
         $releaseJson = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases/latest" -UseBasicParsing
     } catch {
-        Write-ErrorAndExit "Unable to resolve the latest release from the GitHub API: $_"
+        Write-ErrorAndExit "Unable to resolve the latest release from the GitHub API: $_. To bypass this step, provide a pinned version (e.g., v1.2.3) or use a pinned install URL: https://github.com/$Repo/releases/download/<VERSION>/install.ps1"
     }
 
     if (-not $releaseJson.tag_name) {
@@ -103,19 +116,20 @@ function Invoke-Download {
     }
 }
 
-$releaseTag = Resolve-ReleaseTag -RequestedVersion $Version
-$platform = Get-PlatformSuffix
 $InstallDir = Join-Path $env:LOCALAPPDATA "trackstate\bin"
-$archiveName = "trackstate-cli-$platform-$releaseTag.tar.gz"
-$checksumName = "trackstate-$releaseTag.sha256"
-$downloadBase = "https://github.com/$Repo/releases/download/$releaseTag"
 
 if (-not $Force) {
     $conflictingBinary = Get-ConflictingTrackStateBinary -InstallDir $InstallDir
     if ($conflictingBinary) {
-        Write-ErrorAndExit "A conflicting trackstate.exe already exists on PATH: $conflictingBinary. Use -Force to override this conflict and continue installation."
+        Write-ErrorAndExit "A conflicting trackstate binary already exists on PATH: $conflictingBinary. Use -Force to override this conflict and continue installation."
     }
 }
+
+$releaseTag = Resolve-ReleaseTag -RequestedVersion $Version
+$platform = Get-PlatformSuffix
+$archiveName = "trackstate-cli-$platform-$releaseTag.tar.gz"
+$checksumName = "trackstate-$releaseTag.sha256"
+$downloadBase = "https://github.com/$Repo/releases/download/$releaseTag"
 
 Write-Info "Installing TrackState CLI $releaseTag for $platform..."
 

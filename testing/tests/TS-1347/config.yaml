@@ -15,12 +15,16 @@ runtime_inputs:
   required_markers_in_job:
     publish-release:
       - /repos/${GITHUB_REPOSITORY}/releases/generate-notes
+      - '\"# '
+      - "## "
       - "## Compiled artifacts"
       - "| Platform | Desktop | CLI |"
       - "| Linux |"
-      - "| macOS |"
       - "| Windows |"
+      - "macOS requirement"
       - trackstate-${release_tag}.sha256
+      - Quick Start
+      - Installation
       - "## Install the CLI"
       - "### Linux / macOS"
       - "### Windows (PowerShell)"

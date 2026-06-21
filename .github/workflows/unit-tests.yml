@@ -46,10 +46,29 @@ jobs:
               - 'tool/**'
               - '.dmtools/policies/**'
               - '.github/workflows/unit-tests.yml'
+            python-tests:
+              - 'testing/**/*.py'
+              - 'test_python/**/*.py'
+              - '.github/workflows/unit-tests.yml'
 
       - name: Skip full Flutter validation
         if: steps.changes.outputs.flutter != 'true'
         run: echo "No Flutter-related changes detected; skipping heavy Flutter validation."
+
+      - name: Setup Python
+        if: steps.changes.outputs.python-tests == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Python dependencies
+        if: steps.changes.outputs.python-tests == 'true'
+        run: pip install pyyaml
+
+      - name: Run Python unit tests
+        if: steps.changes.outputs.python-tests == 'true'
+        run: |
+          python -m unittest discover -s test_python -p "test_*.py" -v
 
       - name: Setup Flutter
         if: steps.changes.outputs.flutter == 'true'
