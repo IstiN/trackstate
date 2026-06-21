@@ -7,6 +7,7 @@ import subprocess
 from testing.core.interfaces.non_default_branch_release_repository import (
     NonDefaultBranchReleaseEnvironmentError,
 )
+from testing.frameworks.python.gh_cli_api_client import _resolve_gh_executable
 
 
 DEFAULT_COMMAND_TIMEOUT_SECONDS = 30.0
@@ -49,16 +50,6 @@ def verify_github_environment(
         "via the GitHub API. The current environment may lack network access or "
         "repository permissions, so live GitHub interactions are unavailable.",
     )
-
-
-def _resolve_gh_executable() -> str:
-    configured = os.environ.get("GH_CLI_PATH", "").strip()
-    if configured:
-        return configured
-    path_candidate = shutil.which("gh")
-    if path_candidate:
-        return path_candidate
-    return "gh"
 
 
 def _run_gh_command(

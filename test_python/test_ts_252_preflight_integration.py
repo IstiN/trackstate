@@ -10,7 +10,8 @@ from testing.core.config.non_default_branch_release_config import (
 from testing.core.interfaces.non_default_branch_release_repository import (
     NonDefaultBranchReleaseEnvironmentError,
 )
-from testing.frameworks.python.gh_cli_api_client import GhCliApiClient
+from testing.frameworks.python.github_environment_preflight import verify_github_environment
+from testing.frameworks.python.gh_cli_api_client import GhCliApiClient, _resolve_gh_executable
 from testing.frameworks.python.gh_cli_non_default_branch_release_repository import (
     GhCliNonDefaultBranchReleaseRepository,
 )
@@ -43,18 +44,19 @@ class Ts252PreflightIntegrationTest(unittest.TestCase):
             github_api_client=client,
         )
 
-        started_at = time.time()
-        with self.assertRaises(NonDefaultBranchReleaseEnvironmentError):
-            repository.create_and_merge_pull_request(
-                config=config,
-                default_branch="main",
-            )
-        elapsed = time.time() - started_at
-
+        # The repository no longer runs its own preflight; call it explicitly
+        # so the test still exercises the fail-fast path (TS-1389).
         # The preflight must fail fast; the original bug timed out at 300 s.
+        started_at = time.monotonic()
+        with self.assertRaises(NonDefaultBranchReleaseEnvironmentError) as cm:
+            verify_github_environment(config.repository)
+        elapsed = time.monotonic() - started_at
         self.assertLess(
             elapsed,
             60,
             "Expected the preflight check to fail within 60 s, "
             f"but it took {elapsed:.1f} s.",
         )
+
+        # Verify the error message mentions the expected repository issue.
+        self.assertIn("cannot access repository", str(cm.exception).lower())
