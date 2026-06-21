@@ -690,8 +690,7 @@ module.exports = {
         },
         story_test_automation: {
             customParams: {
-                autoStartReview: true,
-                autoStartReviewConfigFile: 'agents/pr_story_test_automation_review.json'
+                autoStartReview: false
             }
         },
         story_test_automation_rework: {
@@ -711,8 +710,7 @@ module.exports = {
         },
         bug_test_automation: {
             customParams: {
-                autoStartReview: true,
-                autoStartReviewConfigFile: 'agents/pr_bug_test_automation_review.json'
+                autoStartReview: false
             }
         },
         bug_test_automation_rework: {
