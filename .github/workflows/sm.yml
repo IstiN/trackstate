@@ -1,10 +1,8 @@
 name: SM Agent
 
-run-name: "SM Agent : ${{ github.event_name == 'schedule' && 'scheduled' || github.event_name == 'workflow_run' && format('after {0}', github.event.workflow_run.display_title) || 'manual' }}"
+run-name: "SM Agent : ${{ github.event_name == 'workflow_run' && format('after {0}', github.event.workflow_run.display_title) || 'manual' }}"
 
 on:
-  schedule:
-    - cron: "*/10 * * * *"
   workflow_dispatch:
   workflow_run:
     workflows: ["AI Teammate"]
@@ -90,7 +88,7 @@ jobs:
           SOURCE_GITHUB_REPOSITORY: trackstate
 
           CLI_ALLOWED_COMMANDS: "find,ls,cat,mkdir,bash,run-agent.sh"
-          DMTOOLS_FILE_READ_ALLOWED_PATHS: "../.dmtools/**"
+          DMTOOLS_FILE_READ_ALLOWED_PATHS: ".dmtools/**,../.dmtools/**"
         run: |
           CI_RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           echo "CI Run URL: ${CI_RUN_URL}"

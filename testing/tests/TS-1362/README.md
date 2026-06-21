@@ -6,7 +6,7 @@ The test compiles `bin/trackstate.dart` to a standalone executable and verifies 
 
 - The compilation succeeds with no `dart:ui` platform-availability errors.
 - The compiled binary produces JSON output identical to the Dart VM entrypoint for the same command.
-- Environment-token authentication precedence is preserved (`TRACKSTATE_TOKEN` > `gh` config).
+- Local-target authSource neutrality is preserved: the compiled binary reports `authSource: "none"` even when hosted tokens (`TRACKSTATE_TOKEN`, `GITHUB_TOKEN`, `GH_TOKEN`) are present in the environment.
 
 ## Command under test
 
