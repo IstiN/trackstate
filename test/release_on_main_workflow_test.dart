@@ -163,7 +163,7 @@ void main() {
       expect(workflow, contains('runs-on: ubuntu-latest'));
       expect(workflow, contains('flutter build linux --release'));
       expect(workflow, contains('name: Build Windows release artifacts'));
-      expect(workflow, contains('runs-on: windows-latest'));
+      expect(workflow, contains('runs-on: windows-2022'));
       expect(workflow, contains('flutter build windows --release'));
       expect(workflow, contains('name: Build macOS release artifacts'));
       expect(
@@ -284,16 +284,22 @@ void main() {
         contains(r'CLI_ARCHIVE: ${{ steps.metadata.outputs.cli_archive }}'),
       );
 
+      expect(windowsPackageStep, contains('shell: powershell'));
+
       final windowsRunBlock = windowsPackageStep.substring(
         windowsPackageStep.indexOf('run: |'),
       );
       expect(
         windowsRunBlock,
-        contains(r'zip -r "${GITHUB_WORKSPACE}/build/$DESKTOP_ARCHIVE"'),
+        contains(r'$desktopSource = [System.IO.Path]::Combine($buildDir, "windows", "x64", "runner", "Release", "*")'),
       );
       expect(
         windowsRunBlock,
-        contains(r'tar -czf "${GITHUB_WORKSPACE}/build/$CLI_ARCHIVE"'),
+        contains(r'Compress-Archive -Path $desktopSource -DestinationPath $desktop -Force'),
+      );
+      expect(
+        windowsRunBlock,
+        contains(r'tar -czf $cli -C $releaseDir trackstate.exe'),
       );
       expect(
         windowsRunBlock,
