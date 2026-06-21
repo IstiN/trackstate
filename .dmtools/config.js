@@ -129,7 +129,7 @@ module.exports = {
         "configFile": "agents/pr_test_automation_review.json",
         "skipIfLabel": "sm_test_review_triggered",
         "addLabel": "sm_test_review_triggered",
-        "enabled": true
+        "enabled": false
     },
     {
         "description": "In Rework Test Cases \u2192 trigger pr_test_automation_rework",
@@ -137,7 +137,7 @@ module.exports = {
         "configFile": "agents/pr_test_automation_rework.json",
         "skipIfLabel": "sm_test_rework_triggered",
         "addLabel": "sm_test_rework_triggered",
-        "enabled": true
+        "enabled": false
     },
     {
         "description": "In Review Stories & Bugs (pr_approved) \u2192 retry merge",
@@ -151,7 +151,7 @@ module.exports = {
         "jql": "project = {jiraProject} AND issuetype in ('Test Case') AND status in ('In Review - Passed', 'In Review - Failed') AND labels = 'pr_approved' ORDER BY created ASC",
         "configFile": "agents/retry_merge_test.json",
         "localExecution": true,
-        "enabled": true
+        "enabled": false
     },
     {
         "description": "Review/Rework/Blocked Stories & Bugs with already merged PR \u2192 recover Merged status",
@@ -172,7 +172,7 @@ module.exports = {
         "jql": "project = {jiraProject} AND issuetype in ('Test Case') AND status in ('In Review - Passed', 'In Review - Failed')",
         "configFile": "agents/recover_dirty_review_test_case.json",
         "localExecution": true,
-        "enabled": true
+        "enabled": false
     },
     {
         "description": "Merged Stories \u2192 Ready For Testing + generate test cases",
