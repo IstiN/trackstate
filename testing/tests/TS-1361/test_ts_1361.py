@@ -110,8 +110,7 @@ class PosixInstallScriptIdempotencyAndConflictTest(unittest.TestCase):
                 )
 
                 # Run with --force to allow the managed install to override the conflict.
-                # The install script does not yet implement --force, so this call will
-                # succeed only once the product adds conflict detection and a --force flag.
+                # The install script implements conflict detection and a --force flag.
                 force = run_install_sh(
                     patched,
                     flags=["--force"],
