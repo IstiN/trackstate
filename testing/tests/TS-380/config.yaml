@@ -16,7 +16,6 @@ runtime_inputs:
     - orderable
     - navigable
     - searchable
-    - clauseNames
     - schema
   expected_schema_subkeys:
     - type
