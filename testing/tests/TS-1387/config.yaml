@@ -1,0 +1,9 @@
+test_id: TS-1387
+type: cli
+framework: unittest
+platform: python
+dependencies:
+  - Python 3 standard library
+notes:
+  - Reads trackstate-setup/README.md directly from the working tree.
+  - Validates CLI syntax of the documented GitHub CLI validation command.
