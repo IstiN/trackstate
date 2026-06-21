@@ -274,10 +274,11 @@ jobs:
           DESKTOP_ARCHIVE: ${{ steps.metadata.outputs.desktop_archive }}
           CLI_ARCHIVE: ${{ steps.metadata.outputs.cli_archive }}
         run: |
-          $desktop = Join-Path $env:GITHUB_WORKSPACE "build" $env:DESKTOP_ARCHIVE
-          $cli = Join-Path $env:GITHUB_WORKSPACE "build" $env:CLI_ARCHIVE
-          $releaseDir = Join-Path $env:GITHUB_WORKSPACE "build" "release"
-          $desktopSource = Join-Path $env:GITHUB_WORKSPACE "build" "windows" "x64" "runner" "Release" "*"
+          $buildDir = Join-Path $env:GITHUB_WORKSPACE "build"
+          $desktop = Join-Path $buildDir $env:DESKTOP_ARCHIVE
+          $cli = Join-Path $buildDir $env:CLI_ARCHIVE
+          $releaseDir = Join-Path $buildDir "release"
+          $desktopSource = [System.IO.Path]::Combine($buildDir, "windows", "x64", "runner", "Release", "*")
 
           Compress-Archive -Path $desktopSource -DestinationPath $desktop -Force
           tar -czf $cli -C $releaseDir trackstate.exe
