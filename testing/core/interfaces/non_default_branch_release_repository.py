@@ -13,6 +13,17 @@ class NonDefaultBranchReleaseRepositoryError(RuntimeError):
     pass
 
 
+class NonDefaultBranchReleaseEnvironmentError(NonDefaultBranchReleaseRepositoryError):
+    """Raised when the live GitHub environment required by the test is unavailable.
+
+    This is a distinct subclass so callers can differentiate an infrastructure
+    precondition failure (missing GitHub CLI, no authentication, no network, or
+    missing repository permissions) from a genuine release-automation defect.
+    """
+
+    pass
+
+
 @dataclass(frozen=True)
 class NonDefaultBranchMergedPullRequest:
     number: int

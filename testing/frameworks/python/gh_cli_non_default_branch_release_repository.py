@@ -23,6 +23,9 @@ from testing.core.interfaces.non_default_branch_release_repository import (
     NonDefaultBranchReleaseRepository,
     NonDefaultBranchReleaseRepositoryError,
 )
+from testing.frameworks.python.github_environment_preflight import (
+    verify_github_environment,
+)
 
 
 class GhCliNonDefaultBranchReleaseRepository(NonDefaultBranchReleaseRepository):
@@ -41,6 +44,11 @@ class GhCliNonDefaultBranchReleaseRepository(NonDefaultBranchReleaseRepository):
         config: NonDefaultBranchReleaseConfig,
         default_branch: str,
     ) -> NonDefaultBranchMergedPullRequest:
+        # Fail fast when the environment cannot reach the live GitHub API. Without
+        # this check the subsequent `gh pr create` / `gh pr merge` calls can hang
+        # waiting for auth or network I/O and exceed the test timeout (TS-1389).
+        verify_github_environment(config.repository)
+
         temp_repository_root = Path(tempfile.mkdtemp(prefix="ts252-"))
         target_branch_name, source_branch_name = self._unique_branch_names(config)
         pull_request_number: int | None = None
