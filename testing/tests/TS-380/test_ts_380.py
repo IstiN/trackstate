@@ -1,67 +1,85 @@
 from __future__ import annotations
 
-import unittest
 from pathlib import Path
+import unittest
 
-from testing.components.services.trackstate_cli_read_fields_validator import (
-    TrackStateCliReadFieldsValidator,
+from testing.components.services.trackstate_cli_read_fields_local_validator import (
+    TrackStateCliReadFieldsLocalValidator,
 )
-from testing.core.config.trackstate_cli_read_fields_config import (
-    TrackStateCliReadFieldsConfig,
+from testing.core.config.trackstate_cli_read_fields_local_config import (
+    TrackStateCliReadFieldsLocalConfig,
 )
-from testing.core.models.trackstate_cli_read_fields_result import (
-    TrackStateCliReadFieldsObservation,
-)
-from testing.tests.support.trackstate_cli_read_fields_probe_factory import (
-    create_trackstate_cli_read_fields_probe,
+from testing.tests.support.trackstate_cli_read_fields_local_probe_factory import (
+    create_trackstate_cli_read_fields_local_probe,
 )
 
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-
-
-class TrackStateCliReadFieldsTest(unittest.TestCase):
+class TrackStateCliReadFieldsLocalTest(unittest.TestCase):
     """Verify that the `read fields` command returns a flat array of field objects
     with the Jira-standard schema (TS-380).
     """
 
     def setUp(self) -> None:
-        self.config = TrackStateCliReadFieldsConfig.from_defaults()
-        self.validator = TrackStateCliReadFieldsValidator(
-            probe=create_trackstate_cli_read_fields_probe(REPO_ROOT)
+        self.repository_root = Path(__file__).resolve().parents[3]
+        self.config = TrackStateCliReadFieldsLocalConfig.from_defaults()
+        self.validator = TrackStateCliReadFieldsLocalValidator(
+            probe=create_trackstate_cli_read_fields_local_probe(self.repository_root)
         )
 
     def test_read_fields_returns_jira_schema_array(self) -> None:
-        result = self.validator.validate(config=self.config)
-        observation = result.observation
+        validation_result = self.validator.validate(config=self.config)
+        observation = validation_result.observation
 
-        self._assert_successful_execution(observation)
-        payload = observation.result.json_payload
-        self.assertIsInstance(
-            payload,
-            list,
-            f"Expected a JSON array, got {type(payload).__name__}.\n"
-            f"Observed payload:\n{observation.result.stdout}",
+        self.assertEqual(
+            observation.requested_command,
+            self.config.requested_command,
+            "TS-380 did not execute the exact ticket command.\n"
+            f"Expected command: {observation.requested_command_text}\n"
+            f"Observed command: {observation.executed_command_text}",
         )
-        assert isinstance(payload, list)
+        self.assertIsNotNone(
+            observation.compiled_binary_path,
+            "TS-380 must execute a repository-local compiled binary "
+            "so the seeded Local Git repository stays the current working directory.\n"
+            f"Executed command: {observation.executed_command_text}\n"
+            f"Fallback reason: {observation.fallback_reason}",
+        )
+        self.assertEqual(
+            observation.executed_command[0],
+            observation.compiled_binary_path,
+            "TS-380 did not run the compiled repository-local CLI binary.\n"
+            f"Executed command: {observation.executed_command_text}\n"
+            f"Compiled binary path: {observation.compiled_binary_path}",
+        )
+        self.assertEqual(
+            observation.result.exit_code,
+            0,
+            "CLI 'read fields' failed unexpectedly.\n"
+            f"Requested command: {observation.requested_command_text}\n"
+            f"Executed command: {observation.executed_command_text}\n"
+            f"stdout:\n{observation.result.stdout}\n"
+            f"stderr:\n{observation.result.stderr}",
+        )
+
+        fields = validation_result.fields
         self.assertTrue(
-            payload,
-            "CLI 'read fields' returned an empty array.",
+            fields,
+            "CLI 'read fields' returned an empty or non-array payload.\n"
+            f"stdout:\n{observation.result.stdout}\n"
+            f"stderr:\n{observation.result.stderr}",
         )
 
-        # Verify each entry has the Jira-standard schema keys promised by config.yaml
-        required_keys = set(self.config.required_field_keys)
-        for idx, entry in enumerate(payload):
+        for idx, entry in enumerate(fields):
             with self.subTest(index=idx, field=entry.get("id", "?")):
                 self.assertIsInstance(
                     entry,
                     dict,
                     f"Array entry {idx} is not an object: {entry!r}",
                 )
-                missing = required_keys - set(entry.keys())
+                missing_keys = set(self.config.required_field_keys) - set(entry.keys())
                 self.assertFalse(
-                    missing,
-                    f"Field entry {idx} missing required keys: {missing}.\n"
+                    missing_keys,
+                    f"Field entry {idx} missing required keys: {missing_keys}.\n"
                     f"Observed entry: {entry}",
                 )
                 schema = entry.get("schema")
@@ -72,20 +90,22 @@ class TrackStateCliReadFieldsTest(unittest.TestCase):
                     f"Observed entry: {entry}",
                 )
                 if isinstance(schema, dict):
-                    self.assertIn(
-                        "type",
-                        schema,
-                        f"Field entry {idx} schema missing 'type'.\n"
+                    missing_schema_keys = (
+                        set(self.config.required_schema_keys) - set(schema.keys())
+                    )
+                    self.assertFalse(
+                        missing_schema_keys,
+                        f"Field entry {idx} schema missing required keys: "
+                        f"{missing_schema_keys}.\n"
                         f"Observed schema: {schema}",
                     )
-                    has_schema_discriminator = "system" in schema or "custom" in schema
+                    has_discriminator = "system" in schema or "custom" in schema
                     self.assertTrue(
-                        has_schema_discriminator,
-                        f"Field entry {idx} schema missing either 'system' or 'custom' key.\n"
-                        f"Observed schema: {schema}",
+                        has_discriminator,
+                        f"Field entry {idx} schema missing either 'system' or "
+                        f"'custom' key.\nObserved schema: {schema}",
                     )
 
-        # Verify no TrackState-specific envelope markers are present
         stdout_text = observation.result.stdout.strip()
         self.assertNotIn(
             '"ok"',
@@ -95,34 +115,13 @@ class TrackStateCliReadFieldsTest(unittest.TestCase):
         self.assertNotIn(
             '"schemaVersion"',
             stdout_text,
-            "Raw 'read fields' output should not contain a TrackState envelope 'schemaVersion' key.",
+            "Raw 'read fields' output should not contain a TrackState envelope "
+            "'schemaVersion' key.",
         )
         self.assertNotIn(
             '"data"',
             stdout_text,
             "Raw 'read fields' output should not contain a TrackState envelope 'data' key.",
-        )
-
-    def _assert_successful_execution(
-        self,
-        observation: TrackStateCliReadFieldsObservation,
-    ) -> None:
-        self.assertEqual(
-            observation.requested_command,
-            self.config.requested_command,
-            "Step 1 failed: TS-380 did not execute the exact ticket command.\n"
-            f"Expected command: {observation.requested_command_text}\n"
-            f"Observed command: {observation.executed_command_text}",
-        )
-        self.assertEqual(
-            observation.result.exit_code,
-            0,
-            f"CLI 'read fields' failed unexpectedly.\n"
-            f"Requested command: {observation.requested_command_text}\n"
-            f"Executed command: {observation.executed_command_text}\n"
-            f"Fallback reason: {observation.fallback_reason}\n"
-            f"stdout:\n{observation.result.stdout}\n"
-            f"stderr:\n{observation.result.stderr}",
         )
 
 

@@ -16,8 +16,12 @@ runtime_inputs:
     - orderable
     - navigable
     - searchable
+    - clauseNames
     - schema
+  expected_schema_subkeys:
+    - type
 notes:
   - Verifies that the TrackState CLI read fields command returns a flat array of field objects with the Jira-standard schema.
-  - The test initializes a temporary TrackState repository and runs the CLI command against it.
-  - Validates JSON structure, field object keys, and schema sub-object keys.
+  - Uses the shared probe/validator architecture (TrackStateCliReadFieldsLocalValidator + PythonTrackStateCliReadFieldsLocalFramework) instead of raw subprocess calls in the ticket test file.
+  - The framework seeds a temporary TrackState repository, compiles a local CLI binary, and runs the read fields command from the seeded repository.
+  - Validates JSON structure, field object keys, schema sub-object keys, and the absence of TrackState envelope markers.
