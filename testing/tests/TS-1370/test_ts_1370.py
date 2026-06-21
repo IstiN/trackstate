@@ -4,11 +4,8 @@ import fnmatch
 import json
 import os
 import platform
-import shutil
-import stat
 import subprocess
 import sys
-import tarfile
 import tempfile
 import traceback
 import unittest
@@ -42,10 +39,10 @@ from testing.tests.support.trackstate_release_artifact_probe_factory import (  #
     create_trackstate_release_artifact_probe,
 )
 
-TICKET_KEY = "TS-1366"
-TICKET_SUMMARY = "CLI Archive Content Atomicity — binary-only packaging and executable bit"
-TEST_FILE_PATH = "testing/tests/TS-1366/test_ts_1366.py"
-RUN_COMMAND = "mkdir -p outputs && python testing/tests/TS-1366/test_ts_1366.py"
+TICKET_KEY = "TS-1370"
+TICKET_SUMMARY = "Desktop Artifact Integrity — binary-level verification using unified checksum"
+TEST_FILE_PATH = "testing/tests/TS-1370/test_ts_1370.py"
+RUN_COMMAND = "mkdir -p outputs && python testing/tests/TS-1370/test_ts_1370.py"
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 RESULT_PATH = OUTPUTS_DIR / "test_automation_result.json"
@@ -56,7 +53,7 @@ BUG_DESCRIPTION_PATH = OUTPUTS_DIR / "bug_description.md"
 CONFIG_PATH = REPO_ROOT / "testing" / "tests" / TICKET_KEY / "config.yaml"
 
 
-class CliArchiveAtomicityTest(unittest.TestCase):
+class DesktopArtifactIntegrityTest(unittest.TestCase):
     def setUp(self) -> None:
         self.config = self._load_config(CONFIG_PATH)
         self.result: dict[str, Any] = {
@@ -65,13 +62,12 @@ class CliArchiveAtomicityTest(unittest.TestCase):
             "repository": self.config["repository"],
             "default_branch": self.config.get("default_branch", "main"),
             "release_tag": None,
-            "cli_archive_asset": None,
-            "archive_members": [],
-            "extracted_binary_path": None,
-            "extracted_binary_mode": None,
-            "file_output": None,
-            "binary_run_output": None,
-            "binary_run_error": None,
+            "checksum_file": None,
+            "downloaded_assets": [],
+            "checksum_entries": [],
+            "verification_output": None,
+            "failed_checksums": [],
+            "missing_assets": [],
             "run_command": RUN_COMMAND,
             "test_file_path": TEST_FILE_PATH,
             "os": platform.system(),
@@ -80,7 +76,7 @@ class CliArchiveAtomicityTest(unittest.TestCase):
             "human_verification": [],
         }
 
-    def test_cli_archive_is_atomic_and_executable(self) -> None:
+    def test_unified_checksum_validates_all_desktop_and_cli_assets(self) -> None:
         OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
         try:
             self._run_test()
@@ -97,11 +93,11 @@ class CliArchiveAtomicityTest(unittest.TestCase):
         release_tag = resolver.resolve_release_tag(
             repository=base_config.repository,
             pattern=base_config.release_tag_pattern,
-            env_key="TS1366_RELEASE_TAG",
+            env_key="TS1370_RELEASE_TAG",
         )
         if release_tag is None:
             raise unittest.SkipTest(
-                "No release tag could be determined. Set TS1366_RELEASE_TAG or run the test "
+                "No release tag could be determined. Set TS1370_RELEASE_TAG or run the test "
                 "from a GitHub Actions release/tag workflow."
             )
 
@@ -126,32 +122,42 @@ class CliArchiveAtomicityTest(unittest.TestCase):
             self._record_step(
                 step=2,
                 status="failed",
-                action="Locate the Linux x64 CLI archive on the selected release.",
+                action="Locate all required release assets and the unified checksum file.",
                 observed=self.result["blocked_reason"],
             )
             raise unittest.SkipTest(self.result["blocked_reason"])
 
-        cli_asset = self._find_cli_asset(observation)
-        if cli_asset is None:
-            pattern = self.config["cli_archive_pattern"]
+        expected_assets = self._expand_expected_assets(release_tag)
+        checksum_pattern = self.config["checksum_file_pattern"].format(tag=release_tag)
+        asset_by_name = {asset.name: asset for asset in observation.assets}
+
+        missing_assets = [name for name in expected_assets if name not in asset_by_name]
+        checksum_asset = self._find_checksum_asset(asset_by_name, checksum_pattern)
+        if checksum_asset is not None:
+            self.result["checksum_file"] = checksum_asset.name
+
+        if missing_assets or checksum_asset is None:
+            missing_items = missing_assets.copy()
+            if checksum_asset is None:
+                missing_items.append(checksum_pattern)
+            self.result["missing_assets"] = missing_items
             self._record_step(
                 step=2,
                 status="failed",
-                action="Locate the Linux x64 CLI archive on the selected release.",
-                observed=(
-                    f"No asset matching {pattern} was found on release {release_tag}."
-                ),
+                action="Locate all required release assets and the unified checksum file.",
+                observed=f"Missing assets: {missing_items}. Available assets: {list(asset_by_name.keys())}",
             )
-            raise unittest.SkipTest(
-                f"Release {release_tag} does not expose a CLI archive matching {pattern}."
+            self.result["blocked_reason"] = (
+                f"Release {release_tag} is missing required assets: {missing_items}."
             )
+            raise unittest.SkipTest(self.result["blocked_reason"])
 
-        self.result["cli_archive_asset"] = cli_asset.name
+        self.result["downloaded_assets"] = expected_assets
         self._record_step(
             step=2,
             status="passed",
-            action="Locate the Linux x64 CLI archive on the selected release.",
-            observed=f"CLI archive asset: {cli_asset.name}",
+            action="Locate all required release assets and the unified checksum file.",
+            observed=f"Found assets: {expected_assets}; checksum file: {checksum_asset.name}",
         )
 
         repository_service = LiveSetupRepositoryService(
@@ -164,215 +170,128 @@ class CliArchiveAtomicityTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory(prefix=f"trackstate-{TICKET_KEY.lower()}-") as tmp:
             temp_dir = Path(tmp)
-            archive_path = temp_dir / cli_asset.name
-            archive_path.write_bytes(
-                repository_service.download_release_asset_bytes(cli_asset.id)
+            self._download_assets(repository_service, asset_by_name, expected_assets, temp_dir)
+            checksum_path = self._download_checksum_manifest(
+                repository_service, checksum_asset, temp_dir
             )
-            members = self._inspect_archive_members(archive_path)
-            self.result["archive_members"] = [
-                {"name": m.name, "mode": oct(stat.S_IMODE(m.mode)), "isreg": m.isreg()}
-                for m in members
-            ]
-            self._assert_atomic_contents(members)
-
-            extract_dir = temp_dir / "extract"
-            extract_dir.mkdir()
-            self._extract_archive(archive_path, extract_dir)
-            binary_path = extract_dir / self.config["expected_member_name"]
-            self.result["extracted_binary_path"] = str(binary_path)
-            self._assert_executable_bit(binary_path)
-            self._verify_binary_with_file(binary_path)
-            self._run_extracted_binary(binary_path)
+            self._inspect_checksum_manifest(checksum_path)
+            self._verify_checksums(temp_dir, checksum_path)
 
         self._record_human_verification(
             check=(
-                "Verified the CLI archive as a real user would: downloaded the published "
-                "release asset, listed its contents, extracted the binary, and confirmed "
-                "the executable permissions allow immediate execution."
+                "Verified artifact integrity as a real user would: downloaded all platform "
+                "archives and the unified checksum file, then ran sha256sum -c to confirm "
+                "every file is uncorrupted."
             ),
             observed=(
-                f"archive={self.result['cli_archive_asset']}; "
-                f"members={self.result['archive_members']}; "
-                f"binary_mode={self.result['extracted_binary_mode']}"
+                f"checksum_file={self.result['checksum_file']}; "
+                f"verified_assets={self.result['downloaded_assets']}; "
+                f"failed_checksums={self.result['failed_checksums']}"
             ),
         )
         self._write_pass_outputs()
 
-    def _find_cli_asset(
-        self,
-        observation: TrackStateReleaseArtifactObservation,
-    ) -> TrackStateReleaseAssetObservation | None:
-        pattern = self.config["cli_archive_pattern"]
-        matching = [
-            asset
-            for asset in observation.assets
-            if fnmatch.fnmatch(asset.name, pattern)
+    def _expand_expected_assets(self, release_tag: str) -> list[str]:
+        return [
+            template.format(tag=release_tag)
+            for template in self.config["expected_assets"]
         ]
-        if not matching:
-            return None
-        if len(matching) > 1:
-            raise AssertionError(
-                f"Release exposed multiple CLI archives matching {pattern}: "
-                f"{[asset.name for asset in matching]}."
+
+    def _find_checksum_asset(
+        self,
+        asset_by_name: dict[str, TrackStateReleaseAssetObservation],
+        pattern: str,
+    ) -> TrackStateReleaseAssetObservation | None:
+        matching = [name for name in asset_by_name if fnmatch.fnmatch(name, pattern)]
+        if len(matching) == 1:
+            return asset_by_name[matching[0]]
+        return None
+
+    def _download_assets(
+        self,
+        repository_service: LiveSetupRepositoryService,
+        asset_by_name: dict[str, TrackStateReleaseAssetObservation],
+        asset_names: list[str],
+        destination_dir: Path,
+    ) -> None:
+        for asset_name in asset_names:
+            asset = asset_by_name[asset_name]
+            asset_path = destination_dir / asset_name
+            asset_path.write_bytes(
+                repository_service.download_release_asset_bytes(asset.id)
             )
-        return matching[0]
-
-    def _inspect_archive_members(self, archive_path: Path) -> list[tarfile.TarInfo]:
-        try:
-            with tarfile.open(archive_path, mode="r:*") as tf:
-                members = tf.getmembers()
-        except tarfile.TarError as error:
-            raise AssertionError(
-                f"Could not open archive {archive_path.name}: {error}"
-            ) from error
-
-        listing = "\n".join(
-            f"{m.name}\t{oct(stat.S_IMODE(m.mode))}\t{'dir' if m.isdir() else 'file' if m.isreg() else 'other'}"
-            for m in members
-        )
         self._record_step(
             step=3,
             status="passed",
-            action="List the archive contents.",
-            observed=f"Archive members:\n{listing}",
+            action="Download all platform archives.",
+            observed=f"Downloaded {len(asset_names)} archives to {destination_dir}.",
         )
-        return members
 
-    def _assert_atomic_contents(self, members: list[tarfile.TarInfo]) -> None:
-        member_names = [m.name for m in members]
-        failures: list[str] = []
-        if len(members) != 1:
-            failures.append(
-                f"Expected exactly one archive member, found {len(members)}: {member_names}."
-            )
-        else:
-            member = members[0]
-            if not member.isreg():
-                failures.append(
-                    f"The single archive member is not a regular file: {member.name} "
-                    f"(type={member.type})."
-                )
-            if member.name != self.config["expected_member_name"]:
-                failures.append(
-                    f"Expected archive member named {self.config['expected_member_name']!r}, "
-                    f"found {member.name!r}."
-                )
+    def _download_checksum_manifest(
+        self,
+        repository_service: LiveSetupRepositoryService,
+        checksum_asset: TrackStateReleaseAssetObservation,
+        destination_dir: Path,
+    ) -> Path:
+        checksum_path = destination_dir / checksum_asset.name
+        checksum_path.write_bytes(
+            repository_service.download_release_asset_bytes(checksum_asset.id)
+        )
+        return checksum_path
 
-        if failures:
-            self._record_step(
-                step=4,
-                status="failed",
-                action="Verify the archive contains only the compiled executable.",
-                observed="\n".join(failures),
-            )
-            raise AssertionError("\n".join(failures))
-
+    def _inspect_checksum_manifest(self, checksum_path: Path) -> None:
+        text = checksum_path.read_text(encoding="utf-8")
+        entries = []
+        for line in text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split(None, 1)
+            if len(parts) == 2:
+                entries.append({"checksum": parts[0], "filename": parts[1].strip()})
+        self.result["checksum_entries"] = entries
         self._record_step(
             step=4,
             status="passed",
-            action="Verify the archive contains only the compiled executable.",
-            observed=f"Exactly one regular file named {self.config['expected_member_name']!r}.",
+            action="Read the unified checksum manifest.",
+            observed=f"Manifest contains {len(entries)} entries: {[e['filename'] for e in entries]}",
         )
 
-    def _extract_archive(
-        self,
-        archive_path: Path,
-        extract_dir: Path,
-    ) -> None:
-        try:
-            with tarfile.open(archive_path, mode="r:*") as tf:
-                tf.extractall(path=extract_dir)
-        except tarfile.TarError as error:
+    def _verify_checksums(self, working_dir: Path, checksum_path: Path) -> None:
+        completed = subprocess.run(
+            ("sha256sum", "-c", str(checksum_path)),
+            cwd=working_dir,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.result["verification_output"] = completed.stdout.strip()
+        failed = []
+        for line in (completed.stdout + completed.stderr).splitlines():
+            if ": OK" in line:
+                continue
+            if line.strip():
+                failed.append(line.strip())
+        self.result["failed_checksums"] = failed
+
+        if completed.returncode != 0 or failed:
+            self._record_step(
+                step=5,
+                status="failed",
+                action="Verify every archive with sha256sum -c.",
+                observed="\n".join(failed) if failed else completed.stderr.strip(),
+            )
             raise AssertionError(
-                f"Could not extract archive {archive_path.name}: {error}"
-            ) from error
+                "Checksum verification failed.\n"
+                f"stdout:\n{completed.stdout}\n"
+                f"stderr:\n{completed.stderr}"
+            )
+
         self._record_step(
             step=5,
             status="passed",
-            action="Extract the archive.",
-            observed=f"Extracted to {extract_dir}.",
-        )
-
-    def _assert_executable_bit(self, binary_path: Path) -> None:
-        if not binary_path.exists():
-            raise AssertionError(
-                f"Extracted binary {binary_path.name} was not found at {binary_path}."
-            )
-        mode = binary_path.stat().st_mode
-        self.result["extracted_binary_mode"] = oct(stat.S_IMODE(mode))
-        if not stat.S_ISREG(mode):
-            raise AssertionError(
-                f"Extracted path {binary_path.name} is not a regular file."
-            )
-
-        expected_mask = int(self.config.get("expected_permission_bits", "0o755"), 8)
-        observed_mode = stat.S_IMODE(mode)
-        if (observed_mode & expected_mask) != expected_mask:
-            raise AssertionError(
-                f"Expected permissions to include {oct(expected_mask)} "
-                f"(e.g., -rwxr-xr-x), observed {oct(observed_mode)}."
-            )
-
-        self._record_step(
-            step=6,
-            status="passed",
-            action="Check the extracted binary permissions.",
-            observed=f"Permissions: {oct(observed_mode)}.",
-        )
-
-    def _verify_binary_with_file(self, binary_path: Path) -> None:
-        if shutil.which("file") is None:
-            self.result["file_output"] = "<file utility not available>"
-            return
-        completed = subprocess.run(
-            ("file", str(binary_path)),
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        output = (completed.stdout or completed.stderr).strip()
-        self.result["file_output"] = output
-        self._record_human_verification(
-            check="Ran `file` on the extracted binary as a human reviewer would.",
-            observed=output,
-        )
-
-    def _run_extracted_binary(self, binary_path: Path) -> None:
-        if platform.system() != "Linux" or platform.machine() not in {"x86_64", "amd64"}:
-            self.result["binary_run_output"] = "<skipped: host is not Linux x86_64>"
-            self._record_human_verification(
-                check="Attempted to execute the extracted binary as a real user would.",
-                observed="Skipped execution because the host is not a Linux x86_64 system.",
-            )
-            return
-
-        if not os.access(binary_path, os.X_OK):
-            self.result["binary_run_error"] = "<binary is not executable>"
-            return
-
-        completed = subprocess.run(
-            (str(binary_path), "--version"),
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=False,
-        )
-        self.result["binary_run_output"] = completed.stdout.strip()
-        self.result["binary_run_error"] = completed.stderr.strip() or None
-        if completed.returncode != 0:
-            raise AssertionError(
-                f"Extracted binary exited with code {completed.returncode} when run "
-                f"with --version.\nstdout: {completed.stdout}\nstderr: {completed.stderr}"
-            )
-        self._record_step(
-            step=7,
-            status="passed",
-            action="Run the extracted binary to confirm it executes immediately.",
-            observed=f"Exit code 0. stdout: {completed.stdout.strip()[:200]}",
-        )
-        self._record_human_verification(
-            check="Executed the extracted binary with `--version` as a real user would after downloading.",
-            observed=completed.stdout.strip()[:500],
+            action="Verify every archive with sha256sum -c.",
+            observed="All listed archives returned OK.",
         )
 
     @staticmethod
@@ -438,20 +357,20 @@ class CliArchiveAtomicityTest(unittest.TestCase):
     def _write_blocked_outputs(self) -> None:
         BUG_DESCRIPTION_PATH.unlink(missing_ok=True)
         reason = self.result.get("blocked_reason") or (
-            "No published release exposes a matching Linux x64 CLI archive."
+            "The selected release does not expose all required assets or the unified checksum file."
         )
-        missing = self.result.get("missing") or [
+        missing = self.result.get("missing_assets") or []
+        missing_items = [
             {
                 "type": "release_asset",
-                "name": "trackstate-cli-linux-x64-<tag>.tar.gz",
-                "description": (
-                    "Linux x64 CLI archive produced by the release-on-main workflow."
-                ),
+                "name": item,
+                "description": "Required platform archive or checksum file.",
                 "how_to_add": (
-                    "Run the release-on-main workflow to completion so the Linux CLI "
-                    "archive is published to the GitHub release."
+                    "Run the release-on-main workflow to completion so all platform "
+                    "archives and the unified checksum file are published to the GitHub release."
                 ),
             }
+            for item in missing
         ]
         RESULT_PATH.write_text(
             json.dumps(
@@ -462,7 +381,7 @@ class CliArchiveAtomicityTest(unittest.TestCase):
                     "skipped": 1,
                     "summary": "0 passed, 0 failed, 1 skipped",
                     "blocked_reason": reason,
-                    "missing": missing,
+                    "missing": missing_items,
                 },
                 indent=2,
             )
@@ -507,13 +426,12 @@ def _jira_pass_summary(result: dict[str, Any]) -> str:
         f"*Test Case:* {TICKET_KEY} — {TICKET_SUMMARY}",
         f"*Repository:* {result['repository']}",
         f"*Release:* {result.get('release_tag')}",
-        f"*CLI Archive:* {result.get('cli_archive_asset')}",
+        f"*Checksum File:* {result.get('checksum_file')}",
         "",
         "h4. What was tested",
-        "* Downloaded the published Linux x64 CLI archive from the selected GitHub release.",
-        "* Listed the archive contents and verified exactly one regular file named {trackstate}.",
-        "* Extracted the binary and confirmed the executable bit is preserved.",
-        "* Ran the extracted binary with {--version} as a real-user sanity check.",
+        "* Downloaded all six platform-specific archives from the selected GitHub release.",
+        "* Downloaded the unified SHA256 checksum file.",
+        "* Ran {{sha256sum -c}} to verify every listed archive returned OK.",
         "",
         "h4. Automation",
     ]
@@ -524,9 +442,9 @@ def _jira_pass_summary(result: dict[str, Any]) -> str:
         [
             "",
             "h4. Result",
-            f"* The archive is atomic and contains only the compiled executable with executable permissions.",
-            f"* Observed member: {result.get('archive_members')}",
-            f"* Observed binary mode: {result.get('extracted_binary_mode')}",
+            "* The unified checksum file validates the integrity of all published desktop and CLI assets.",
+            f"* Verified assets: {result.get('downloaded_assets')}",
+            f"* Checksum entries: {len(result.get('checksum_entries', []))}",
             "",
             "h4. Test file",
             "{code}",
@@ -550,20 +468,19 @@ def _jira_failure_summary(result: dict[str, Any], error: str) -> str:
         f"*Test Case:* {TICKET_KEY} — {TICKET_SUMMARY}",
         f"*Repository:* {result['repository']}",
         f"*Release:* {result.get('release_tag')}",
-        f"*CLI Archive:* {result.get('cli_archive_asset')}",
+        f"*Checksum File:* {result.get('checksum_file')}",
         "",
         "h4. What was tested",
-        "* Downloaded the published Linux x64 CLI archive from the selected GitHub release.",
-        "* Listed the archive contents and verified exactly one regular file named {trackstate}.",
-        "* Extracted the binary and confirmed the executable bit is preserved.",
+        "* Downloaded all available platform archives and the unified checksum file.",
+        "* Ran {{sha256sum -c}} to verify archive integrity.",
         "",
         "h4. Automation",
     ]
     lines.extend(_jira_step_lines(result.get("steps")))
     lines.extend(["", "h4. Result"])
     lines.append(f"* ❌ Failure: {{noformat}}{error}{{noformat}}")
-    lines.append(f"* Observed archive members: {result.get('archive_members')}")
-    lines.append(f"* Observed binary mode: {result.get('extracted_binary_mode')}")
+    lines.append(f"* Failed checksums: {result.get('failed_checksums')}")
+    lines.append(f"* Verification output: {result.get('verification_output')}")
     lines.extend(
         [
             "",
@@ -591,13 +508,11 @@ def _jira_blocked_summary(result: dict[str, Any], reason: str) -> str:
         f"*Release:* {result.get('release_tag') or '<none selected>'}",
         "",
         "h4. What was tested",
-        "* Attempted to locate a published Linux x64 CLI archive on the selected GitHub release.",
+        "* Attempted to locate all required platform archives and the unified checksum file on the selected GitHub release.",
         "",
         "h4. Result",
         f"* 🚫 Blocked: {reason}",
-        "",
-        "h4. Missing",
-        "* A published Linux x64 CLI archive matching {trackstate-cli-linux-x64-*.tar.gz}.",
+        f"* Missing assets: {result.get('missing_assets')}",
         "",
         "h4. Test file",
         "{code}",
@@ -620,13 +535,12 @@ def _markdown_pass_summary(result: dict[str, Any]) -> str:
         f"**Test Case:** {TICKET_KEY} — {TICKET_SUMMARY}",
         f"**Repository:** `{result['repository']}`",
         f"**Release:** `{result.get('release_tag')}`",
-        f"**CLI Archive:** `{result.get('cli_archive_asset')}`",
+        f"**Checksum File:** `{result.get('checksum_file')}`",
         "",
         "## What was automated",
-        "- Downloaded the published Linux x64 CLI archive from the selected GitHub release.",
-        "- Listed the archive contents and verified exactly one regular file named `trackstate`.",
-        "- Extracted the binary and confirmed the executable bit is preserved.",
-        "- Ran the extracted binary with `--version` as a real-user sanity check.",
+        "- Downloaded all six platform-specific archives from the selected GitHub release.",
+        "- Downloaded the unified SHA256 checksum file.",
+        "- Ran `sha256sum -c` to verify every listed archive returned OK.",
         "",
         "## Automation details",
     ]
@@ -637,9 +551,9 @@ def _markdown_pass_summary(result: dict[str, Any]) -> str:
         [
             "",
             "## Result",
-            "- The archive is atomic and contains only the compiled executable with executable permissions.",
-            f"- Observed member: `{result.get('archive_members')}`",
-            f"- Observed binary mode: `{result.get('extracted_binary_mode')}`",
+            "- The unified checksum file validates the integrity of all published desktop and CLI assets.",
+            f"- Verified assets: `{result.get('downloaded_assets')}`",
+            f"- Checksum entries: `{len(result.get('checksum_entries', []))}`",
             "",
             "## How to run",
             "```bash",
@@ -658,17 +572,16 @@ def _markdown_failure_summary(result: dict[str, Any], error: str) -> str:
         f"**Test Case:** {TICKET_KEY} — {TICKET_SUMMARY}",
         f"**Repository:** `{result['repository']}`",
         f"**Release:** `{result.get('release_tag')}`",
-        f"**CLI Archive:** `{result.get('cli_archive_asset')}`",
+        f"**Checksum File:** `{result.get('checksum_file')}`",
         "",
         "## What was automated",
-        "- Downloaded the published Linux x64 CLI archive from the selected GitHub release.",
-        "- Listed the archive contents and verified exactly one regular file named `trackstate`.",
-        "- Extracted the binary and confirmed the executable bit is preserved.",
+        "- Downloaded all available platform archives and the unified checksum file.",
+        "- Ran `sha256sum -c` to verify archive integrity.",
         "",
         "## Result",
         f"- Failure: `{error}`",
-        f"- Observed archive members: `{result.get('archive_members')}`",
-        f"- Observed binary mode: `{result.get('extracted_binary_mode')}`",
+        f"- Failed checksums: `{result.get('failed_checksums')}`",
+        f"- Verification output: `{result.get('verification_output')}`",
         "",
         "## How to run",
         "```bash",
@@ -688,10 +601,11 @@ def _markdown_blocked_summary(result: dict[str, Any], reason: str) -> str:
         f"**Release:** `{result.get('release_tag') or '<none selected>'}`",
         "",
         "## What was automated",
-        "- Attempted to locate a published Linux x64 CLI archive on the selected GitHub release.",
+        "- Attempted to locate all required platform archives and the unified checksum file on the selected GitHub release.",
         "",
         "## Result",
         f"- 🚫 Blocked: {reason}",
+        f"- Missing assets: `{result.get('missing_assets')}`",
         "",
         "## How to run",
         "```bash",
@@ -706,24 +620,23 @@ def _bug_description(result: dict[str, Any]) -> str:
         f"h4. Environment\n"
         f"* Repository: {result['repository']}\n"
         f"* Release: {result.get('release_tag')}\n"
-        f"* CLI archive: {result.get('cli_archive_asset')}\n"
+        f"* Checksum file: {result.get('checksum_file')}\n"
         f"* Host OS: {result.get('os')} {result.get('arch')}\n"
         f"* Run command: {RUN_COMMAND}\n"
         "\n"
         "h4. Steps to Reproduce\n"
-        "# Download the Linux x64 CLI archive from the selected GitHub release.\n"
-        "# List the archive contents with {{tar -tzf}}.\n"
-        "# Extract the archive and run {{ls -l trackstate}}.\n"
+        "# Download all six platform archives and the unified checksum file from the selected GitHub release.\n"
+        "# Place all files in the same directory.\n"
+        "# Run {{sha256sum -c trackstate-<tag>.sha256}}.\n"
         "\n"
         "h4. Expected Result\n"
-        "* The archive contains exactly one regular file named {{trackstate}}.\n"
-        "* No directories, metadata files, or extra files are present.\n"
-        "* The extracted binary has executable permissions (e.g., {{-rwxr-xr-x}}).\n"
+        "* The command returns OK for every file listed in the manifest.\n"
+        "* The manifest covers all six platform archives.\n"
         "\n"
         "h4. Actual Result\n"
         f"{{noformat}}\n{result.get('error')}\n{{noformat}}\n"
-        f"* Observed archive members: {result.get('archive_members')}\n"
-        f"* Observed binary mode: {result.get('extracted_binary_mode')}\n"
+        f"* Failed checksums: {result.get('failed_checksums')}\n"
+        f"* Verification output: {result.get('verification_output')}\n"
         "\n"
         "h4. Logs / Error Output\n"
         "{code}\n"
@@ -741,9 +654,7 @@ def _jira_step_lines(steps: Any) -> list[str]:
             continue
         status = str(entry.get("status", "")).strip().lower()
         icon = "✅" if status == "passed" else "❌"
-        lines.append(
-            f"* {icon} Step {entry.get('step')}: {entry.get('action')}"
-        )
+        lines.append(f"* {icon} Step {entry.get('step')}: {entry.get('action')}")
         lines.append(f"** Observed: {entry.get('observed')}")
     return lines
 
