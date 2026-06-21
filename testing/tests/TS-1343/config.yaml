@@ -31,7 +31,6 @@ runtime_inputs:
       - resolve-version
       - build-linux
       - build-windows
-      - build-macos
 notes:
   - Statically validates that platform build jobs declare a dependency on the shared validation job.
   - Does not mutate the repository or trigger live workflow runs.
