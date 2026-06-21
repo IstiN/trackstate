@@ -373,12 +373,14 @@ jobs:
           cp "scripts/install/$INSTALL_SH" "$install_assets_dir/$INSTALL_SH"
           cp "scripts/install/$INSTALL_PS1" "$install_assets_dir/$INSTALL_PS1"
           cp "scripts/install/$INSTALL_CMD" "$install_assets_dir/$INSTALL_CMD"
-          cp "assets/assistant/trackstate-github.skill" "$install_assets_dir/trackstate-github.skill"
-          cp "assets/assistant/trackstate-claude.skill" "$install_assets_dir/trackstate-claude.skill"
+          cp "assets/assistant/$GITHUB_SKILL" "$install_assets_dir/$GITHUB_SKILL"
+          cp "assets/assistant/$CLAUDE_SKILL" "$install_assets_dir/$CLAUDE_SKILL"
           chmod +x "$install_assets_dir/$INSTALL_SH"
           sed -i "s|__REPO_PLACEHOLDER__|$GITHUB_REPOSITORY|g" "$install_assets_dir/$INSTALL_SH"
           sed -i "s|__REPO_PLACEHOLDER__|$GITHUB_REPOSITORY|g" "$install_assets_dir/$INSTALL_PS1"
           sed -i "s|__REPO_PLACEHOLDER__|$GITHUB_REPOSITORY|g" "$install_assets_dir/$INSTALL_CMD"
+          sed -i "s|__REPO_PLACEHOLDER__|$GITHUB_REPOSITORY|g" "$install_assets_dir/$GITHUB_SKILL"
+          sed -i "s|__REPO_PLACEHOLDER__|$GITHUB_REPOSITORY|g" "$install_assets_dir/$CLAUDE_SKILL"
 
       - name: Publish release
         shell: bash

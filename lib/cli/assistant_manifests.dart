@@ -6,8 +6,6 @@
 /// `trackstate-github.skill` and `trackstate-claude.skill`.
 library;
 
-const String trackStateAssistantSchemaVersion = '1';
-
 const String trackStateGitHubAssistantManifest = r'''{
   "schemaVersion": "1",
   "name": "TrackState for GitHub",
@@ -15,10 +13,10 @@ const String trackStateGitHubAssistantManifest = r'''{
   "assistant": "github",
   "description": "Install and invoke the TrackState CLI inside GitHub Copilot, GitHub Actions, and Codespaces environments.",
   "install": {
-    "command": "curl -fsSL https://github.com/IstiN/trackstate/releases/latest/download/install.sh | bash",
-    "commandWindows": "irm https://github.com/IstiN/trackstate/releases/latest/download/install.ps1 -OutFile install.ps1; .\\install.ps1",
+    "command": "curl -fsSL https://github.com/__REPO_PLACEHOLDER__/releases/latest/download/install.sh | bash",
+    "commandWindows": "irm https://github.com/__REPO_PLACEHOLDER__/releases/latest/download/install.ps1 -OutFile install.ps1; .\\install.ps1",
     "shell": "bash",
-    "docs": "https://github.com/IstiN/trackstate/releases/latest"
+    "docs": "https://github.com/__REPO_PLACEHOLDER__/releases/latest"
   },
   "invocation": {
     "commandPath": "trackstate assistant github",
@@ -42,7 +40,7 @@ const String trackStateGitHubAssistantManifest = r'''{
     "authSource": "TRACKSTATE_TOKEN environment variable or gh auth token",
     "target": "hosted",
     "provider": "github",
-    "repository": "owner/name"
+    "repository": "__REPO_PLACEHOLDER__"
   }
 }
 ''';
@@ -54,10 +52,10 @@ const String trackStateClaudeAssistantManifest = r'''{
   "assistant": "claude",
   "description": "Install and invoke the TrackState CLI inside Claude Code and Claude desktop project environments.",
   "install": {
-    "command": "curl -fsSL https://github.com/IstiN/trackstate/releases/latest/download/install.sh | bash",
-    "commandWindows": "irm https://github.com/IstiN/trackstate/releases/latest/download/install.ps1 -OutFile install.ps1; .\\install.ps1",
+    "command": "curl -fsSL https://github.com/__REPO_PLACEHOLDER__/releases/latest/download/install.sh | bash",
+    "commandWindows": "irm https://github.com/__REPO_PLACEHOLDER__/releases/latest/download/install.ps1 -OutFile install.ps1; .\\install.ps1",
     "shell": "bash",
-    "docs": "https://github.com/IstiN/trackstate/releases/latest"
+    "docs": "https://github.com/__REPO_PLACEHOLDER__/releases/latest"
   },
   "invocation": {
     "commandPath": "trackstate assistant claude",
@@ -81,7 +79,7 @@ const String trackStateClaudeAssistantManifest = r'''{
     "authSource": "TRACKSTATE_TOKEN environment variable or gh auth token",
     "target": "hosted",
     "provider": "github",
-    "repository": "owner/name"
+    "repository": "__REPO_PLACEHOLDER__"
   }
 }
 ''';
