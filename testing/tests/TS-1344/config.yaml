@@ -10,7 +10,6 @@ runtime_inputs:
   required_jobs:
     - build-linux
     - build-windows
-    - build-macos
   required_steps_by_job:
     build-linux:
       - Build Linux desktop app
@@ -42,5 +41,5 @@ runtime_inputs:
       - .zip
       - .tar.gz
 notes:
-  - Statically validates that Linux and Windows build jobs define the expected build/package/upload steps and artifact names.
-  - Does not perform actual compilation.
+  - Scope: static validation only. Verifies that the workflow YAML defines the expected Linux and Windows build jobs, steps, outputs, runners, and artifact name markers.
+  - Does not trigger the workflow, download archives, or verify executable contents.

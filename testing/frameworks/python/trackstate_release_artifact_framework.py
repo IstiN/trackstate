@@ -62,11 +62,13 @@ class PythonTrackStateReleaseArtifactFramework(TrackStateReleaseArtifactProbe):
                     f"{config.release_tag}."
                 ),
                 checksum_manifest_text=None,
+                release_body=None,
             )
 
         release_view_command, release_view_exit_code, release_view_stdout, release_view_stderr = (
             self._run_release_view(config.repository, selected_release.tag_name)
         )
+        release_body = self._fetch_release_body(config.repository, selected_release.id)
         checksum_manifest_text: str | None = None
 
         with tempfile.TemporaryDirectory(prefix="trackstate-ts708-") as temp_dir_name:
@@ -97,6 +99,7 @@ class PythonTrackStateReleaseArtifactFramework(TrackStateReleaseArtifactProbe):
             gh_release_view_stdout=release_view_stdout,
             gh_release_view_stderr=release_view_stderr,
             checksum_manifest_text=checksum_manifest_text,
+            release_body=release_body,
         )
 
     def _list_releases(
@@ -157,6 +160,28 @@ class PythonTrackStateReleaseArtifactFramework(TrackStateReleaseArtifactProbe):
         repository: str,
         release_id: int,
     ) -> list[dict[str, object]]:
+        payload = self._fetch_release_detail(repository, release_id)
+        assets = payload.get("assets")
+        if not isinstance(assets, list):
+            return []
+        return [asset for asset in assets if isinstance(asset, dict)]
+
+    def _fetch_release_body(
+        self,
+        repository: str,
+        release_id: int,
+    ) -> str | None:
+        payload = self._fetch_release_detail(repository, release_id)
+        body = payload.get("body")
+        if isinstance(body, str):
+            return body
+        return None
+
+    def _fetch_release_detail(
+        self,
+        repository: str,
+        release_id: int,
+    ) -> dict[str, object]:
         payload = json.loads(
             self._github_api_client.request_text(
                 endpoint=f"/repos/{repository}/releases/{release_id}"
@@ -164,10 +189,7 @@ class PythonTrackStateReleaseArtifactFramework(TrackStateReleaseArtifactProbe):
         )
         if not isinstance(payload, dict):
             raise RuntimeError(f"GitHub release detail for {release_id} was not an object.")
-        assets = payload.get("assets")
-        if not isinstance(assets, list):
-            return []
-        return [asset for asset in assets if isinstance(asset, dict)]
+        return payload
 
     def _run_release_view(
         self,

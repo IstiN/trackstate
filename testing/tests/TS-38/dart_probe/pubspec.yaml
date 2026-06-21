@@ -7,3 +7,5 @@ environment:
 dependencies:
   http:
     path: packages/http
+  meta:
+    path: packages/meta

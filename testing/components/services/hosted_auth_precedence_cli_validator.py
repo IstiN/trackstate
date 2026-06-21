@@ -35,6 +35,22 @@ class HostedAuthPrecedenceCliValidator:
                 explicit_invalid_token_session=None,
             )
 
+        project_json_ok, project_json_reason = (
+            self._probe.verify_hosted_repository_has_project_json(
+                config=config,
+                environment_token=environment_token,
+            )
+        )
+        if not project_json_ok:
+            raise AssertionError(
+                "Precondition failed: the configured hosted repository is not "
+                "initialized as a TrackState project. "
+                f"Repository: {config.repository}. "
+                f"Reason: {project_json_reason}\n"
+                "Set TS271_REPOSITORY to a hosted TrackState project that contains "
+                "project.json, or ensure the default repository is accessible."
+            )
+
         return HostedAuthPrecedenceCliValidationResult(
             token_resolution=token_resolution,
             environment_session=self._probe.hosted_session_with_environment_token(

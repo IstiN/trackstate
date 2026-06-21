@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 from typing import Any, Mapping, Sequence
@@ -11,6 +12,9 @@ from testing.core.interfaces.github_api_client import (
     GitHubApiClient,
     GitHubApiClientError,
 )
+
+
+_HTTP_STATUS_PATTERN = re.compile(r"HTTP\s+(\d{3})")
 
 
 class GhCliApiClient(GitHubApiClient):
@@ -47,11 +51,12 @@ class GhCliApiClient(GitHubApiClient):
             input=input_text,
         )
         if completed.returncode != 0:
-            raise GitHubApiClientError(
+            message = (
                 f"gh api {' '.join(command[2:])} failed with exit code "
                 f"{completed.returncode}.\nSTDOUT:\n{completed.stdout}\nSTDERR:\n"
                 f"{completed.stderr}"
             )
+            raise GitHubApiClientError(message, status_code=_extract_status_code(completed.stderr))
         return completed.stdout
 
 
@@ -66,3 +71,10 @@ def _resolve_gh_executable() -> str:
     if homebrew_candidate.exists():
         return str(homebrew_candidate)
     return "gh"
+
+
+def _extract_status_code(stderr: str) -> int | None:
+    match = _HTTP_STATUS_PATTERN.search(stderr)
+    if match:
+        return int(match.group(1))
+    return None

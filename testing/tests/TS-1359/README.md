@@ -1,12 +1,21 @@
 # TS-1359 — Windows PowerShell Install Script (install.ps1)
 
-Static validation of `scripts/install/install.ps1`.
+Functional test of `scripts/install/install.ps1`.
 
-The test verifies that the script:
+A local mock GitHub Release server provides a valid Windows archive. The patched
+installer runs under PowerShell (pwsh) in an isolated temporary environment and
+is redirected to the mock server. The test verifies:
 
-- Targets `%LOCALAPPDATA%\trackstate\bin` for the installed binary.
-- Updates the user-level (`User`) `Path` environment variable.
-- Extracts and copies `trackstate.exe`.
-- Does not request UAC elevation (`Start-Process`, `runAs`).
-
-Functional execution requires a Windows host; the runtime portion is skipped on non-Windows platforms.
+- The script targets `%LOCALAPPDATA%\trackstate\bin` for the installed binary.
+- The script updates the user-level (`User`) `Path` environment variable.
+- The script extracts and copies `trackstate.exe`.
+- The script does not request UAC elevation (`Start-Process`, `runAs`).
+- Running the installer succeeds and places `trackstate.exe` in the mocked
+  `%LOCALAPPDATA%\trackstate\bin`.
+- The install directory is appended to the user PATH exactly once.
+- Re-running the installer when the install directory is already on PATH does
+  not create duplicate PATH entries.
+- A pre-existing `trackstate.exe` elsewhere on PATH is detected and blocks the
+  install (currently missing in production).
+- Passing `-Force` allows the managed install to override a conflict (currently
+  missing in production).
