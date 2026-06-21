@@ -15,7 +15,7 @@ from testing.tests.support.release_workflow_static_validator_factory import (
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
-class InstallScriptAssetAvailabilityTest(unittest.TestCase):
+class InstallScriptAssetAvailabilityStaticTest(unittest.TestCase):
     def setUp(self) -> None:
         self.config = ReleaseWorkflowStaticConfig.from_file(
             REPO_ROOT / "testing" / "tests" / "TS-1357" / "config.yaml",
@@ -23,7 +23,7 @@ class InstallScriptAssetAvailabilityTest(unittest.TestCase):
         )
         self.validator = create_release_workflow_static_validator(REPO_ROOT)
 
-    def test_release_workflow_attaches_install_script_assets(self) -> None:
+    def test_install_script_source_files_exist_and_are_published_as_standalone_assets(self) -> None:
         observation = self.validator.validate(self.config)
         self._write_result_if_requested(observation.to_dict())
 
@@ -35,6 +35,15 @@ class InstallScriptAssetAvailabilityTest(unittest.TestCase):
             observation.failures,
             "Static validation failed:\n" + "\n".join(observation.failures),
         )
+
+        publish_release = observation.jobs.get("publish-release", {})
+        job_text = __import__("json").dumps(publish_release)
+        for asset in ("install.sh", "install.ps1", "install.cmd"):
+            self.assertIn(
+                asset,
+                job_text,
+                f"Publish-release job does not reference standalone asset '{asset}'",
+            )
 
     def _write_result_if_requested(self, payload: dict[str, object]) -> None:
         result_path = os.environ.get("TS1357_RESULT_PATH")

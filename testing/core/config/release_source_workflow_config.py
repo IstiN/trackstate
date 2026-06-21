@@ -16,11 +16,11 @@ class ReleaseSourceWorkflowConfig:
 
     @property
     def releases_api_endpoint(self) -> str:
-        return f"/repos/{self.repository}/releases?per_page=1"
+        return f"/repos/{self.repository}/releases?per_page=100"
 
     @property
     def tags_api_endpoint(self) -> str:
-        return f"/repos/{self.repository}/tags?per_page=1"
+        return f"/repos/{self.repository}/tags?per_page=100"
 
     @property
     def releases_page_url(self) -> str:

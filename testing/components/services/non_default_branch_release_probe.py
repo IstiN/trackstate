@@ -21,6 +21,9 @@ from testing.core.interfaces.non_default_branch_release_repository import (
     NonDefaultBranchReleaseRepositoryError,
 )
 from testing.core.interfaces.url_text_reader import UrlTextReader, UrlTextReaderError
+from testing.frameworks.python.github_environment_preflight import (
+    verify_github_environment,
+)
 
 
 class NonDefaultBranchReleaseProbeError(RuntimeError):
@@ -43,6 +46,11 @@ class NonDefaultBranchReleaseProbeService:
         self._tag_pattern = re.compile(self._config.semver_tag_pattern)
 
     def validate(self) -> NonDefaultBranchReleaseObservation:
+        # TS-1389: fail fast if the live GitHub environment is unavailable. This
+        # runs before any long-lived branch/PR/merge operations so the test can
+        # be skipped instead of hanging until the outer timeout fires.
+        verify_github_environment(self._config.repository)
+
         repository_info = self._read_json_object(f"/repos/{self._config.repository}")
         default_branch = self._optional_string(repository_info.get("default_branch"))
         if default_branch is None:

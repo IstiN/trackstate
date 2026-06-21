@@ -32,8 +32,33 @@ class TrackStateReleaseArtifactConfig:
     def release_page_url(self, tag_name: str) -> str:
         return f"https://github.com/{self.repository}/releases/tag/{tag_name}"
 
+    def with_release_tag(self, release_tag: str) -> "TrackStateReleaseArtifactConfig":
+        return TrackStateReleaseArtifactConfig(
+            repository=self.repository,
+            default_branch=self.default_branch,
+            release_tag=release_tag,
+            release_tag_pattern=self.release_tag_pattern,
+            expected_architecture_fragment=self.expected_architecture_fragment,
+            archive_extensions=self.archive_extensions,
+            checksum_extensions=self.checksum_extensions,
+            forbidden_extensions=self.forbidden_extensions,
+        )
+
     @classmethod
     def from_file(cls, path: Path) -> "TrackStateReleaseArtifactConfig":
+        return cls._from_file(path, require_release_tag=True)
+
+    @classmethod
+    def from_file_without_release_tag(cls, path: Path) -> "TrackStateReleaseArtifactConfig":
+        return cls._from_file(path, require_release_tag=False)
+
+    @classmethod
+    def _from_file(
+        cls,
+        path: Path,
+        *,
+        require_release_tag: bool,
+    ) -> "TrackStateReleaseArtifactConfig":
         payload = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         if not isinstance(payload, dict):
             raise ValueError(f"TS-708 config must deserialize to a mapping: {path}")
@@ -50,6 +75,13 @@ class TrackStateReleaseArtifactConfig:
             payload_key="release_tag_pattern",
             default=r"^v\d+\.\d+\.\d+$",
         )
+        release_tag = _read_release_tag(
+            runtime_inputs,
+            env_key="TS708_RELEASE_TAG",
+            payload_key="release_tag",
+            pattern=release_tag_pattern,
+            required=require_release_tag,
+        )
         return cls(
             repository=_read_string(
                 runtime_inputs,
@@ -63,12 +95,7 @@ class TrackStateReleaseArtifactConfig:
                 payload_key="default_branch",
                 default="main",
             ),
-            release_tag=_read_required_release_tag(
-                runtime_inputs,
-                env_key="TS708_RELEASE_TAG",
-                payload_key="release_tag",
-                pattern=release_tag_pattern,
-            ),
+            release_tag=release_tag,
             release_tag_pattern=release_tag_pattern,
             expected_architecture_fragment=_read_string(
                 runtime_inputs,
@@ -132,23 +159,26 @@ def _read_optional_string(
     return None
 
 
-def _read_required_release_tag(
+def _read_release_tag(
     payload: dict[str, Any],
     *,
     env_key: str,
     payload_key: str,
     pattern: str,
+    required: bool,
 ) -> str:
     compiled_pattern = re.compile(pattern)
     value = _read_optional_string(payload, env_key=env_key, payload_key=payload_key)
     if value is None:
         value = _read_release_tag_from_ci_metadata(compiled_pattern)
     if value is None:
-        raise ValueError(
-            "TS-708 requires an explicit release tag. Set TS708_RELEASE_TAG, add "
-            "runtime_inputs.release_tag to testing/tests/TS-708/config.yaml, or run in "
-            "GitHub Actions with CI metadata that resolves the version tag under test."
-        )
+        if required:
+            raise ValueError(
+                "TS-708 requires an explicit release tag. Set TS708_RELEASE_TAG, add "
+                "runtime_inputs.release_tag to testing/tests/TS-708/config.yaml, or run in "
+                "GitHub Actions with CI metadata that resolves the version tag under test."
+            )
+        return ""
     if compiled_pattern.fullmatch(value) is None:
         raise ValueError(
             "TS-708 release tag must match the configured semantic-version pattern.\n"
