@@ -60,7 +60,7 @@ class CrossPlatformArtifactGenerationStaticTest(unittest.TestCase):
     ) -> None:
         for job_name, expected_runner in (
             ("build-linux", "ubuntu-latest"),
-            ("build-windows", "windows-latest"),
+            ("build-windows", "windows-2022"),
         ):
             job = observation.jobs.get(job_name)
             if not isinstance(job, dict):
@@ -202,7 +202,7 @@ def _jira_pass_summary(observation: ReleaseWorkflowStaticObservation) -> str:
         "",
         "h2. What was tested",
         "* Statically verified that {{build-linux}} is defined to run on {{ubuntu-latest}} and declares artifact names {{TrackState-linux-x64-vX.Y.Z.tar.gz}} and {{trackstate-cli-linux-x64-vX.Y.Z.tar.gz}}.",
-        "* Statically verified that {{build-windows}} is defined to run on {{windows-latest}} and declares artifact names {{TrackState-windows-x64-vX.Y.Z.zip}} and {{trackstate-cli-windows-x64-vX.Y.Z.tar.gz}}.",
+        "* Statically verified that {{build-windows}} is defined to run on {{windows-2022}} and declares artifact names {{TrackState-windows-x64-vX.Y.Z.zip}} and {{trackstate-cli-windows-x64-vX.Y.Z.tar.gz}}.",
         "* Verified each job exposes {{desktop_archive}}, {{cli_archive}}, and {{artifact_name}} outputs.",
         "* Verified build, package, and upload steps use clear headings.",
         "* Verified upload steps set {{if-no-files-found: error}}.",
@@ -266,7 +266,7 @@ def _markdown_pass_summary(observation: ReleaseWorkflowStaticObservation) -> str
         "",
         "### What was automated",
         "- Statically verified `build-linux` is defined to run on `ubuntu-latest` and declares `TrackState-linux-x64-vX.Y.Z.tar.gz` plus `trackstate-cli-linux-x64-vX.Y.Z.tar.gz`.",
-        "- Statically verified `build-windows` is defined to run on `windows-latest` and declares `TrackState-windows-x64-vX.Y.Z.zip` plus `trackstate-cli-windows-x64-vX.Y.Z.tar.gz`.",
+        "- Statically verified `build-windows` is defined to run on `windows-2022` and declares `TrackState-windows-x64-vX.Y.Z.zip` plus `trackstate-cli-windows-x64-vX.Y.Z.tar.gz`.",
         "- Verified each job exposes `desktop_archive`, `cli_archive`, and `artifact_name` outputs.",
         "- Verified build, package, and upload steps use clear headings.",
         "- Verified upload steps set `if-no-files-found: error`.",
