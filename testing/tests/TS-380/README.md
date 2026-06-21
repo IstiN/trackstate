@@ -8,7 +8,7 @@ Functional test verifying that the `trackstate read fields` command returns a fl
 2. The `trackstate read fields` command is executed.
 3. The command exits with code 0 and returns valid JSON.
 4. The JSON payload is a flat array of field objects.
-5. Each field object contains the Jira-standard schema keys: `id`, `name`, `custom`, `orderable`, `navigable`, `searchable`, `clauseNames`, `schema`.
+5. Each field object contains the Jira-standard schema keys: `id`, `name`, `custom`, `orderable`, `navigable`, `searchable`, `schema`.
 6. The `schema` sub-object contains `type` and `system` keys.
 
 ## Run this test
