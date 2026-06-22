@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:args/args.dart';
 import 'package:http/http.dart' as http;
 
+import 'assistant_manifests.dart';
 import 'jira_compatibility_service.dart';
 import '../data/providers/github/github_trackstate_provider.dart';
 import '../data/providers/local/local_git_trackstate_provider.dart';
@@ -74,6 +75,9 @@ class TrackStateCli {
           defaultTargetType: TrackStateCliTargetType.local,
         ),
         'attachment' => await _runAttachment(
+          normalizedArguments.skip(1).toList(),
+        ),
+        'assistant' => await _runAssistant(
           normalizedArguments.skip(1).toList(),
         ),
         'jira_create_ticket_basic' => await _runJiraCreateTicketBasic(
