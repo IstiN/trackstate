@@ -29,6 +29,7 @@ class GhCliApiClient(GitHubApiClient):
         method: str = "GET",
         field_args: Sequence[str] | None = None,
         stdin_json: Mapping[str, Any] | None = None,
+        timeout_seconds: int = 60,
     ) -> str:
         command = [self._gh_executable, "api", "-X", method, endpoint]
         if field_args:
@@ -41,15 +42,23 @@ class GhCliApiClient(GitHubApiClient):
 
         environment = os.environ.copy()
         environment.setdefault("GH_PAGER", "cat")
-        completed = subprocess.run(
-            command,
-            cwd=self._repository_root,
-            env=environment,
-            check=False,
-            capture_output=True,
-            text=True,
-            input=input_text,
-        )
+        try:
+            completed = subprocess.run(
+                command,
+                cwd=self._repository_root,
+                env=environment,
+                check=False,
+                capture_output=True,
+                text=True,
+                input=input_text,
+                timeout=timeout_seconds,
+            )
+        except subprocess.TimeoutExpired as error:
+            message = (
+                f"gh api {' '.join(command[2:])} timed out after {timeout_seconds}s.\n"
+                f"STDOUT:\n{error.stdout or ''}\nSTDERR:\n{error.stderr or ''}"
+            )
+            raise GitHubApiClientError(message) from error
         if completed.returncode != 0:
             message = (
                 f"gh api {' '.join(command[2:])} failed with exit code "
