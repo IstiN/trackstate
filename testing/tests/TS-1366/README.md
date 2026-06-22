@@ -16,7 +16,7 @@ the compiled `trackstate` executable with the executable bit preserved.
    extra files are present.
 5. After extraction, the binary has read and execute permissions (the
    executable bit is preserved).
-6. As a real-user verification, the extracted binary is run with `--version`
+6. As a real-user verification, the extracted binary is run with `--help`
    when the host OS can execute the Linux x64 ELF binary.
 
 ## Run this test
