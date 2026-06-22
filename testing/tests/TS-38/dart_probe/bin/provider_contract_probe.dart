@@ -24,6 +24,20 @@ class FakeTrackStateProviderAdapter implements TrackStateProviderAdapter {
   }
 
   @override
+  Future<RepositorySyncCheck> checkSync({
+    RepositorySyncState? previousState,
+  }) async =>
+      RepositorySyncCheck(
+        state: RepositorySyncState(
+          providerType: providerType,
+          repositoryRevision: 'mock-revision',
+          sessionRevision: 'mock-revision',
+          connectionState: ProviderConnectionState.connected,
+          permission: await getPermission(),
+        ),
+      );
+
+  @override
   Future<RepositoryAttachment> readAttachment(
     String path, {
     required String ref,

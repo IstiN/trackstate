@@ -224,6 +224,7 @@ class GitHubPagesWorkflowProbe:
         return False
 
     def _wait_for_workflow_registration(self, repository: str) -> bool:
+        self._enable_actions(repository)
         deadline = time.time() + self._fork_registration_timeout_seconds
         while time.time() < deadline:
             workflows = self._gh_json(f"repos/{repository}/actions/workflows")
@@ -232,6 +233,13 @@ class GitHubPagesWorkflowProbe:
                     return True
             time.sleep(self._poll_interval_seconds)
         return False
+
+    def _enable_actions(self, repository: str) -> None:
+        self._gh_text(
+            f"repos/{repository}/actions/permissions",
+            method="PUT",
+            stdin_json={"enabled": True},
+        )
 
     def _ensure_pages_configuration(self, repository: str) -> dict[str, Any]:
         pages_endpoint = f"repos/{repository}/pages"

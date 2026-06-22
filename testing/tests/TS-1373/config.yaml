@@ -1,0 +1,11 @@
+test_id: TS-1373
+type: cli
+framework: unittest
+platform: python
+dependencies:
+  - Dart SDK available on PATH or via TRACKSTATE_DART_BIN
+  - git CLI available on PATH for seeding a disposable Local Git repository
+notes:
+  - "Executes `trackstate session --target local --path <temp-repo>` without `--output`."
+  - "Injects ambient GitHub CLI tokens (GH_TOKEN and GITHUB_TOKEN) into the runtime environment."
+  - "Verifies the JSON success envelope reports `authSource: 'none'` for the local target, regardless of the ambient tokens."

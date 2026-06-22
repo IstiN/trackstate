@@ -28,6 +28,6 @@ setup itself:
 
 Optional overrides:
 
-- `TS271_REPOSITORY` (default: `IstiN/trackstate`)
+- `TS271_REPOSITORY` (default: `IstiN/trackstate-setup`)
 - `TS271_PROVIDER` (default: `github`)
 - `TS271_INVALID_TOKEN` (default: `DIFFERENT_INVALID_TOKEN`)

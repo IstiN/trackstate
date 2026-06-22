@@ -676,6 +676,58 @@ extension _TrackStateCliCommands on TrackStateCli {
     }
   }
 
+  Future<TrackStateCliExecution> _runAssistant(
+    List<String> arguments,
+  ) async {
+    if (arguments.isEmpty || _isHelpInvocation(arguments)) {
+      return TrackStateCliExecution.success(
+        output: TrackStateCliOutput.text,
+        content: _assistantHelpText,
+      );
+    }
+
+    final assistantId = arguments.first.toLowerCase();
+    final manifest = switch (assistantId) {
+      'github' => trackStateGitHubAssistantManifest,
+      'claude' => trackStateClaudeAssistantManifest,
+      _ => null,
+    };
+    if (manifest == null) {
+      return _error(
+        _TrackStateCliException(
+          code: 'INVALID_ASSISTANT',
+          category: TrackStateCliErrorCategory.validation,
+          message:
+              'Unknown assistant "$assistantId". Supported assistants: github, claude.',
+          exitCode: 2,
+          details: <String, Object?>{'assistant': assistantId},
+        ),
+        targetType: TrackStateCliTargetType.local,
+        targetValue: _environment.resolvePath(_environment.workingDirectory),
+        provider: 'local-git',
+        output: TrackStateCliOutput.json,
+      );
+    }
+
+    final rest = arguments.skip(1).toList();
+    if (rest.isNotEmpty && !_isHelpInvocation(rest)) {
+      return run(rest);
+    }
+
+    final manifestJson = jsonDecode(manifest) as Map<String, Object?>;
+    return _success(
+      targetType: TrackStateCliTargetType.local,
+      targetValue: _environment.resolvePath(_environment.workingDirectory),
+      provider: 'local-git',
+      output: TrackStateCliOutput.json,
+      data: <String, Object?>{
+        'command': 'assistant',
+        'assistant': assistantId,
+        'manifest': manifestJson,
+      },
+    );
+  }
+
   Future<TrackStateCliExecution> _runExecuteRequest(
     List<String> arguments,
   ) async {
@@ -6419,6 +6471,31 @@ extension _TrackStateCliCommands on TrackStateCli {
     parser,
   );
 
+  String get _assistantHelpText => [
+    'trackstate assistant',
+    '',
+    'Assistant install surface for GitHub and Claude environments.',
+    '',
+    'The TrackState CLI is installed through the same release artifact as the base CLI.',
+    'Assistants reach it through a separate command namespace: trackstate assistant <assistant>.',
+    '',
+    'Usage:',
+    '  trackstate assistant <assistant> [command] [arguments]',
+    '',
+    'Assistants:',
+    '  github     GitHub Copilot, Actions, and Codespaces manifest.',
+    '  claude     Claude Code and Claude desktop project manifest.',
+    '',
+    'Examples:',
+    '  trackstate assistant github',
+    '  trackstate assistant github search --jql "project = DEMO"',
+    '  trackstate assistant claude',
+    '  trackstate assistant claude ticket create --summary "New story" --issue-type Story',
+    '',
+    'When a command is provided after the assistant name, it is run through the',
+    'standard TrackState CLI with the same target and output options.',
+  ].join('\n');
+
   String get _rootHelpText => [
     'trackstate',
     '',
@@ -6435,6 +6512,7 @@ extension _TrackStateCliCommands on TrackStateCli {
     '  ticket     Mutate tickets through the shared mutation service.',
     '  archive    Archive one issue from the current local repository by default.',
     '  attachment Upload or download one attachment.',
+    '  assistant  Assistant install surface for GitHub and Claude.',
     '  jira_execute_request',
     '             Execute a narrow Jira-compatible raw request.',
     '',
@@ -6453,6 +6531,7 @@ extension _TrackStateCliCommands on TrackStateCli {
     '  trackstate archive TRACK-1',
     '  trackstate attachment upload --target local --issue TRACK-1 --file ./design.png',
     '  trackstate attachment download --target hosted --provider github --repository owner/name --attachment-id TRACK/TRACK-1/attachments/design.png --out ./downloads/design.png',
+    '  trackstate assistant github',
     '  jira_execute_request --target local --method GET --request-path /rest/api/2/search --query jql=project%20%3D%20TRACK',
     '',
     'Use "trackstate <command> --help" for command-specific options.',

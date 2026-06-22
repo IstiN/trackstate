@@ -20,10 +20,12 @@ from testing.frameworks.python.trackstate_release_artifact_framework import (
 
 def create_trackstate_release_artifact_probe(
     repository_root: Path,
+    config: TrackStateReleaseArtifactConfig | None = None,
 ) -> TrackStateReleaseArtifactProbe:
-    config = TrackStateReleaseArtifactConfig.from_file(
-        repository_root / "testing/tests/TS-708/config.yaml"
-    )
+    if config is None:
+        config = TrackStateReleaseArtifactConfig.from_file(
+            repository_root / "testing/tests/TS-708/config.yaml"
+        )
     repository_service = LiveSetupRepositoryService(
         config=LiveSetupTestConfig(
             app_url=config.releases_page_url,
