@@ -1,0 +1,14 @@
+test_id: TS-1363
+type: install-script
+framework: unittest
+platform: windows-cmd
+dependencies:
+  - Python 3.12+
+  - pwsh (for cross-platform execution of the delegated PowerShell script)
+runtime_inputs:
+  install_cmd_path: scripts/install/install.cmd
+  install_ps1_path: scripts/install/install.ps1
+notes:
+  - Verifies that install.cmd exists, delegates to install.ps1, and handles fallback execution.
+  - The production script downloads install.ps1 from GitHub releases; the test patches the URL to a mock server.
+  - Cross-platform execution: on Linux, the test uses pwsh to validate the .cmd script logic.
