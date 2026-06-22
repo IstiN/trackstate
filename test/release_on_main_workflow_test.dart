@@ -415,11 +415,11 @@ void main() {
       expect(publishReleaseJob, contains(r'echo "| Windows | $DESKTOP_WINDOWS | $CLI_WINDOWS |"'));
       expect(
         publishReleaseJob,
-        contains('macOS assets are published by a separate job'),
+        contains(r'echo "| macOS | $DESKTOP_MACOS | $CLI_MACOS |"'),
       );
       expect(
         publishReleaseJob,
-        isNot(contains(r'echo "| macOS | $DESKTOP_MACOS | $CLI_MACOS |"')),
+        contains('macOS assets are published by a separate job'),
       );
     });
 
@@ -454,6 +454,15 @@ void main() {
       expect(publishReleaseJob, contains('### Windows'));
       // Guidance must be structured as headings, not only a blockquote.
       expect(publishReleaseJob, isNot(contains(r'echo "> **Security warning:**"')));
+    });
+
+    test('release notes include a macOS row in the compiled artifacts table', () {
+      expect(
+        publishReleaseJob,
+        contains(r'echo "| macOS | $DESKTOP_MACOS | $CLI_MACOS |"'),
+      );
+      expect(publishReleaseJob, contains('TrackState-macos-arm64'));
+      expect(publishReleaseJob, contains('trackstate-cli-macos-arm64'));
     });
 
     test('release notes state the macOS desktop build requires Apple Silicon', () {
@@ -503,6 +512,8 @@ void main() {
       expect(publishJob, contains('chmod +x'));
       expect(publishJob, contains('__REPO_PLACEHOLDER__'));
       expect(publishJob, contains('sed -i'));
+      expect(publishJob, contains(r'GITHUB_SKILL: trackstate-github.skill'));
+      expect(publishJob, contains(r'CLAUDE_SKILL: trackstate-claude.skill'));
     });
 
     test('uploads install scripts as release assets', () {

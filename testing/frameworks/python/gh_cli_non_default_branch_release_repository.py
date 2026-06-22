@@ -47,11 +47,9 @@ class GhCliNonDefaultBranchReleaseRepository(NonDefaultBranchReleaseRepository):
         # that use the repository directly (e.g. integration tests) should call
         # verify_github_environment() explicitly if needed.
         #
-        # WARNING: The _run_command helper below invokes `gh` and `git`
-        # subprocesses without an explicit timeout. The probe-level preflight is
-        # the only bounded-timeout gate; once it passes, repository-level
-        # commands are expected to succeed. If the environment degrades after
-        # the preflight (e.g. network partition), the test may hang.
+        # NOTE: _run_command uses an explicit per-command timeout so that
+        # transient network delays or interactive prompts fail fast instead of
+        # hanging the test. The timeout is taken from config.command_timeout_seconds.
         temp_repository_root = Path(tempfile.mkdtemp(prefix="ts252-"))
         target_branch_name, source_branch_name = self._unique_branch_names(config)
         pull_request_number: int | None = None
@@ -60,8 +58,13 @@ class GhCliNonDefaultBranchReleaseRepository(NonDefaultBranchReleaseRepository):
         target_branch_pushed = False
         merged_pull_request: NonDefaultBranchMergedPullRequest | None = None
 
+        command_timeout = config.command_timeout_seconds
         try:
-            self._run_command(["gh", "auth", "setup-git"], cwd=None)
+            self._run_command(
+                ["gh", "auth", "setup-git"],
+                cwd=None,
+                timeout=command_timeout,
+            )
             self._run_command(
                 [
                     "git",
@@ -71,28 +74,34 @@ class GhCliNonDefaultBranchReleaseRepository(NonDefaultBranchReleaseRepository):
                     str(temp_repository_root),
                 ],
                 cwd=None,
+                timeout=command_timeout,
             )
             self._run_command(
                 ["git", "checkout", "-b", target_branch_name, f"origin/{default_branch}"],
                 cwd=temp_repository_root,
+                timeout=command_timeout,
             )
             self._run_command(
                 ["git", "config", "user.name", "ai-teammate"],
                 cwd=temp_repository_root,
+                timeout=command_timeout,
             )
             self._run_command(
                 ["git", "config", "user.email", "agent.ai.native@gmail.com"],
                 cwd=temp_repository_root,
+                timeout=command_timeout,
             )
             self._run_command(
                 ["git", "push", "--set-upstream", "origin", target_branch_name],
                 cwd=temp_repository_root,
+                timeout=command_timeout,
             )
             target_branch_pushed = True
 
             self._run_command(
                 ["git", "checkout", "-b", source_branch_name, target_branch_name],
                 cwd=temp_repository_root,
+                timeout=command_timeout,
             )
 
             probe_file = temp_repository_root / config.probe_file_path
@@ -106,7 +115,11 @@ class GhCliNonDefaultBranchReleaseRepository(NonDefaultBranchReleaseRepository):
             with probe_file.open("a", encoding="utf-8") as stream:
                 stream.write(f"\n<!-- TS-252 probe {marker} -->\n")
 
-            self._run_command(["git", "add", config.probe_file_path], cwd=temp_repository_root)
+            self._run_command(
+                ["git", "add", config.probe_file_path],
+                cwd=temp_repository_root,
+                timeout=command_timeout,
+            )
             self._run_command(
                 [
                     "git",
@@ -115,10 +128,12 @@ class GhCliNonDefaultBranchReleaseRepository(NonDefaultBranchReleaseRepository):
                     "TS-252 probe: verify non-default branch merge does not release",
                 ],
                 cwd=temp_repository_root,
+                timeout=command_timeout,
             )
             self._run_command(
                 ["git", "push", "--set-upstream", "origin", source_branch_name],
                 cwd=temp_repository_root,
+                timeout=command_timeout,
             )
             source_branch_pushed = True
 
@@ -139,6 +154,7 @@ class GhCliNonDefaultBranchReleaseRepository(NonDefaultBranchReleaseRepository):
                     config.pull_request_body,
                 ],
                 cwd=temp_repository_root,
+                timeout=command_timeout,
             ).stdout.strip()
             pull_request_number = self._extract_pull_request_number(pull_request_url)
 
@@ -155,6 +171,7 @@ class GhCliNonDefaultBranchReleaseRepository(NonDefaultBranchReleaseRepository):
                     "--admin",
                 ],
                 cwd=temp_repository_root,
+                timeout=command_timeout,
             )
 
             merged_metadata = self._wait_for_merged_pull_request(
@@ -294,14 +311,23 @@ class GhCliNonDefaultBranchReleaseRepository(NonDefaultBranchReleaseRepository):
         self._run_command(["git", "push", "origin", "--delete", branch_name], cwd=cwd)
 
     def _branch_exists_on_origin(self, branch_name: str, *, cwd: Path) -> bool:
-        completed = subprocess.run(
-            ["git", "ls-remote", "--heads", "origin", branch_name],
-            cwd=cwd,
-            env=self._command_environment(),
-            check=False,
-            capture_output=True,
-            text=True,
-        )
+        try:
+            completed = subprocess.run(
+                ["git", "ls-remote", "--heads", "origin", branch_name],
+                cwd=cwd,
+                env=self._command_environment(),
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+        except subprocess.TimeoutExpired as error:
+            raise NonDefaultBranchReleaseRepositoryError(
+                "git ls-remote timed out while checking disposable branch cleanup.\n"
+                f"Branch: {branch_name}\n"
+                f"STDOUT:\n{error.stdout or ''}\n"
+                f"STDERR:\n{error.stderr or ''}"
+            ) from error
         if completed.returncode != 0:
             raise NonDefaultBranchReleaseRepositoryError(
                 "git ls-remote failed while checking disposable branch cleanup.\n"
@@ -369,15 +395,24 @@ class GhCliNonDefaultBranchReleaseRepository(NonDefaultBranchReleaseRepository):
         command: list[str],
         *,
         cwd: Path | None,
+        timeout: int | None = 180,
     ) -> subprocess.CompletedProcess[str]:
-        completed = subprocess.run(
-            command,
-            cwd=cwd or self._repository_root,
-            env=self._command_environment(),
-            check=False,
-            capture_output=True,
-            text=True,
-        )
+        try:
+            completed = subprocess.run(
+                command,
+                cwd=cwd or self._repository_root,
+                env=self._command_environment(),
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired as error:
+            command_text = " ".join(command)
+            raise NonDefaultBranchReleaseRepositoryError(
+                f"{command_text} timed out after {timeout}s.\n"
+                f"STDOUT:\n{error.stdout or ''}\nSTDERR:\n{error.stderr or ''}"
+            ) from error
         if completed.returncode != 0:
             command_text = " ".join(command)
             raise NonDefaultBranchReleaseRepositoryError(
