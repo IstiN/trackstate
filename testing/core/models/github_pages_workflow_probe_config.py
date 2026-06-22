@@ -13,6 +13,7 @@ class GitHubPagesWorkflowProbeConfig:
     workflow_file: str
     workflow_ref: str
     trackstate_ref: str
+    allowed_actions: str = "all"
 
     @classmethod
     def from_file(cls, path: Path) -> "GitHubPagesWorkflowProbeConfig":
@@ -35,7 +36,23 @@ class GitHubPagesWorkflowProbeConfig:
             workflow_file=cls._require_string(runtime_inputs, "workflow_file", path),
             workflow_ref=cls._require_string(runtime_inputs, "workflow_ref", path),
             trackstate_ref=cls._require_string(runtime_inputs, "trackstate_ref", path),
+            allowed_actions=cls._optional_string(
+                runtime_inputs, "allowed_actions", "all"
+            ),
         )
+
+    @staticmethod
+    def _optional_string(
+        payload: dict[str, Any],
+        key: str,
+        default: str,
+    ) -> str:
+        value = payload.get(key)
+        if value is None:
+            return default
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"TS-69 config runtime_inputs.{key} must be a non-empty string in config.")
+        return value.strip()
 
     def requested_repository_for(self, authenticated_login: str) -> str:
         login = authenticated_login.strip()
