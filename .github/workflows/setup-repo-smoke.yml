@@ -1,0 +1,65 @@
+name: Setup repo smoke validation
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 9 * * *'
+  workflow_run:
+    workflows: ['Sync Setup Pages']
+    types: [completed]
+
+concurrency:
+  group: setup-repo-smoke
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Validate setup repo Pages deploy and CLI workflow
+    if: >-
+      github.event_name != 'workflow_run' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+          token: ${{ secrets.PAT_TOKEN || github.token }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: 'package.json'
+          cache: npm
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Install Chromium for Playwright
+        run: npx playwright install --with-deps chromium
+
+      - name: Run setup repo smoke validation
+        env:
+          TRACKSTATE_TOKEN: ${{ secrets.PAT_TOKEN }}
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
+          TRACKSTATE_LIVE_APP_URL: ${{ vars.TRACKSTATE_LIVE_APP_URL }}
+          TRACKSTATE_LIVE_SETUP_REPOSITORY: ${{ vars.TRACKSTATE_LIVE_SETUP_REPOSITORY }}
+          TRACKSTATE_LIVE_SETUP_REF: ${{ vars.TRACKSTATE_LIVE_SETUP_REF }}
+        run: python testing/scripts/run_setup_repo_smoke.py
+
+      - name: Upload smoke result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: setup-repo-smoke-result
+          path: outputs/setup_repo_smoke_result.json
