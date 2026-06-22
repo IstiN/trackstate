@@ -22,5 +22,5 @@ notes:
   - Downloads the CLI archive from the selected GitHub release and inspects it with the Python tarfile module.
   - Checks that the archive contains exactly one regular file named `trackstate` and no directories or metadata files.
   - Verifies the executable bit is preserved after extraction (owner/group/other read and execute bits).
-  - Attempts to run the extracted binary with `--version` as a real-user sanity check when the host OS can execute it.
+  - Attempts to run the extracted binary with `--help` as a real-user sanity check when the host OS can execute it.
   - Reports blocked_by_human when no published release exposes a matching Linux x64 CLI archive.
