@@ -1067,9 +1067,9 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _CatalogSummaryRow(
-          title: l10n.issueTypes,
+          title: l10n.statuses,
           names: [
-            for (final entry in settings.issueTypeDefinitions) entry.name,
+            for (final entry in settings.statusDefinitions) entry.name,
           ],
         ),
         const SizedBox(height: 12),
@@ -1081,16 +1081,16 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
         ),
         const SizedBox(height: 12),
         _CatalogSummaryRow(
-          title: l10n.fields,
+          title: l10n.issueTypes,
           names: [
-            for (final entry in settings.fieldDefinitions) entry.name,
+            for (final entry in settings.issueTypeDefinitions) entry.name,
           ],
         ),
         const SizedBox(height: 12),
         _CatalogSummaryRow(
-          title: l10n.statuses,
+          title: l10n.fields,
           names: [
-            for (final entry in settings.statusDefinitions) entry.name,
+            for (final entry in settings.fieldDefinitions) entry.name,
           ],
         ),
       ],
@@ -1312,7 +1312,6 @@ class _CatalogSummaryRow extends StatelessWidget {
   Widget build(BuildContext context) {
     return Text(
       '$title: ${names.join(', ')}',
-      semanticsLabel: '${title.toLowerCase()} catalog entries: ${names.join(', ')}',
       style: Theme.of(context).textTheme.bodyMedium,
     );
   }
