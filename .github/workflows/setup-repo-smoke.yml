@@ -52,9 +52,6 @@ jobs:
           TRACKSTATE_TOKEN: ${{ secrets.PAT_TOKEN }}
           GH_TOKEN: ${{ secrets.PAT_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
-          TRACKSTATE_LIVE_APP_URL: ${{ vars.TRACKSTATE_LIVE_APP_URL }}
-          TRACKSTATE_LIVE_SETUP_REPOSITORY: ${{ vars.TRACKSTATE_LIVE_SETUP_REPOSITORY }}
-          TRACKSTATE_LIVE_SETUP_REF: ${{ vars.TRACKSTATE_LIVE_SETUP_REF }}
         run: python testing/scripts/run_setup_repo_smoke.py
 
       - name: Upload smoke result
