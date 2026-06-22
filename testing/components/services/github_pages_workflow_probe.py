@@ -50,6 +50,7 @@ class GitHubPagesWorkflowProbe:
         github_api_client: GitHubApiClient,
         url_text_reader: UrlTextReader,
         fork_registration_timeout_seconds: int = 300,
+        workflow_registration_timeout_seconds: int = 600,
         run_timeout_seconds: int = 480,
         pages_timeout_seconds: int = 180,
         poll_interval_seconds: int = 5,
@@ -58,6 +59,9 @@ class GitHubPagesWorkflowProbe:
         self._github_api_client = github_api_client
         self._url_text_reader = url_text_reader
         self._fork_registration_timeout_seconds = fork_registration_timeout_seconds
+        self._workflow_registration_timeout_seconds = (
+            workflow_registration_timeout_seconds
+        )
         self._run_timeout_seconds = run_timeout_seconds
         self._pages_timeout_seconds = pages_timeout_seconds
         self._poll_interval_seconds = poll_interval_seconds
@@ -171,8 +175,8 @@ class GitHubPagesWorkflowProbe:
                 "TS-69 requires validating the requested fork, but GitHub did not "
                 f"register {self._config.workflow_file} for {requested_repository} "
                 "within "
-                f"{self._fork_registration_timeout_seconds} seconds. The probe does "
-                f"not fall back to {upstream_repository}."
+                f"{self._workflow_registration_timeout_seconds} seconds. The probe "
+                f"does not fall back to {upstream_repository}."
             )
 
         return requested_repository
@@ -225,20 +229,26 @@ class GitHubPagesWorkflowProbe:
 
     def _wait_for_workflow_registration(self, repository: str) -> bool:
         self._enable_actions(repository)
-        deadline = time.time() + self._fork_registration_timeout_seconds
+        deadline = time.time() + self._workflow_registration_timeout_seconds
+        poll_interval = self._poll_interval_seconds
         while time.time() < deadline:
             workflows = self._gh_json(f"repos/{repository}/actions/workflows")
             for workflow in workflows.get("workflows", []):
                 if workflow.get("path", "").endswith(self._config.workflow_file):
                     return True
-            time.sleep(self._poll_interval_seconds)
+            time.sleep(poll_interval)
+            if poll_interval > 0:
+                poll_interval = min(poll_interval * 2, 60)
         return False
 
     def _enable_actions(self, repository: str) -> None:
         self._gh_text(
             f"repos/{repository}/actions/permissions",
             method="PUT",
-            stdin_json={"enabled": True},
+            stdin_json={
+                "enabled": True,
+                "allowed_actions": "all",
+            },
         )
 
     def _ensure_pages_configuration(self, repository: str) -> dict[str, Any]:
