@@ -1,0 +1,15 @@
+test_id: TS-1402
+type: api
+framework: unittest
+platform: python
+dependencies:
+  - Compiled TrackState CLI at bin/trackstate_cli
+  - GitHub token with read/write access to the configured setup repository
+runtime_inputs:
+  setup_repository: "${TRACKSTATE_LIVE_SETUP_REPOSITORY:-IstiN/trackstate-setup}"
+  setup_ref: "${TRACKSTATE_LIVE_SETUP_REF:-main}"
+  project: DEMO
+  issue_type: Story
+notes:
+  - Creates a temporary issue, transitions it, searches for it, then deletes it.
+  - Requires a hosted GitHub setup repository with DEMO project data.

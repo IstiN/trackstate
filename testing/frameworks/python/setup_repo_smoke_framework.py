@@ -58,7 +58,7 @@ class SetupRepoSmokeFramework(SetupRepoSmokeProbe):
     def run(self) -> SetupRepoSmokeResult:
         errors: list[str] = []
 
-        variables = self._validate_runtime_variables()
+        variables = self.validate_runtime_variables()
         token_available = any(v.present for v in variables)
         if not token_available:
             errors.append(
@@ -66,11 +66,11 @@ class SetupRepoSmokeFramework(SetupRepoSmokeProbe):
                 f"{', '.join(self._config.auth_token_variables)} must be set."
             )
 
-        pages_health = self._probe_pages_health()
+        pages_health = self.probe_pages_health()
         if pages_health and pages_health.error:
             errors.append(f"Pages health probe failed: {pages_health.error}")
 
-        pages_interactive = self._measure_pages_time_to_interactive()
+        pages_interactive = self.measure_pages_time_to_interactive()
         if pages_interactive and pages_interactive.error:
             errors.append(f"Pages interactive probe failed: {pages_interactive.error}")
 
@@ -83,12 +83,12 @@ class SetupRepoSmokeFramework(SetupRepoSmokeProbe):
             )
         else:
             try:
-                cli_smoke = self._run_cli_smoke()
+                cli_smoke = self.run_cli_smoke()
             except Exception as error:  # pragma: no cover - defensive catch
                 errors.append(f"CLI smoke failed: {error}")
 
             try:
-                cli_benchmark = self._run_cli_benchmark()
+                cli_benchmark = self.run_cli_benchmark()
             except Exception as error:  # pragma: no cover - defensive catch
                 errors.append(f"CLI benchmark failed: {error}")
 
@@ -101,7 +101,7 @@ class SetupRepoSmokeFramework(SetupRepoSmokeProbe):
             errors=errors,
         )
 
-    def _validate_runtime_variables(self) -> tuple[RuntimeVariableObservation, ...]:
+    def validate_runtime_variables(self) -> tuple[RuntimeVariableObservation, ...]:
         return tuple(
             RuntimeVariableObservation(
                 name=name,
@@ -110,7 +110,7 @@ class SetupRepoSmokeFramework(SetupRepoSmokeProbe):
             for name in self._config.auth_token_variables
         )
 
-    def _probe_pages_health(self) -> PagesHealthObservation:
+    def probe_pages_health(self) -> PagesHealthObservation:
         url = self._config.app_url
         try:
             request = urllib_request.Request(url, method="GET")
@@ -171,7 +171,7 @@ class SetupRepoSmokeFramework(SetupRepoSmokeProbe):
             expected_base_href=self._config.expected_base_href,
         )
 
-    def _measure_pages_time_to_interactive(self) -> PagesInteractiveObservation:
+    def measure_pages_time_to_interactive(self) -> PagesInteractiveObservation:
         url = self._config.app_url
         if sync_playwright is None:
             return PagesInteractiveObservation(
@@ -259,7 +259,7 @@ class SetupRepoSmokeFramework(SetupRepoSmokeProbe):
                 error=str(error),
             )
 
-    def _run_cli_smoke(self) -> CliSmokeObservation:
+    def run_cli_smoke(self) -> CliSmokeObservation:
         session = self._run_cli_command(
             [
                 "session",
@@ -299,25 +299,30 @@ class SetupRepoSmokeFramework(SetupRepoSmokeProbe):
 
         created_key = self._extract_issue_key(create)
 
+        # The DEMO Story workflow (delivery-workflow) requires sequential transitions:
+        # todo -> in-progress -> in-review -> done.
         transition: CliCommandObservation | None = None
         if created_key:
-            transition = self._run_cli_command(
-                [
-                    "jira_move_to_status",
-                    "--target",
-                    "hosted",
-                    "--provider",
-                    "github",
-                    "--repository",
-                    self._config.repository,
-                    "--branch",
-                    self._config.ref,
-                    "--issueKey",
-                    created_key,
-                    "--status",
-                    "Done",
-                ]
-            )
+            for status in ("In Progress", "In Review", "Done"):
+                transition = self._run_cli_command(
+                    [
+                        "jira_move_to_status",
+                        "--target",
+                        "hosted",
+                        "--provider",
+                        "github",
+                        "--repository",
+                        self._config.repository,
+                        "--branch",
+                        self._config.ref,
+                        "--issueKey",
+                        created_key,
+                        "--status",
+                        status,
+                    ]
+                )
+                if not transition.succeeded:
+                    break
 
         search = self._run_cli_command(
             [
@@ -338,23 +343,9 @@ class SetupRepoSmokeFramework(SetupRepoSmokeProbe):
         cleanup: CliCommandObservation | None = None
         delete: CliCommandObservation | None = None
         if created_key:
-            cleanup = self._run_cli_command(
-                [
-                    "jira_move_to_status",
-                    "--target",
-                    "hosted",
-                    "--provider",
-                    "github",
-                    "--repository",
-                    self._config.repository,
-                    "--branch",
-                    self._config.ref,
-                    "--issueKey",
-                    created_key,
-                    "--status",
-                    "Done",
-                ]
-            )
+            # The issue was already walked through the workflow above; no extra
+            # cleanup transition is needed before deletion.
+            cleanup = None
             delete = self._delete_issue(created_key)
 
         return CliSmokeObservation(
@@ -369,6 +360,7 @@ class SetupRepoSmokeFramework(SetupRepoSmokeProbe):
     def _delete_issue(self, issue_key: str) -> CliCommandObservation:
         return self._run_cli_command(
             [
+                "ticket",
                 "delete",
                 "--target",
                 "hosted",
@@ -378,12 +370,12 @@ class SetupRepoSmokeFramework(SetupRepoSmokeProbe):
                 self._config.repository,
                 "--branch",
                 self._config.ref,
-                "--issueKey",
+                "--key",
                 issue_key,
             ]
         )
 
-    def _run_cli_benchmark(self) -> CliBenchmarkObservation:
+    def run_cli_benchmark(self) -> CliBenchmarkObservation:
         from concurrent.futures import as_completed
 
         config = self._config
@@ -604,29 +596,31 @@ def _benchmark_worker(
             )
         )
 
-        observations.append(
-            framework._run_cli_command(
-                [
-                    "jira_move_to_status",
-                    "--target",
-                    "hosted",
-                    "--provider",
-                    "github",
-                    "--repository",
-                    repository,
-                    "--branch",
-                    ref,
-                    "--issueKey",
-                    created_key,
-                    "--status",
-                    "Done",
-                ]
+        for status in ("In Progress", "In Review", "Done"):
+            observations.append(
+                framework._run_cli_command(
+                    [
+                        "jira_move_to_status",
+                        "--target",
+                        "hosted",
+                        "--provider",
+                        "github",
+                        "--repository",
+                        repository,
+                        "--branch",
+                        ref,
+                        "--issueKey",
+                        created_key,
+                        "--status",
+                        status,
+                    ]
+                )
             )
-        )
 
         observations.append(
             framework._run_cli_command(
                 [
+                    "ticket",
                     "delete",
                     "--target",
                     "hosted",
@@ -636,7 +630,7 @@ def _benchmark_worker(
                     repository,
                     "--branch",
                     ref,
-                    "--issueKey",
+                    "--key",
                     created_key,
                 ]
             )
