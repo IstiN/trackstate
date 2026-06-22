@@ -74,6 +74,24 @@ install.cmd
 
 The installer places the `trackstate` binary in a user-local directory and updates your PATH. No administrator privileges are required.
 
+## Assistant install surface
+
+Each release also publishes machine-readable assistant manifests for GitHub and Claude environments. Install the CLI through the same command as above, then use the separate assistant command path:
+
+```bash
+trackstate assistant github
+trackstate assistant claude
+```
+
+Or download the matching `.skill` release asset directly:
+
+| Assistant | Release asset | Invocation |
+|---|---|---|
+| GitHub | `trackstate-github.skill` | `trackstate assistant github` |
+| Claude | `trackstate-claude.skill` | `trackstate assistant claude` |
+
+The assistant namespace uses the same installed binary as the base CLI; it only changes the invocation path. Run `trackstate assistant --help` for details.
+
 ## GitHub artifacts
 
 `.github/workflows/unit-tests.yml` runs Flutter required checks on pull requests. `.github/workflows/flutter-ci.yml` builds the GitHub Pages web app, uploads the `trackstate-web` artifact, and deploys Pages from `main`.
