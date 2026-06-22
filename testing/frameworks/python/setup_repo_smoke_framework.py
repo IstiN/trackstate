@@ -194,47 +194,54 @@ class SetupRepoSmokeFramework(SetupRepoSmokeProbe):
                         "--disable-backgrounding-occluded-windows",
                     ]
                 )
-                context = browser.new_context(
-                    viewport={"width": 1440, "height": 900}
-                )
-                page = context.new_page()
-
-                for _ in range(self._config.page_interactive_warmup_runs):
-                    page.goto(url, wait_until="domcontentloaded", timeout=120_000)
-                    page.wait_for_timeout(500)
-
-                response = page.goto(
-                    url, wait_until="domcontentloaded", timeout=120_000
-                )
-                if response is None:
-                    return PagesInteractiveObservation(
-                        url=url,
-                        elapsed_seconds=0.0,
-                        budget_seconds=budget,
-                        labels_found=(),
-                        error="No HTTP response received from the Pages URL.",
+                try:
+                    context = browser.new_context(
+                        viewport={"width": 1440, "height": 900}
                     )
+                    try:
+                        page = context.new_page()
+                        try:
+                            for _ in range(self._config.page_interactive_warmup_runs):
+                                page.goto(url, wait_until="domcontentloaded", timeout=120_000)
+                                page.wait_for_timeout(500)
 
-                started_at = time.monotonic()
-                page.wait_for_function(
-                    """
-                    (labels) => {
-                        const bodyText = document.body?.innerText ?? '';
-                        return labels.every((label) => bodyText.includes(label));
-                    }
-                    """,
-                    arg=list(labels),
-                    timeout=60_000,
-                )
-                elapsed = time.monotonic() - started_at
+                            started_at = time.monotonic()
+                            response = page.goto(
+                                url, wait_until="domcontentloaded", timeout=120_000
+                            )
+                            if response is None:
+                                return PagesInteractiveObservation(
+                                    url=url,
+                                    elapsed_seconds=0.0,
+                                    budget_seconds=budget,
+                                    labels_found=(),
+                                    error="No HTTP response received from the Pages URL.",
+                                )
 
-                browser.close()
-                return PagesInteractiveObservation(
-                    url=url,
-                    elapsed_seconds=elapsed,
-                    budget_seconds=budget,
-                    labels_found=labels,
-                )
+                            page.wait_for_function(
+                                """
+                                (labels) => {
+                                    const bodyText = document.body?.innerText ?? '';
+                                    return labels.every((label) => bodyText.includes(label));
+                                }
+                                """,
+                                arg=list(labels),
+                                timeout=60_000,
+                            )
+                            elapsed = time.monotonic() - started_at
+
+                            return PagesInteractiveObservation(
+                                url=url,
+                                elapsed_seconds=elapsed,
+                                budget_seconds=budget,
+                                labels_found=labels,
+                            )
+                        finally:
+                            page.close()
+                    finally:
+                        context.close()
+                finally:
+                    browser.close()
         except PlaywrightTimeoutError as error:
             return PagesInteractiveObservation(
                 url=url,
@@ -329,6 +336,7 @@ class SetupRepoSmokeFramework(SetupRepoSmokeProbe):
         )
 
         cleanup: CliCommandObservation | None = None
+        delete: CliCommandObservation | None = None
         if created_key:
             cleanup = self._run_cli_command(
                 [
@@ -347,6 +355,7 @@ class SetupRepoSmokeFramework(SetupRepoSmokeProbe):
                     "Done",
                 ]
             )
+            delete = self._delete_issue(created_key)
 
         return CliSmokeObservation(
             session=session,
@@ -354,6 +363,24 @@ class SetupRepoSmokeFramework(SetupRepoSmokeProbe):
             transition=transition,
             search=search,
             cleanup=cleanup,
+            delete=delete,
+        )
+
+    def _delete_issue(self, issue_key: str) -> CliCommandObservation:
+        return self._run_cli_command(
+            [
+                "delete",
+                "--target",
+                "hosted",
+                "--provider",
+                "github",
+                "--repository",
+                self._config.repository,
+                "--branch",
+                self._config.ref,
+                "--issueKey",
+                issue_key,
+            ]
         )
 
     def _run_cli_benchmark(self) -> CliBenchmarkObservation:
@@ -371,6 +398,7 @@ class SetupRepoSmokeFramework(SetupRepoSmokeProbe):
                     config.repository,
                     config.ref,
                     command_timeout,
+                    self._cli_runner,
                 ): worker_index
                 for worker_index in range(concurrency)
             }
@@ -400,6 +428,7 @@ class SetupRepoSmokeFramework(SetupRepoSmokeProbe):
             max_seconds=max_latency,
             budget_seconds=config.benchmark_command_budget_seconds,
             max_budget_seconds=config.benchmark_command_max_seconds,
+            min_success_rate=config.benchmark_min_success_rate,
             errors=errors,
         )
 
@@ -435,16 +464,14 @@ class SetupRepoSmokeFramework(SetupRepoSmokeProbe):
             error=completed.stderr.strip() if completed.returncode != 0 else None,
         )
 
-    def _resolve_cli_executable(self) -> Path:
+    @staticmethod
+    def _resolve_cli_executable() -> Path:
         repo_root = Path(__file__).resolve().parents[3]
         prebuilt = repo_root / "bin" / "trackstate_cli"
         if prebuilt.is_file():
             return prebuilt
-        source = repo_root / "bin" / "trackstate.dart"
-        if source.is_file():
-            return source
         raise FileNotFoundError(
-            "TrackState CLI executable not found. Expected bin/trackstate_cli or bin/trackstate.dart."
+            "TrackState CLI executable not found. Expected bin/trackstate_cli."
         )
 
     @staticmethod
@@ -490,6 +517,7 @@ def _benchmark_worker(
     repository: str,
     ref: str,
     command_timeout: float,
+    cli_runner: CliRunner | None = None,
 ) -> list[CliCommandObservation]:
     from testing.frameworks.python.setup_repo_smoke_framework import (
         SetupRepoSmokeFramework,
@@ -499,7 +527,7 @@ def _benchmark_worker(
         app_url="",
         repository=repository,
         ref=ref,
-        required_variables=(),
+        auth_token_variables=(),
         expected_title="",
         expected_base_href="",
         shell_navigation_labels=(),
@@ -511,7 +539,7 @@ def _benchmark_worker(
         benchmark_command_max_seconds=0.0,
         benchmark_min_success_rate=0.0,
     )
-    framework = SetupRepoSmokeFramework(config)
+    framework = SetupRepoSmokeFramework(config, cli_runner=cli_runner)
     summary = f"TS-24 benchmark worker {worker_index} {time.strftime('%Y%m%d-%H%M%S')}"
 
     observations: list[CliCommandObservation] = []
@@ -592,6 +620,24 @@ def _benchmark_worker(
                     created_key,
                     "--status",
                     "Done",
+                ]
+            )
+        )
+
+        observations.append(
+            framework._run_cli_command(
+                [
+                    "delete",
+                    "--target",
+                    "hosted",
+                    "--provider",
+                    "github",
+                    "--repository",
+                    repository,
+                    "--branch",
+                    ref,
+                    "--issueKey",
+                    created_key,
                 ]
             )
         )

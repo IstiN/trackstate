@@ -244,6 +244,8 @@ class SetupRepoSmokeFrameworkTest(unittest.TestCase):
             calls.append(arguments)
             if arguments[0] == "create":
                 return self._success_create("DEMO-1000")
+            if arguments[0] == "delete":
+                return self._success_command("delete")
             return self._success_command(arguments[0])
 
         framework = self._make_framework(cli_runner=fake_runner)
@@ -254,10 +256,12 @@ class SetupRepoSmokeFrameworkTest(unittest.TestCase):
         self.assertTrue(smoke.transition.succeeded)
         self.assertTrue(smoke.search.succeeded)
         self.assertTrue(smoke.cleanup.succeeded)
+        self.assertTrue(smoke.delete.succeeded)
         self.assertIn("session", [c[0] for c in calls])
         self.assertIn("create", [c[0] for c in calls])
         self.assertIn("jira_move_to_status", [c[0] for c in calls])
         self.assertIn("search", [c[0] for c in calls])
+        self.assertIn("delete", [c[0] for c in calls])
 
     def test_cli_smoke_create_failure_skips_transition(self) -> None:
         def fake_runner(arguments: list[str]) -> CliCommandObservation:
@@ -276,6 +280,7 @@ class SetupRepoSmokeFrameworkTest(unittest.TestCase):
         self.assertFalse(smoke.all_succeeded)
         self.assertIsNone(smoke.transition)
         self.assertIsNone(smoke.cleanup)
+        self.assertIsNone(smoke.delete)
 
     def test_extract_issue_key_from_json(self) -> None:
         stdout = json.dumps(
@@ -331,6 +336,11 @@ class SetupRepoSmokeFrameworkTest(unittest.TestCase):
                 elapsed_seconds=0.8,
             ),
             CliCommandObservation(
+                command=("trackstate", "delete"),
+                exit_code=0,
+                elapsed_seconds=0.3,
+            ),
+            CliCommandObservation(
                 command=("trackstate", "search"),
                 exit_code=0,
                 elapsed_seconds=0.5,
@@ -342,7 +352,7 @@ class SetupRepoSmokeFrameworkTest(unittest.TestCase):
 
         self.assertTrue(benchmark.passed)
         self.assertEqual(benchmark.concurrency, 2)
-        self.assertEqual(benchmark.total_commands, 10)
+        self.assertEqual(benchmark.total_commands, 12)
         self.assertEqual(benchmark.failed_commands, 0)
         self.assertEqual(benchmark.p95_seconds, 0.8)
         self.assertEqual(benchmark.max_seconds, 0.8)
@@ -364,6 +374,26 @@ class SetupRepoSmokeFrameworkTest(unittest.TestCase):
                 elapsed_seconds=0.1,
                 error="create failed",
             ),
+            CliCommandObservation(
+                command=("trackstate", "read"),
+                exit_code=0,
+                elapsed_seconds=0.3,
+            ),
+            CliCommandObservation(
+                command=("trackstate", "jira_move_to_status"),
+                exit_code=0,
+                elapsed_seconds=0.3,
+            ),
+            CliCommandObservation(
+                command=("trackstate", "delete"),
+                exit_code=0,
+                elapsed_seconds=0.2,
+            ),
+            CliCommandObservation(
+                command=("trackstate", "search"),
+                exit_code=0,
+                elapsed_seconds=0.3,
+            ),
         ]
 
         framework = self._make_framework()
@@ -371,6 +401,43 @@ class SetupRepoSmokeFrameworkTest(unittest.TestCase):
 
         self.assertFalse(benchmark.passed)
         self.assertEqual(benchmark.failed_commands, 2)
+
+    def test_real_benchmark_worker_with_fake_cli_runner(self) -> None:
+        """Exercise the real _benchmark_worker to catch config/field mismatches."""
+
+        def fake_cli_runner(arguments: list[str]) -> CliCommandObservation:
+            if arguments[0] == "create":
+                return CliCommandObservation(
+                    command=("trackstate", "create"),
+                    exit_code=0,
+                    elapsed_seconds=0.5,
+                    issue_key="DEMO-42",
+                )
+            return CliCommandObservation(
+                command=tuple(arguments),
+                exit_code=0,
+                elapsed_seconds=0.3,
+            )
+
+        observations = _benchmark_worker(
+            worker_index=0,
+            repository="owner/repo",
+            ref="main",
+            command_timeout=30.0,
+            cli_runner=fake_cli_runner,
+        )
+
+        self.assertEqual(len(observations), 6)
+        self.assertTrue(all(o.succeeded for o in observations))
+        # Check that all expected CLI commands were issued
+        first_args = [o.command[0] for o in observations]
+        self.assertIn("session", first_args)
+        self.assertIn("search", first_args)
+        # create observation has command=("trackstate", "create") so command[1] is "create"
+        self.assertEqual(observations[1].command[1], "create")
+        self.assertEqual(observations[1].issue_key, "DEMO-42")
+        # delete observation has command=("delete", "--target", ...) so command[0] is "delete"
+        self.assertEqual(observations[4].command[0], "delete")
 
     @mock.patch("testing.frameworks.python.setup_repo_smoke_framework.urllib_request.urlopen")
     def test_run_reports_missing_auth_token(self, mock_urlopen: mock.Mock) -> None:

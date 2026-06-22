@@ -73,12 +73,13 @@ class CliSmokeObservation:
     transition: CliCommandObservation | None = None
     search: CliCommandObservation | None = None
     cleanup: CliCommandObservation | None = None
+    delete: CliCommandObservation | None = None
 
     @property
     def all_succeeded(self) -> bool:
         return all(
             observation is not None and observation.succeeded
-            for observation in (self.session, self.create, self.transition, self.search)
+            for observation in (self.session, self.create, self.transition, self.search, self.cleanup, self.delete)
         )
 
 
@@ -92,14 +93,21 @@ class CliBenchmarkObservation:
     max_seconds: float
     budget_seconds: float
     max_budget_seconds: float
+    min_success_rate: float = 1.0
     errors: list[str] = field(default_factory=list)
 
     @property
     def passed(self) -> bool:
+        success_rate = (
+            self.successful_commands / self.total_commands
+            if self.total_commands > 0
+            else 0.0
+        )
         return (
             self.failed_commands == 0
             and self.p95_seconds <= self.budget_seconds
             and self.max_seconds <= self.max_budget_seconds
+            and success_rate >= self.min_success_rate
         )
 
 
@@ -183,6 +191,7 @@ def _cli_smoke_dict(observation: CliSmokeObservation | None) -> dict[str, Any] |
         "transition": _cli_command_dict(observation.transition),
         "search": _cli_command_dict(observation.search),
         "cleanup": _cli_command_dict(observation.cleanup),
+        "delete": _cli_command_dict(observation.delete),
         "all_succeeded": observation.all_succeeded,
     }
 

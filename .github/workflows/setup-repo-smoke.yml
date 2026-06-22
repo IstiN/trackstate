@@ -35,9 +35,6 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install Python dependencies
-        run: pip install pyyaml
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
