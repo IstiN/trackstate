@@ -1,0 +1,9 @@
+test_id: TS-1394
+type: cli
+framework: unittest
+platform: python
+dependencies:
+  - Dart SDK available on PATH or via TRACKSTATE_DART_BIN
+notes:
+  - Verifies that commands placed after the assistant name are routed through the standard TrackState CLI.
+  - Uses a disposable local Git repository seeded with a minimal TrackState project so the routed command can execute without network access.
