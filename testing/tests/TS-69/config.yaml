@@ -10,3 +10,7 @@ runtime_inputs:
   workflow_file: install-update-trackstate.yml
   workflow_ref: main
   trackstate_ref: main
+  # The probe widens the fork's Actions permissions so the workflow can register.
+  # Override to a more restrictive policy (e.g. "local_only") if the test account
+  # is subject to enterprise/org-level Actions restrictions.
+  allowed_actions: all

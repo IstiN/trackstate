@@ -230,15 +230,14 @@ class GitHubPagesWorkflowProbe:
     def _wait_for_workflow_registration(self, repository: str) -> bool:
         self._enable_actions(repository)
         deadline = time.time() + self._workflow_registration_timeout_seconds
-        poll_interval = self._poll_interval_seconds
+        poll_interval = max(self._poll_interval_seconds, 1)
         while time.time() < deadline:
             workflows = self._gh_json(f"repos/{repository}/actions/workflows")
             for workflow in workflows.get("workflows", []):
                 if workflow.get("path", "").endswith(self._config.workflow_file):
                     return True
             time.sleep(poll_interval)
-            if poll_interval > 0:
-                poll_interval = min(poll_interval * 2, 60)
+            poll_interval = min(poll_interval * 2, 60)
         return False
 
     def _enable_actions(self, repository: str) -> None:
@@ -247,7 +246,7 @@ class GitHubPagesWorkflowProbe:
             method="PUT",
             stdin_json={
                 "enabled": True,
-                "allowed_actions": "all",
+                "allowed_actions": self._config.allowed_actions,
             },
         )
 

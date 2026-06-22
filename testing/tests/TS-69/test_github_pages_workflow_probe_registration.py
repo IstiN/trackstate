@@ -13,6 +13,12 @@ from testing.core.models.github_pages_workflow_probe_config import (
 )
 
 
+CLOCK_START = 1000.0
+REGISTRATION_DELAY = 350.0
+REGISTRATION_TIME = CLOCK_START + REGISTRATION_DELAY
+EXTENDED_TIMEOUT = 600
+
+
 class _UnusedGitHubApiClient:
     def request_text(self, **_: object) -> str:
         raise AssertionError(
@@ -103,7 +109,7 @@ class _UnregisteredWorkflowProbe(_WorkflowRegistrationProbe):
 
 
 class _MockClock:
-    def __init__(self, start: float = 1000.0) -> None:
+    def __init__(self, start: float = CLOCK_START) -> None:
         self.now = start
 
     def time(self) -> float:
@@ -159,9 +165,9 @@ class _SlowWorkflowRegistrationProbe(GitHubPagesWorkflowProbe):
     ) -> dict[str, object]:
         del method, field_args, stdin_json
         if endpoint == "repos/ai-teammate/trackstate-setup/actions/workflows":
-            # Register after 350 simulated seconds, which is past the original
-            # 300-second timeout but within the extended 600-second window.
-            if time.time() >= 1350.0:
+            # Register after REGISTRATION_DELAY simulated seconds, which is past
+            # the original 300-second timeout but within the extended window.
+            if time.time() >= REGISTRATION_TIME:
                 return {
                     "workflows": [
                         {
@@ -204,7 +210,7 @@ class GitHubPagesWorkflowProbeRegistrationTest(unittest.TestCase):
         """
         clock = _MockClock()
         probe = _SlowWorkflowRegistrationProbe(
-            workflow_registration_timeout_seconds=600,
+            workflow_registration_timeout_seconds=EXTENDED_TIMEOUT,
         )
 
         with mock.patch("time.time", clock.time), mock.patch(
@@ -215,13 +221,13 @@ class GitHubPagesWorkflowProbeRegistrationTest(unittest.TestCase):
         self.assertEqual(selected_repository, "ai-teammate/trackstate-setup")
         self.assertGreaterEqual(
             clock.now,
-            1000.0 + 350.0,
-            "The probe should have polled until the workflow registered."
+            REGISTRATION_TIME,
+            "The probe should have polled until the workflow registered.",
         )
         self.assertLess(
             clock.now,
-            1000.0 + 600.0,
-            "The probe should not have hit the extended timeout."
+            CLOCK_START + EXTENDED_TIMEOUT,
+            "The probe should not have hit the extended timeout.",
         )
 
 
