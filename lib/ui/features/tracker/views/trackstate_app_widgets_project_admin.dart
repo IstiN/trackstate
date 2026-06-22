@@ -1059,6 +1059,44 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
     );
   }
 
+  Widget _buildCatalogSummary(
+    AppLocalizations l10n,
+    ProjectSettingsCatalog settings,
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _CatalogSummaryRow(
+          title: l10n.statuses,
+          names: [
+            for (final entry in settings.statusDefinitions) entry.name,
+          ],
+        ),
+        const SizedBox(height: 12),
+        _CatalogSummaryRow(
+          title: l10n.workflows,
+          names: [
+            for (final entry in settings.workflowDefinitions) entry.name,
+          ],
+        ),
+        const SizedBox(height: 12),
+        _CatalogSummaryRow(
+          title: l10n.issueTypes,
+          names: [
+            for (final entry in settings.issueTypeDefinitions) entry.name,
+          ],
+        ),
+        const SizedBox(height: 12),
+        _CatalogSummaryRow(
+          title: l10n.fields,
+          names: [
+            for (final entry in settings.fieldDefinitions) entry.name,
+          ],
+        ),
+      ],
+    );
+  }
+
   Widget _orderedSettingsAction({
     required Widget child,
     required ProjectSettingsTab activeTab,
@@ -1252,9 +1290,29 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
             tabBar,
             const SizedBox(height: 16),
             content,
+            const SizedBox(height: 16),
+            _buildCatalogSummary(l10n, settings),
           ],
         ),
       ),
+    );
+  }
+}
+
+class _CatalogSummaryRow extends StatelessWidget {
+  const _CatalogSummaryRow({
+    required this.title,
+    required this.names,
+  });
+
+  final String title;
+  final List<String> names;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      '$title: ${names.join(', ')}',
+      style: Theme.of(context).textTheme.bodyMedium,
     );
   }
 }
