@@ -49,11 +49,22 @@ class _FakePlaywrightPage:
     def wait_for_timeout(self, ms: int) -> None:
         pass
 
-    def wait_for_function(self, expression: str, *, arg: object, timeout: int) -> None:
+    def wait_for_selector(self, selector: str, *, state: str, timeout: int) -> object:
+        return _FakeResponse()
+
+    def locator(self, selector: str) -> "_FakeLocator":
+        return _FakeLocator()
+
+    def wait_for_function(self, expression: str, *, arg: object = None, timeout: int = 0) -> None:
         if not self._labels_present:
             raise smoke_module.PlaywrightTimeoutError("missing labels")
 
     def close(self) -> None:
+        pass
+
+
+class _FakeLocator:
+    def evaluate(self, expression: str) -> None:
         pass
 
 
@@ -180,7 +191,7 @@ class SetupRepoSmokeFrameworkTest(unittest.TestCase):
         mock_urlopen.return_value = _FakeUrlopenResponse(200, html.encode("utf-8"))
 
         framework = self._make_framework()
-        health = framework._probe_pages_health()
+        health = framework.probe_pages_health()
 
         self.assertTrue(health.healthy)
         self.assertEqual(health.status_code, 200)
@@ -199,7 +210,7 @@ class SetupRepoSmokeFrameworkTest(unittest.TestCase):
         )
 
         framework = self._make_framework()
-        health = framework._probe_pages_health()
+        health = framework.probe_pages_health()
 
         self.assertFalse(health.healthy)
         self.assertEqual(health.status_code, 500)
@@ -211,7 +222,7 @@ class SetupRepoSmokeFrameworkTest(unittest.TestCase):
 
         with mock.patch.object(smoke_module, "sync_playwright", lambda: fake_manager):
             framework = self._make_framework()
-            observation = framework._measure_pages_time_to_interactive()
+            observation = framework.measure_pages_time_to_interactive()
 
         self.assertTrue(observation.within_budget)
         self.assertEqual(observation.labels_found, ("Dashboard", "Board"))
@@ -221,7 +232,7 @@ class SetupRepoSmokeFrameworkTest(unittest.TestCase):
     def test_pages_interactive_missing_playwright_returns_error(self) -> None:
         with mock.patch.object(smoke_module, "sync_playwright", None):
             framework = self._make_framework()
-            observation = framework._measure_pages_time_to_interactive()
+            observation = framework.measure_pages_time_to_interactive()
 
         self.assertIsNotNone(observation.error)
         self.assertIn("Playwright is not installed", observation.error)
@@ -232,7 +243,7 @@ class SetupRepoSmokeFrameworkTest(unittest.TestCase):
 
         with mock.patch.object(smoke_module, "sync_playwright", lambda: fake_manager):
             framework = self._make_framework()
-            observation = framework._measure_pages_time_to_interactive()
+            observation = framework.measure_pages_time_to_interactive()
 
         self.assertIsNotNone(observation.error)
         self.assertIn("Timed out", observation.error)
@@ -244,12 +255,12 @@ class SetupRepoSmokeFrameworkTest(unittest.TestCase):
             calls.append(arguments)
             if arguments[0] == "create":
                 return self._success_create("DEMO-1000")
-            if arguments[0] == "delete":
-                return self._success_command("delete")
+            if arguments[0] == "ticket" and arguments[1] == "delete":
+                return self._success_command("ticket_delete")
             return self._success_command(arguments[0])
 
         framework = self._make_framework(cli_runner=fake_runner)
-        smoke = framework._run_cli_smoke()
+        smoke = framework.run_cli_smoke()
 
         self.assertTrue(smoke.all_succeeded)
         self.assertEqual(smoke.create.issue_key, "DEMO-1000")
@@ -261,7 +272,7 @@ class SetupRepoSmokeFrameworkTest(unittest.TestCase):
         self.assertIn("create", [c[0] for c in calls])
         self.assertIn("jira_move_to_status", [c[0] for c in calls])
         self.assertIn("search", [c[0] for c in calls])
-        self.assertIn("delete", [c[0] for c in calls])
+        self.assertIn("ticket", [c[0] for c in calls])
 
     def test_cli_smoke_create_failure_skips_transition(self) -> None:
         def fake_runner(arguments: list[str]) -> CliCommandObservation:
@@ -275,7 +286,7 @@ class SetupRepoSmokeFrameworkTest(unittest.TestCase):
             return self._success_command(arguments[0])
 
         framework = self._make_framework(cli_runner=fake_runner)
-        smoke = framework._run_cli_smoke()
+        smoke = framework.run_cli_smoke()
 
         self.assertFalse(smoke.all_succeeded)
         self.assertIsNone(smoke.transition)
@@ -348,7 +359,7 @@ class SetupRepoSmokeFrameworkTest(unittest.TestCase):
         ]
 
         framework = self._make_framework()
-        benchmark = framework._run_cli_benchmark()
+        benchmark = framework.run_cli_benchmark()
 
         self.assertTrue(benchmark.passed)
         self.assertEqual(benchmark.concurrency, 2)
@@ -397,7 +408,7 @@ class SetupRepoSmokeFrameworkTest(unittest.TestCase):
         ]
 
         framework = self._make_framework()
-        benchmark = framework._run_cli_benchmark()
+        benchmark = framework.run_cli_benchmark()
 
         self.assertFalse(benchmark.passed)
         self.assertEqual(benchmark.failed_commands, 2)
@@ -427,7 +438,7 @@ class SetupRepoSmokeFrameworkTest(unittest.TestCase):
             cli_runner=fake_cli_runner,
         )
 
-        self.assertEqual(len(observations), 6)
+        self.assertEqual(len(observations), 8)
         self.assertTrue(all(o.succeeded for o in observations))
         # Check that all expected CLI commands were issued
         first_args = [o.command[0] for o in observations]
@@ -436,8 +447,9 @@ class SetupRepoSmokeFrameworkTest(unittest.TestCase):
         # create observation has command=("trackstate", "create") so command[1] is "create"
         self.assertEqual(observations[1].command[1], "create")
         self.assertEqual(observations[1].issue_key, "DEMO-42")
-        # delete observation has command=("delete", "--target", ...) so command[0] is "delete"
-        self.assertEqual(observations[4].command[0], "delete")
+        # delete observation uses `ticket delete ...`, so command[0] is "ticket" and command[1] is "delete"
+        self.assertEqual(observations[6].command[0], "ticket")
+        self.assertEqual(observations[6].command[1], "delete")
 
     @mock.patch("testing.frameworks.python.setup_repo_smoke_framework.urllib_request.urlopen")
     def test_run_reports_missing_auth_token(self, mock_urlopen: mock.Mock) -> None:

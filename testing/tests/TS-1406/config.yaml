@@ -1,0 +1,14 @@
+test_id: TS-1406
+type: web
+framework: unittest
+platform: python
+dependencies:
+  - Playwright Chromium runtime
+  - @axe-core/playwright
+  - Deployed TrackState.AI Pages URL
+runtime_inputs:
+  app_url: "${TRACKSTATE_LIVE_APP_URL:-https://istin.github.io/trackstate-setup/}"
+  expected_title: TrackState.AI
+notes:
+  - Loads the Pages URL, enables Flutter semantics, and runs an accessibility scan.
+  - Color-contrast and focusable-element rules are verified.

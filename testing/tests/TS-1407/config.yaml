@@ -1,0 +1,23 @@
+test_id: TS-1407
+type: api
+framework: unittest
+platform: python
+dependencies:
+  - GitHub CLI authenticated with read access to the setup repository
+  - Local checkout of the trackstate-setup submodule
+runtime_inputs:
+  setup_repository: "${TRACKSTATE_LIVE_SETUP_REPOSITORY:-IstiN/trackstate-setup}"
+  setup_ref: "${TRACKSTATE_LIVE_SETUP_REF:-main}"
+  expected_paths:
+    - DEMO/project.json
+    - DEMO/config/fields.json
+    - DEMO/config/statuses.json
+    - DEMO/config/issue-types.json
+    - DEMO/config/workflows.json
+    - DEMO/config/priorities.json
+    - DEMO/config/components.json
+    - DEMO/config/versions.json
+    - .github/workflows/install-update-trackstate.yml
+notes:
+  - Compares the remote default-branch tree against the expected template paths.
+  - Also verifies the local trackstate-setup submodule contains the same required files.

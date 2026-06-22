@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:trackstate/data/repositories/trackstate_repository.dart';
 
 http.Client createHostedSetupClient() {
   return MockClient((request) async {
@@ -36,17 +37,22 @@ const _treeResponse = {
   ],
 };
 
+// These keys must match the default hosted setup repository
+// (SetupTrackStateRepository.repositoryName) because the UI probe relies on
+// the mock returning content for the repo the app starts against.
+const _repository = SetupTrackStateRepository.repositoryName;
+
 const _contentResponses = {
-  '/repos/trackstate/trackstate/contents/DEMO/project.json':
+  '/repos/$_repository/contents/DEMO/project.json':
       '{"key":"DEMO","name":"Demo Project"}',
-  '/repos/trackstate/trackstate/contents/DEMO/config/statuses.json':
+  '/repos/$_repository/contents/DEMO/config/statuses.json':
       '[{"name":"To Do"},{"name":"In Progress"},{"name":"Done"}]',
-  '/repos/trackstate/trackstate/contents/DEMO/config/issue-types.json':
+  '/repos/$_repository/contents/DEMO/config/issue-types.json':
       '[{"name":"Epic"},{"name":"Story"}]',
-  '/repos/trackstate/trackstate/contents/DEMO/config/fields.json':
+  '/repos/$_repository/contents/DEMO/config/fields.json':
       '[{"name":"Summary"},{"name":"Priority"}]',
-  '/repos/trackstate/trackstate/contents/DEMO/DEMO-1/main.md':
+  '/repos/$_repository/contents/DEMO/DEMO-1/main.md':
       '---\nkey: DEMO-1\nproject: DEMO\nissueType: Story\nstatus: In Progress\npriority: High\nsummary: Hosted runtime sample issue\nassignee: demo-user\nreporter: demo-admin\nlabels:\n  - hosted\ncomponents:\n  - web\nparent: null\nepic: null\nupdated: 2026-05-05T00:00:00Z\n---\n\n# Description\n\nLoaded through the hosted setup repository.\n',
-  '/repos/trackstate/trackstate/contents/DEMO/DEMO-1/acceptance_criteria.md':
+  '/repos/$_repository/contents/DEMO/DEMO-1/acceptance_criteria.md':
       '- Verify GitHub runtime startup.\n- Keep Local Git disabled by default.\n',
 };

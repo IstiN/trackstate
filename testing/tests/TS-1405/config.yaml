@@ -1,0 +1,13 @@
+test_id: TS-1405
+type: api
+framework: unittest
+platform: python
+dependencies:
+  - testing.frameworks.python.setup_repo_smoke_framework
+  - testing.scripts.run_setup_repo_smoke (optional CI entry point)
+runtime_inputs:
+  setup_repository: "${TRACKSTATE_LIVE_SETUP_REPOSITORY:-IstiN/trackstate-setup}"
+  setup_ref: "${TRACKSTATE_LIVE_SETUP_REF:-main}"
+notes:
+  - The smoke result dictionary must include pages_interactive.elapsed_seconds.
+  - The result dictionary must include cli_benchmark.p95_seconds and max_seconds.

@@ -1,0 +1,15 @@
+test_id: TS-1401
+type: api
+framework: unittest
+platform: python
+dependencies:
+  - Python 3 standard library
+  - testing.frameworks.python.setup_repo_smoke_framework
+runtime_inputs:
+  auth_token_variables:
+    - TRACKSTATE_TOKEN
+    - GH_TOKEN
+    - GITHUB_TOKEN
+  notes:
+    - Reads token presence from the process environment.
+    - Missing tokens cause the pre-flight check to fail cleanly.
