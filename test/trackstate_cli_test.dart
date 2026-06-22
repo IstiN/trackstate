@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
+import 'package:trackstate/cli/assistant_manifests.dart';
 import 'package:trackstate/cli/trackstate_cli.dart';
 import 'package:trackstate/data/providers/local/local_git_trackstate_provider.dart';
 import 'package:trackstate/data/providers/trackstate_provider.dart';
@@ -3161,6 +3162,135 @@ void main() {
         expect(localProvider.resolveWriteBranchCalled, isFalse);
       },
     );
+
+    group('assistant', () {
+      test('mentions assistant in root help', () async {
+        final cli = TrackStateCli();
+
+        final result = await cli.run(const <String>['--help']);
+
+        expect(result.exitCode, 0);
+        expect(result.stdout, contains('assistant'));
+        expect(result.stdout, contains('trackstate assistant github'));
+      });
+
+      test('prints assistant help', () async {
+        final cli = TrackStateCli();
+
+        final result = await cli.run(const <String>['assistant', '--help']);
+
+        expect(result.exitCode, 0);
+        expect(result.stdout, contains('trackstate assistant'));
+        expect(result.stdout, contains('github'));
+        expect(result.stdout, contains('claude'));
+      });
+
+      test('returns github assistant manifest', () async {
+        final cli = TrackStateCli();
+
+        final result = await cli.run(const <String>['assistant', 'github']);
+        final json = jsonDecode(result.stdout) as Map<String, Object?>;
+        final data = json['data']! as Map<String, Object?>;
+        final manifest = data['manifest']! as Map<String, Object?>;
+
+        expect(result.exitCode, 0);
+        expect(json['ok'], isTrue);
+        expect(data['assistant'], 'github');
+        expect(manifest['id'], 'trackstate-github');
+        expect(manifest['assistant'], 'github');
+        expect(
+          (manifest['invocation']! as Map<String, Object?>)['commandPath'],
+          'trackstate assistant github',
+        );
+      });
+
+      test('returns claude assistant manifest', () async {
+        final cli = TrackStateCli();
+
+        final result = await cli.run(const <String>['assistant', 'claude']);
+        final json = jsonDecode(result.stdout) as Map<String, Object?>;
+        final data = json['data']! as Map<String, Object?>;
+        final manifest = data['manifest']! as Map<String, Object?>;
+
+        expect(result.exitCode, 0);
+        expect(json['ok'], isTrue);
+        expect(data['assistant'], 'claude');
+        expect(manifest['id'], 'trackstate-claude');
+        expect(manifest['assistant'], 'claude');
+      });
+
+      test('rejects unknown assistants', () async {
+        final cli = TrackStateCli();
+
+        final result = await cli.run(const <String>[
+          'assistant',
+          'unknown',
+        ]);
+        final json = jsonDecode(result.stdout) as Map<String, Object?>;
+        final error = json['error']! as Map<String, Object?>;
+
+        expect(result.exitCode, 2);
+        expect(json['ok'], isFalse);
+        expect(error['code'], 'INVALID_ASSISTANT');
+        expect(error['category'], 'validation');
+      });
+
+      test('proxies commands through the assistant namespace', () async {
+        final cli = TrackStateCli(
+          environment: const TrackStateCliEnvironment(
+            workingDirectory: '/workspace/repo',
+          ),
+          providerFactory: _FakeTrackStateCliProviderFactory(
+            localProvider: _FakeLocalGitTrackStateProvider(
+              repositoryPath: '/workspace/repo',
+              branch: 'main',
+              user: const RepositoryUser(
+                login: 'local@example.com',
+                displayName: 'Local User',
+              ),
+              permission: const RepositoryPermission(
+                canRead: true,
+                canWrite: false,
+                isAdmin: false,
+              ),
+            ),
+          ),
+          repositoryFactory: _FakeTrackStateCliRepositoryFactory(
+            localRepository: _FakeSearchRepository(snapshot: _sampleSnapshot()),
+          ),
+        );
+
+        final result = await cli.run(const <String>[
+          'assistant',
+          'github',
+          'session',
+          '--target',
+          'local',
+        ]);
+        final json = jsonDecode(result.stdout) as Map<String, Object?>;
+        final data = json['data']! as Map<String, Object?>;
+
+        expect(result.exitCode, 0);
+        expect(json['ok'], isTrue);
+        expect(data['branch'], 'main');
+      });
+
+      test('embeds manifests that match release asset files', () async {
+        final githubFile = File('assets/assistant/trackstate-github.skill');
+        final claudeFile = File('assets/assistant/trackstate-claude.skill');
+
+        expect(githubFile.existsSync(), isTrue);
+        expect(claudeFile.existsSync(), isTrue);
+        expect(
+          jsonDecode(githubFile.readAsStringSync()) as Map<String, Object?>,
+          jsonDecode(trackStateGitHubAssistantManifest) as Map<String, Object?>,
+        );
+        expect(
+          jsonDecode(claudeFile.readAsStringSync()) as Map<String, Object?>,
+          jsonDecode(trackStateClaudeAssistantManifest) as Map<String, Object?>,
+        );
+      });
+    });
   });
 }
 
