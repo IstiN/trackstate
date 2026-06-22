@@ -1,4 +1,4 @@
-# TS-1392 — CLI Assistant Subcommand
+# TS-1393 — CLI Assistant Subcommand
 
 Verifies namespace discovery and session-less invocation of the TrackState CLI assistant subcommand.
 

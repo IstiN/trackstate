@@ -1,37 +1,12 @@
 from __future__ import annotations
 
 import json
-import os
-import shutil
 import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-
-
-def _find_dart_bin() -> str:
-    return os.environ.get("TRACKSTATE_DART_BIN") or shutil.which("dart") or "dart"
-
-
-def _run_cli(
-    args: list[str],
-    cwd: Path | None = None,
-) -> subprocess.CompletedProcess[str]:
-    dart_bin = _find_dart_bin()
-    command = [dart_bin, "run", "trackstate", *args]
-    env = os.environ.copy()
-    env.setdefault("CI", "true")
-    env.setdefault("PUB_CACHE", str(Path.home() / ".pub-cache"))
-    return subprocess.run(
-        command,
-        cwd=cwd or REPO_ROOT,
-        env=env,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+from testing.tests.support.trackstate_cli_runner import run_trackstate_cli
 
 
 def _write_file(path: Path, content: str) -> None:
@@ -142,7 +117,7 @@ class AssistantSubcommandRoutingTest(unittest.TestCase):
             project_dir = Path(tmpdir_str)
             _seed_local_project(project_dir)
 
-            result = _run_cli(
+            result = run_trackstate_cli(
                 [
                     "assistant",
                     "github",
@@ -182,7 +157,7 @@ class AssistantSubcommandRoutingTest(unittest.TestCase):
             project_dir = Path(tmpdir_str)
             _seed_local_project(project_dir)
 
-            result = _run_cli(
+            result = run_trackstate_cli(
                 [
                     "assistant",
                     "claude",

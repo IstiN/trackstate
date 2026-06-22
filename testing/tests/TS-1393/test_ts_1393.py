@@ -1,38 +1,14 @@
 from __future__ import annotations
 
 import json
-import os
-import shutil
-import subprocess
 import unittest
-from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-
-
-def _find_dart_bin() -> str:
-    return os.environ.get("TRACKSTATE_DART_BIN") or shutil.which("dart") or "dart"
-
-
-def _run_cli(args: list[str]) -> subprocess.CompletedProcess[str]:
-    dart_bin = _find_dart_bin()
-    command = [dart_bin, "run", "trackstate", *args]
-    env = os.environ.copy()
-    env.setdefault("CI", "true")
-    env.setdefault("PUB_CACHE", str(Path.home() / ".pub-cache"))
-    return subprocess.run(
-        command,
-        cwd=REPO_ROOT,
-        env=env,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+from testing.tests.support.trackstate_cli_runner import run_trackstate_cli
 
 
 class CliAssistantSubcommandTest(unittest.TestCase):
     def test_assistant_help_documents_github_and_claude(self) -> None:
-        result = _run_cli(["assistant", "--help"])
+        result = run_trackstate_cli(["assistant", "--help"])
         output = result.stdout + result.stderr
         self.assertEqual(
             result.returncode,
@@ -52,7 +28,7 @@ class CliAssistantSubcommandTest(unittest.TestCase):
             )
 
     def test_assistant_github_returns_manifest_json(self) -> None:
-        result = _run_cli(["assistant", "github"])
+        result = run_trackstate_cli(["assistant", "github"])
         self.assertEqual(
             result.returncode,
             0,
@@ -71,7 +47,7 @@ class CliAssistantSubcommandTest(unittest.TestCase):
         )
 
     def test_assistant_claude_returns_manifest_json(self) -> None:
-        result = _run_cli(["assistant", "claude"])
+        result = run_trackstate_cli(["assistant", "claude"])
         self.assertEqual(
             result.returncode,
             0,
@@ -90,7 +66,7 @@ class CliAssistantSubcommandTest(unittest.TestCase):
         )
 
     def test_assistant_unknown_fails_with_validation_error(self) -> None:
-        result = _run_cli(["assistant", "unknown"])
+        result = run_trackstate_cli(["assistant", "unknown"])
         self.assertNotEqual(
             result.returncode,
             0,
