@@ -242,7 +242,7 @@ void main() {
       expect(workflow, isNot(contains('[self-hosted, macOS, trackstate-release, ARM64]')));
     });
 
-    test('env-backs macOS archive names in legacy release notes fallback', () {
+    test('env-backs macOS archive names in the compiled artifacts table', () {
       final publishStep = workflow.substring(
         workflow.indexOf('Publish release assets'),
       );
@@ -257,17 +257,60 @@ void main() {
       );
       expect(
         publishStep,
-        contains(r'"| macOS | $DESKTOP_MACOS | $CLI_MACOS |"'),
+        isNot(
+          contains(r'DESKTOP_LINUX: TrackState-linux-x64-${{ needs.resolve-release.outputs.release_tag }}.tar.gz'),
+        ),
       );
       expect(
         publishStep,
         isNot(
-          contains(
-            r'| macOS | ${{ needs.build-macos.outputs.desktop_archive }} | ${{ needs.build-macos.outputs.cli_archive }} |',
-          ),
+          contains(r'CLI_LINUX: trackstate-cli-linux-x64-${{ needs.resolve-release.outputs.release_tag }}.tar.gz'),
+        ),
+      );
+      expect(
+        publishStep,
+        isNot(
+          contains(r'DESKTOP_WINDOWS: TrackState-windows-x64-${{ needs.resolve-release.outputs.release_tag }}.zip'),
+        ),
+      );
+      expect(
+        publishStep,
+        isNot(
+          contains(r'CLI_WINDOWS: trackstate-cli-windows-x64-${{ needs.resolve-release.outputs.release_tag }}.tar.gz'),
         ),
       );
     });
+
+    test(
+      'macOS-only release notes include a macOS-only compiled artifacts table',
+      () {
+        final publishStep = workflow.substring(
+          workflow.indexOf('Publish release assets'),
+        );
+        expect(publishStep, contains('## Compiled artifacts'));
+        expect(publishStep, contains('| Platform | Desktop | CLI |'));
+        expect(
+          publishStep,
+          isNot(contains(r'"| Linux | $DESKTOP_LINUX | $CLI_LINUX |"')),
+        );
+        expect(
+          publishStep,
+          isNot(contains(r'"| Windows | $DESKTOP_WINDOWS | $CLI_WINDOWS |"')),
+        );
+        expect(
+          publishStep,
+          contains(r'"| macOS | $DESKTOP_MACOS | $CLI_MACOS |"'),
+        );
+        expect(
+          publishStep,
+          contains(r'trackstate-apple-${release_tag}.sha256'),
+        );
+        expect(
+          publishStep,
+          isNot(contains(r'trackstate-${release_tag}.sha256')),
+        );
+      },
+    );
 
     test('fails fast when downloaded macOS artifacts are missing', () {
       final publishJob = workflow.substring(
