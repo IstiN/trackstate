@@ -351,7 +351,7 @@ class CliArchiveAtomicityTest(unittest.TestCase):
             return
 
         completed = subprocess.run(
-            (str(binary_path), "--version"),
+            (str(binary_path), "--help"),
             capture_output=True,
             text=True,
             timeout=30,
@@ -362,7 +362,7 @@ class CliArchiveAtomicityTest(unittest.TestCase):
         if completed.returncode != 0:
             raise AssertionError(
                 f"Extracted binary exited with code {completed.returncode} when run "
-                f"with --version.\nstdout: {completed.stdout}\nstderr: {completed.stderr}"
+                f"with --help.\nstdout: {completed.stdout}\nstderr: {completed.stderr}"
             )
         self._record_step(
             step=7,
@@ -371,7 +371,7 @@ class CliArchiveAtomicityTest(unittest.TestCase):
             observed=f"Exit code 0. stdout: {completed.stdout.strip()[:200]}",
         )
         self._record_human_verification(
-            check="Executed the extracted binary with `--version` as a real user would after downloading.",
+            check="Executed the extracted binary with `--help` as a real user would after downloading.",
             observed=completed.stdout.strip()[:500],
         )
 
@@ -513,7 +513,7 @@ def _jira_pass_summary(result: dict[str, Any]) -> str:
         "* Downloaded the published Linux x64 CLI archive from the selected GitHub release.",
         "* Listed the archive contents and verified exactly one regular file named {trackstate}.",
         "* Extracted the binary and confirmed the executable bit is preserved.",
-        "* Ran the extracted binary with {--version} as a real-user sanity check.",
+        "* Ran the extracted binary with {--help} as a real-user sanity check.",
         "",
         "h4. Automation",
     ]
@@ -626,7 +626,7 @@ def _markdown_pass_summary(result: dict[str, Any]) -> str:
         "- Downloaded the published Linux x64 CLI archive from the selected GitHub release.",
         "- Listed the archive contents and verified exactly one regular file named `trackstate`.",
         "- Extracted the binary and confirmed the executable bit is preserved.",
-        "- Ran the extracted binary with `--version` as a real-user sanity check.",
+        "- Ran the extracted binary with `--help` as a real-user sanity check.",
         "",
         "## Automation details",
     ]
