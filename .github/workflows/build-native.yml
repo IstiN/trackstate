@@ -150,21 +150,23 @@ jobs:
               -f tag_name="$release_tag" \
               -f target_commitish="$release_target_commit" \
               --jq '.body' > "$release_notes" 2>/dev/null; then
-              echo ""
+              echo "" >> "$release_notes"
             else
               echo "::warning::Could not generate release notes from the GitHub API; using fallback scaffold."
-              printf '%s\n' \
-                '## macOS compiled artifacts' \
-                '' \
-                '| Platform | Desktop | CLI |' \
-                '|---|---|---|' \
-                "| macOS | $DESKTOP_MACOS | $CLI_MACOS |" \
-                '' \
-                "Verify downloads with \`trackstate-apple-${release_tag}.sha256\`." \
-                '' \
-                '> Install commands and detailed asset descriptions will be added in a follow-up story.' \
-                > "$release_notes"
             fi
+
+            {
+              echo "## Compiled artifacts"
+              echo ""
+              echo "| Platform | Desktop | CLI |"
+              echo "|---|---|---|"
+              echo "| macOS | $DESKTOP_MACOS | $CLI_MACOS |"
+              echo ""
+              echo "Verify downloads with \`trackstate-apple-${release_tag}.sha256\`."
+              echo ""
+              echo "> **macOS requirement:** The macOS desktop package is built for Apple Silicon (arm64) and requires an Apple Silicon Mac."
+              echo ""
+            } >> "$release_notes"
 
             gh release create "$release_tag" \
               --title "TrackState $release_tag" \

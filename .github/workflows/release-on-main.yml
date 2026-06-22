@@ -317,6 +317,8 @@ jobs:
     env:
       release_tag: ${{ needs.resolve-version.outputs.release_tag }}
       release_checkout_ref: ${{ needs.resolve-version.outputs.release_checkout_ref }}
+      DESKTOP_MACOS: TrackState-macos-arm64-${{ needs.resolve-version.outputs.release_tag }}.zip
+      CLI_MACOS: trackstate-cli-macos-arm64-${{ needs.resolve-version.outputs.release_tag }}.tar.gz
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -365,6 +367,8 @@ jobs:
           INSTALL_PS1: install.ps1
           INSTALL_CMD: install.cmd
           GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_SKILL: trackstate-github.skill
+          CLAUDE_SKILL: trackstate-claude.skill
         run: |
           set -euo pipefail
 
@@ -433,6 +437,7 @@ jobs:
             echo "|---|---|---|"
             echo "| Linux | $DESKTOP_LINUX | $CLI_LINUX |"
             echo "| Windows | $DESKTOP_WINDOWS | $CLI_WINDOWS |"
+            echo "| macOS | $DESKTOP_MACOS | $CLI_MACOS |"
             echo ""
             echo "Verify downloads with \`trackstate-${release_tag}.sha256\`."
             echo ""
