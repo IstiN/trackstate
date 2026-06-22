@@ -1,0 +1,9 @@
+test_id: TS-1392
+type: static
+framework: unittest
+platform: python
+dependencies:
+  - Python 3.12+
+notes:
+  - Verifies that assistant skill manifest release assets exist, are valid JSON, and contain the expected machine-readable content.
+  - Cross-checks the published .skill files against the in-code manifest constants in lib/cli/assistant_manifests.dart.
