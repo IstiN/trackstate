@@ -1,0 +1,85 @@
+/// Machine-readable assistant skill manifests for GitHub and Claude environments.
+///
+/// These constants describe how the released TrackState CLI is installed and
+/// invoked through the separate `trackstate assistant` command namespace. The
+/// same content is published as release assets named
+/// `trackstate-github.skill` and `trackstate-claude.skill`.
+library;
+
+const String trackStateGitHubAssistantManifest = r'''{
+  "schemaVersion": "1",
+  "name": "TrackState for GitHub",
+  "id": "trackstate-github",
+  "assistant": "github",
+  "description": "Install and invoke the TrackState CLI inside GitHub Copilot, GitHub Actions, and Codespaces environments.",
+  "install": {
+    "command": "curl -fsSL https://github.com/__REPO_PLACEHOLDER__/releases/latest/download/install.sh | bash",
+    "commandWindows": "irm https://github.com/__REPO_PLACEHOLDER__/releases/latest/download/install.ps1 -OutFile install.ps1; .\\install.ps1",
+    "shell": "bash",
+    "docs": "https://github.com/__REPO_PLACEHOLDER__/releases/latest"
+  },
+  "invocation": {
+    "commandPath": "trackstate assistant github",
+    "description": "Use the assistant command namespace for constrained, assistant-safe CLI access. The CLI is installed by the same release artifact as the base install, but reached through a separate command path.",
+    "examples": [
+      {
+        "description": "Show assistant readiness and manifest",
+        "command": "trackstate assistant github"
+      },
+      {
+        "description": "Search issues with JQL",
+        "command": "trackstate assistant github search --jql \"project = DEMO\""
+      },
+      {
+        "description": "Read an issue",
+        "command": "trackstate assistant github read ticket --key DEMO-1"
+      }
+    ]
+  },
+  "runtime": {
+    "authSource": "TRACKSTATE_TOKEN environment variable or gh auth token",
+    "target": "hosted",
+    "provider": "github",
+    "repository": "__REPO_PLACEHOLDER__"
+  }
+}
+''';
+
+const String trackStateClaudeAssistantManifest = r'''{
+  "schemaVersion": "1",
+  "name": "TrackState for Claude",
+  "id": "trackstate-claude",
+  "assistant": "claude",
+  "description": "Install and invoke the TrackState CLI inside Claude Code and Claude desktop project environments.",
+  "install": {
+    "command": "curl -fsSL https://github.com/__REPO_PLACEHOLDER__/releases/latest/download/install.sh | bash",
+    "commandWindows": "irm https://github.com/__REPO_PLACEHOLDER__/releases/latest/download/install.ps1 -OutFile install.ps1; .\\install.ps1",
+    "shell": "bash",
+    "docs": "https://github.com/__REPO_PLACEHOLDER__/releases/latest"
+  },
+  "invocation": {
+    "commandPath": "trackstate assistant claude",
+    "description": "Use the assistant command namespace for constrained, assistant-safe CLI access. The CLI is installed by the same release artifact as the base install, but reached through a separate command path.",
+    "examples": [
+      {
+        "description": "Show assistant readiness and manifest",
+        "command": "trackstate assistant claude"
+      },
+      {
+        "description": "Search issues with JQL",
+        "command": "trackstate assistant claude search --jql \"project = DEMO\""
+      },
+      {
+        "description": "Create a story",
+        "command": "trackstate assistant claude ticket create --summary \"New story\" --issue-type Story"
+      }
+    ]
+  },
+  "runtime": {
+    "authSource": "TRACKSTATE_TOKEN environment variable or gh auth token",
+    "target": "hosted",
+    "provider": "github",
+    "repository": "__REPO_PLACEHOLDER__"
+  }
+}
+''';
