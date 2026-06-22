@@ -19,6 +19,7 @@ class NonDefaultBranchReleaseConfig:
     semver_tag_pattern: str
     poll_interval_seconds: int = 10
     pull_request_timeout_seconds: int = 180
+    command_timeout_seconds: int = 180
     quiet_period_seconds: int = 900
     releases_lookup_limit: int = 30
     tags_lookup_limit: int = 50
@@ -72,6 +73,12 @@ class NonDefaultBranchReleaseConfig:
             pull_request_timeout_seconds=cls._require_positive_int(
                 runtime_inputs,
                 "pull_request_timeout_seconds",
+                path,
+                default=180,
+            ),
+            command_timeout_seconds=cls._require_positive_int(
+                runtime_inputs,
+                "command_timeout_seconds",
                 path,
                 default=180,
             ),
