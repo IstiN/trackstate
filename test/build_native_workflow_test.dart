@@ -242,11 +242,27 @@ void main() {
       expect(workflow, isNot(contains('[self-hosted, macOS, trackstate-release, ARM64]')));
     });
 
-    test('env-backs macOS archive names in legacy release notes fallback', () {
+    test('env-backs archive names in the compiled artifacts table', () {
       final publishStep = workflow.substring(
         workflow.indexOf('Publish release assets'),
       );
       expect(publishStep, contains('env:'));
+      expect(
+        publishStep,
+        contains(r'DESKTOP_LINUX: TrackState-linux-x64-${{ needs.resolve-release.outputs.release_tag }}.tar.gz'),
+      );
+      expect(
+        publishStep,
+        contains(r'CLI_LINUX: trackstate-cli-linux-x64-${{ needs.resolve-release.outputs.release_tag }}.tar.gz'),
+      );
+      expect(
+        publishStep,
+        contains(r'DESKTOP_WINDOWS: TrackState-windows-x64-${{ needs.resolve-release.outputs.release_tag }}.zip'),
+      );
+      expect(
+        publishStep,
+        contains(r'CLI_WINDOWS: trackstate-cli-windows-x64-${{ needs.resolve-release.outputs.release_tag }}.tar.gz'),
+      );
       expect(
         publishStep,
         contains(r'DESKTOP_MACOS: ${{ needs.build-macos.outputs.desktop_archive }}'),
@@ -268,6 +284,29 @@ void main() {
         ),
       );
     });
+
+    test(
+      'macOS-only release notes include the full compiled artifacts table',
+      () {
+        final publishStep = workflow.substring(
+          workflow.indexOf('Publish release assets'),
+        );
+        expect(publishStep, contains('## Compiled artifacts'));
+        expect(publishStep, contains('| Platform | Desktop | CLI |'));
+        expect(
+          publishStep,
+          contains(r'"| Linux | $DESKTOP_LINUX | $CLI_LINUX |"'),
+        );
+        expect(
+          publishStep,
+          contains(r'"| Windows | $DESKTOP_WINDOWS | $CLI_WINDOWS |"'),
+        );
+        expect(
+          publishStep,
+          contains(r'"| macOS | $DESKTOP_MACOS | $CLI_MACOS |"'),
+        );
+      },
+    );
 
     test('fails fast when downloaded macOS artifacts are missing', () {
       final publishJob = workflow.substring(

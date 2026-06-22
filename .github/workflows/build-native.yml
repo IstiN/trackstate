@@ -108,6 +108,10 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          DESKTOP_LINUX: TrackState-linux-x64-${{ needs.resolve-release.outputs.release_tag }}.tar.gz
+          CLI_LINUX: trackstate-cli-linux-x64-${{ needs.resolve-release.outputs.release_tag }}.tar.gz
+          DESKTOP_WINDOWS: TrackState-windows-x64-${{ needs.resolve-release.outputs.release_tag }}.zip
+          CLI_WINDOWS: trackstate-cli-windows-x64-${{ needs.resolve-release.outputs.release_tag }}.tar.gz
           DESKTOP_MACOS: ${{ needs.build-macos.outputs.desktop_archive }}
           CLI_MACOS: ${{ needs.build-macos.outputs.cli_archive }}
         run: |
@@ -150,21 +154,25 @@ jobs:
               -f tag_name="$release_tag" \
               -f target_commitish="$release_target_commit" \
               --jq '.body' > "$release_notes" 2>/dev/null; then
-              echo ""
+              echo "" >> "$release_notes"
             else
               echo "::warning::Could not generate release notes from the GitHub API; using fallback scaffold."
-              printf '%s\n' \
-                '## macOS compiled artifacts' \
-                '' \
-                '| Platform | Desktop | CLI |' \
-                '|---|---|---|' \
-                "| macOS | $DESKTOP_MACOS | $CLI_MACOS |" \
-                '' \
-                "Verify downloads with \`trackstate-apple-${release_tag}.sha256\`." \
-                '' \
-                '> Install commands and detailed asset descriptions will be added in a follow-up story.' \
-                > "$release_notes"
             fi
+
+            {
+              echo "## Compiled artifacts"
+              echo ""
+              echo "| Platform | Desktop | CLI |"
+              echo "|---|---|---|"
+              echo "| Linux | $DESKTOP_LINUX | $CLI_LINUX |"
+              echo "| Windows | $DESKTOP_WINDOWS | $CLI_WINDOWS |"
+              echo "| macOS | $DESKTOP_MACOS | $CLI_MACOS |"
+              echo ""
+              echo "Verify downloads with \`trackstate-${release_tag}.sha256\` (Linux/Windows) or \`trackstate-apple-${release_tag}.sha256\` (macOS)."
+              echo ""
+              echo "> **macOS requirement:** The macOS desktop package is built for Apple Silicon (arm64) and requires an Apple Silicon Mac. macOS assets are published by a separate job when the TrackState release runner is available."
+              echo ""
+            } >> "$release_notes"
 
             gh release create "$release_tag" \
               --title "TrackState $release_tag" \
