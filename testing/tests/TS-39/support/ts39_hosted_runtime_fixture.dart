@@ -37,16 +37,16 @@ const _treeResponse = {
 };
 
 const _contentResponses = {
-  '/repos/trackstate/trackstate/contents/DEMO/project.json':
+  '/repos/IstiN/trackstate-setup/contents/DEMO/project.json':
       '{"key":"DEMO","name":"Demo Project"}',
-  '/repos/trackstate/trackstate/contents/DEMO/config/statuses.json':
+  '/repos/IstiN/trackstate-setup/contents/DEMO/config/statuses.json':
       '[{"name":"To Do"},{"name":"In Progress"},{"name":"Done"}]',
-  '/repos/trackstate/trackstate/contents/DEMO/config/issue-types.json':
+  '/repos/IstiN/trackstate-setup/contents/DEMO/config/issue-types.json':
       '[{"name":"Epic"},{"name":"Story"}]',
-  '/repos/trackstate/trackstate/contents/DEMO/config/fields.json':
+  '/repos/IstiN/trackstate-setup/contents/DEMO/config/fields.json':
       '[{"name":"Summary"},{"name":"Priority"}]',
-  '/repos/trackstate/trackstate/contents/DEMO/DEMO-1/main.md':
+  '/repos/IstiN/trackstate-setup/contents/DEMO/DEMO-1/main.md':
       '---\nkey: DEMO-1\nproject: DEMO\nissueType: Story\nstatus: In Progress\npriority: High\nsummary: Hosted runtime sample issue\nassignee: demo-user\nreporter: demo-admin\nlabels:\n  - hosted\ncomponents:\n  - web\nparent: null\nepic: null\nupdated: 2026-05-05T00:00:00Z\n---\n\n# Description\n\nLoaded through the hosted setup repository.\n',
-  '/repos/trackstate/trackstate/contents/DEMO/DEMO-1/acceptance_criteria.md':
+  '/repos/IstiN/trackstate-setup/contents/DEMO/DEMO-1/acceptance_criteria.md':
       '- Verify GitHub runtime startup.\n- Keep Local Git disabled by default.\n',
 };
