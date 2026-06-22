@@ -512,6 +512,8 @@ void main() {
       expect(publishJob, contains('chmod +x'));
       expect(publishJob, contains('__REPO_PLACEHOLDER__'));
       expect(publishJob, contains('sed -i'));
+      expect(publishJob, contains(r'GITHUB_SKILL: trackstate-github.skill'));
+      expect(publishJob, contains(r'CLAUDE_SKILL: trackstate-claude.skill'));
     });
 
     test('uploads install scripts as release assets', () {

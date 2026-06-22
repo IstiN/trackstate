@@ -367,6 +367,8 @@ jobs:
           INSTALL_PS1: install.ps1
           INSTALL_CMD: install.cmd
           GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_SKILL: trackstate-github.skill
+          CLAUDE_SKILL: trackstate-claude.skill
         run: |
           set -euo pipefail
 

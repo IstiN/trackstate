@@ -108,10 +108,6 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          DESKTOP_LINUX: TrackState-linux-x64-${{ needs.resolve-release.outputs.release_tag }}.tar.gz
-          CLI_LINUX: trackstate-cli-linux-x64-${{ needs.resolve-release.outputs.release_tag }}.tar.gz
-          DESKTOP_WINDOWS: TrackState-windows-x64-${{ needs.resolve-release.outputs.release_tag }}.zip
-          CLI_WINDOWS: trackstate-cli-windows-x64-${{ needs.resolve-release.outputs.release_tag }}.tar.gz
           DESKTOP_MACOS: ${{ needs.build-macos.outputs.desktop_archive }}
           CLI_MACOS: ${{ needs.build-macos.outputs.cli_archive }}
         run: |
@@ -164,13 +160,11 @@ jobs:
               echo ""
               echo "| Platform | Desktop | CLI |"
               echo "|---|---|---|"
-              echo "| Linux | $DESKTOP_LINUX | $CLI_LINUX |"
-              echo "| Windows | $DESKTOP_WINDOWS | $CLI_WINDOWS |"
               echo "| macOS | $DESKTOP_MACOS | $CLI_MACOS |"
               echo ""
-              echo "Verify downloads with \`trackstate-${release_tag}.sha256\` (Linux/Windows) or \`trackstate-apple-${release_tag}.sha256\` (macOS)."
+              echo "Verify downloads with \`trackstate-apple-${release_tag}.sha256\`."
               echo ""
-              echo "> **macOS requirement:** The macOS desktop package is built for Apple Silicon (arm64) and requires an Apple Silicon Mac. macOS assets are published by a separate job when the TrackState release runner is available."
+              echo "> **macOS requirement:** The macOS desktop package is built for Apple Silicon (arm64) and requires an Apple Silicon Mac."
               echo ""
             } >> "$release_notes"
 
