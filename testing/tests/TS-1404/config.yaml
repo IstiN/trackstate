@@ -1,0 +1,17 @@
+test_id: TS-1404
+type: api
+framework: unittest
+platform: python
+dependencies:
+  - Compiled TrackState CLI at bin/trackstate_cli
+  - GitHub token with read access to the configured setup repository
+runtime_inputs:
+  setup_repository: "${TRACKSTATE_LIVE_SETUP_REPOSITORY:-IstiN/trackstate-setup}"
+  setup_ref: "${TRACKSTATE_LIVE_SETUP_REF:-main}"
+  benchmark_concurrency: 10
+  benchmark_command_budget_seconds: 3.0
+  benchmark_command_max_seconds: 5.0
+  benchmark_min_success_rate: 1.0
+notes:
+  - Each worker runs session, create, read, transition, delete, and search commands.
+  - All commands must succeed and p95 latency must be within budget.
