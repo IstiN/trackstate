@@ -23,6 +23,13 @@ class CiSmokeReportingTest(unittest.TestCase):
         result = validator.validate_full_smoke()
         payload = result.to_dict()
 
+        self.assertEqual(
+            result.errors,
+            [],
+            "Step 0 failed: the smoke run accumulated unexpected errors.\n"
+            f"Errors: {result.errors}",
+        )
+
         self.assertIn(
             "pages_interactive",
             payload,
@@ -43,10 +50,18 @@ class CiSmokeReportingTest(unittest.TestCase):
             (int, float),
             "Step 2 failed: pages_interactive.elapsed_seconds is not numeric.",
         )
+        self.assertIsNotNone(
+            pages_interactive["elapsed_seconds"],
+            "Step 2 failed: pages_interactive.elapsed_seconds is null.",
+        )
         self.assertGreaterEqual(
             pages_interactive["elapsed_seconds"],
             0.0,
             "Step 2 failed: pages_interactive.elapsed_seconds is negative.",
+        )
+        self.assertTrue(
+            pages_interactive["within_budget"],
+            "Step 2 failed: Pages time-to-interactive did not meet the budget.",
         )
 
         self.assertIn(
@@ -79,10 +94,27 @@ class CiSmokeReportingTest(unittest.TestCase):
             (int, float),
             "Step 4 failed: cli_benchmark.max_seconds is not numeric.",
         )
+        self.assertIsNotNone(
+            cli_benchmark["p95_seconds"],
+            "Step 4 failed: cli_benchmark.p95_seconds is null.",
+        )
+        self.assertIsNotNone(
+            cli_benchmark["max_seconds"],
+            "Step 4 failed: cli_benchmark.max_seconds is null.",
+        )
         self.assertGreaterEqual(
             cli_benchmark["p95_seconds"],
             0.0,
             "Step 4 failed: cli_benchmark.p95_seconds is negative.",
+        )
+        self.assertEqual(
+            cli_benchmark["failed_commands"],
+            0,
+            "Step 4 failed: cli_benchmark reported failed commands.",
+        )
+        self.assertTrue(
+            cli_benchmark["passed"],
+            "Step 4 failed: the CLI benchmark did not report an overall pass.",
         )
 
         self.assertIn(
@@ -94,6 +126,25 @@ class CiSmokeReportingTest(unittest.TestCase):
         self.assertIsNotNone(
             pages_health,
             "Step 5 failed: pages_health is null.",
+        )
+        self.assertTrue(
+            pages_health["healthy"],
+            "Step 5 failed: the Pages health check did not report healthy=true.",
+        )
+
+        self.assertIn(
+            "cli_smoke",
+            payload,
+            "Step 6 failed: smoke summary does not contain a cli_smoke section.",
+        )
+        cli_smoke = payload["cli_smoke"]
+        self.assertIsNotNone(
+            cli_smoke,
+            "Step 6 failed: cli_smoke is null.",
+        )
+        self.assertTrue(
+            cli_smoke["all_succeeded"],
+            "Step 6 failed: the CLI smoke path did not report full success.",
         )
 
 

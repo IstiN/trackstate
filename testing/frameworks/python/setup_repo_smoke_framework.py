@@ -218,6 +218,7 @@ class SetupRepoSmokeFramework(SetupRepoSmokeProbe):
                                     error="No HTTP response received from the Pages URL.",
                                 )
 
+                            self._enable_flutter_semantics(page)
                             page.wait_for_function(
                                 """
                                 (labels) => {
@@ -343,9 +344,10 @@ class SetupRepoSmokeFramework(SetupRepoSmokeProbe):
         cleanup: CliCommandObservation | None = None
         delete: CliCommandObservation | None = None
         if created_key:
-            # The issue was already walked through the workflow above; no extra
-            # cleanup transition is needed before deletion.
-            cleanup = None
+            # The issue was already walked through the workflow above; expose the
+            # final transition as the cleanup observation so tests can assert the
+            # full sequential workflow succeeded before deletion.
+            cleanup = transition
             delete = self._delete_issue(created_key)
 
         return CliSmokeObservation(
@@ -464,6 +466,31 @@ class SetupRepoSmokeFramework(SetupRepoSmokeProbe):
             return prebuilt
         raise FileNotFoundError(
             "TrackState CLI executable not found. Expected bin/trackstate_cli."
+        )
+
+    @staticmethod
+    def _enable_flutter_semantics(page) -> None:
+        """Click the Flutter semantics placeholder and wait for the semantics host."""
+        try:
+            page.wait_for_selector(
+                "flt-semantics-placeholder",
+                state="attached",
+                timeout=15_000,
+            )
+            page.locator("flt-semantics-placeholder").evaluate(
+                "(element) => element.dispatchEvent(new MouseEvent('click', { bubbles: true }))"
+            )
+        except Exception:
+            # The placeholder may already be gone if semantics are auto-enabled.
+            pass
+        page.wait_for_selector(
+            "flt-semantics-host",
+            state="attached",
+            timeout=15_000,
+        )
+        page.wait_for_function(
+            "() => document.querySelectorAll('flt-semantics').length > 0",
+            timeout=15_000,
         )
 
     @staticmethod
