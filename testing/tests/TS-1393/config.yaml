@@ -1,0 +1,9 @@
+test_id: TS-1393
+type: cli
+framework: unittest
+platform: python
+dependencies:
+  - Dart SDK available on PATH or via TRACKSTATE_DART_BIN
+notes:
+  - Verifies the TrackState CLI exposes an assistant subcommand that discovers the github and claude namespaces and can be invoked session-less.
+  - Executes the CLI via dart run trackstate (or a installed trackstate binary if present).
