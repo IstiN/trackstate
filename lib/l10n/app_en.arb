@@ -314,6 +314,7 @@
   "repositoryAccessConnectGitHub": "Connect GitHub",
   "repositoryAccessReadOnly": "Read-only",
   "repositoryAccessAttachmentsRestricted": "Attachments limited",
+  "repositoryAccessAttachmentAccessLimited": "Attachment access limited",
   "repositoryAccessSettings": "Repository access",
   "repositoryAccessDisconnectedTitle": "GitHub write access is not connected",
   "repositoryAccessDisconnectedMessage": "Create, edit, comment, and status changes stay read-only until you connect GitHub with a fine-grained token that has repository Contents write access. PAT is the default browser path.",

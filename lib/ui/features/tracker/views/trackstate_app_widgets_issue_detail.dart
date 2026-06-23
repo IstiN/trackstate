@@ -1238,6 +1238,7 @@ class _MetricCard extends StatelessWidget {
 }
 
 enum MetricTone { primary, secondary, accent }
+
 class _SectionContentPlaceholder extends StatelessWidget {
   const _SectionContentPlaceholder({
     required this.semanticLabel,
@@ -1287,15 +1288,18 @@ class _SectionContentPlaceholder extends StatelessWidget {
     );
   }
 }
+
 class _SettingsProviderButton extends StatelessWidget {
   const _SettingsProviderButton({
     required this.label,
     required this.selected,
     required this.onPressed,
     this.tone = _SettingsProviderButtonTone.defaultTone,
+    this.semanticLabel,
   });
 
   final String label;
+  final String? semanticLabel;
   final bool selected;
   final VoidCallback onPressed;
   final _SettingsProviderButtonTone tone;
@@ -1320,7 +1324,7 @@ class _SettingsProviderButton extends StatelessWidget {
       container: true,
       button: true,
       selected: selected,
-      label: label,
+      label: semanticLabel ?? label,
       excludeSemantics: true,
       child: RepaintBoundary(
         child: SizedBox(
@@ -1439,7 +1443,7 @@ class _HostedProviderConfigurationState
           ),
           const SizedBox(height: 12),
           AccessCallout(
-            semanticLabel: l10n.attachments,
+            semanticLabel: l10n.attachmentStorageMode,
             title: _attachmentStorageCalloutTitle(l10n, viewModel),
             message: _attachmentStorageCalloutMessage(l10n, viewModel),
             tone: _attachmentStorageCalloutTone(viewModel),
@@ -1801,7 +1805,7 @@ class _WorkspaceSwitcherTriggerButton extends StatelessWidget {
             panelId: browserWorkspaceSwitcherSemanticsIdentifier,
             controlsId: controlsId,
             expanded: expanded,
-            child: visualButton,
+            child: ExcludeSemantics(child: visualButton),
           ),
         ),
       );
@@ -1817,11 +1821,12 @@ class _WorkspaceSwitcherTriggerButton extends StatelessWidget {
         sortKey: semanticsSortKey(semanticsSortOrder),
         controlsNodes: controlsNodes,
         onTap: enabled ? onPressed : null,
-        child: visualButton,
+        child: ExcludeSemantics(child: visualButton),
       ),
     );
   }
 }
+
 class _DropdownCreateField extends StatelessWidget {
   const _DropdownCreateField({
     required this.label,
