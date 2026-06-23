@@ -32,7 +32,7 @@ void main() {
         const expectedTitle = 'GitHub startup limit reached';
         const expectedMessage =
             'Hosted startup loaded the minimum app-shell data, but GitHub rate-limited a deferred repository read. Retry later or connect GitHub for a higher limit to resume full hosted reads.';
-        const expectedActions = <String>['Retry startup', 'Connect GitHub'];
+        const expectedActions = <String>['Retry', 'Connect GitHub'];
         final visibleTexts = _formatSnapshot(robot.visibleTexts());
         final visibleSemantics = _formatSnapshot(
           robot.visibleSemanticsLabelsSnapshot(),
