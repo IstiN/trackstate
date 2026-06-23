@@ -2,6 +2,7 @@ import '../../core/interfaces/runtime_startup_probe.dart';
 import '../../core/interfaces/runtime_ui_probe.dart';
 import '../../core/models/runtime_startup_observation.dart';
 import '../../core/models/runtime_ui_observation.dart';
+import '../../core/models/runtime_ui_stability_observation.dart';
 
 class TrackStateRuntimeService {
   const TrackStateRuntimeService({required this.startupProbe, this.uiProbe});
@@ -23,5 +24,13 @@ class TrackStateRuntimeService {
       throw StateError('Hosted runtime UI probe is not configured.');
     }
     return probe.inspectHostedRuntimeExperience();
+  }
+
+  Future<RuntimeUiStabilityObservation> inspectHostedRuntimeStability() {
+    final probe = uiProbe;
+    if (probe == null) {
+      throw StateError('Hosted runtime UI probe is not configured.');
+    }
+    return probe.inspectHostedRuntimeStability();
   }
 }
