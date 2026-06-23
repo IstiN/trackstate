@@ -590,26 +590,20 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
                       '${field.required ? l10n.catalogRequired : l10n.optional}'
                       '${field.reserved ? ' • ${l10n.catalogReserved}' : ''}',
                   onEdit: canEdit
-                      ? () => _editField(
-                          l10n: l10n,
-                          initial: field,
-                        )
+                      ? () => _editField(l10n: l10n, initial: field)
                       : null,
                   onDelete: canEdit && !field.reserved
                       ? () => _replaceDraft(
                           settings.copyWith(
                             fieldDefinitions: [
                               for (final entry in settings.fieldDefinitions)
-                                if (entry.id != field.id)
-                                  entry,
+                                if (entry.id != field.id) entry,
                             ],
                           ),
                         )
                       : null,
-                  editLabel:
-                      '${l10n.editField} ${field.name}',
-                  deleteLabel:
-                      '${l10n.deleteField} ${field.name}',
+                  editLabel: '${l10n.editField} ${field.name}',
+                  deleteLabel: '${l10n.deleteField} ${field.name}',
                 );
               },
             ),
@@ -1085,16 +1079,12 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
       children: [
         _CatalogSummaryRow(
           title: l10n.statuses,
-          names: [
-            for (final entry in settings.statusDefinitions) entry.name,
-          ],
+          names: [for (final entry in settings.statusDefinitions) entry.name],
         ),
         const SizedBox(height: 12),
         _CatalogSummaryRow(
           title: l10n.workflows,
-          names: [
-            for (final entry in settings.workflowDefinitions) entry.name,
-          ],
+          names: [for (final entry in settings.workflowDefinitions) entry.name],
         ),
         const SizedBox(height: 12),
         _CatalogSummaryRow(
@@ -1106,9 +1096,7 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
         const SizedBox(height: 12),
         _CatalogSummaryRow(
           title: l10n.fields,
-          names: [
-            for (final entry in settings.fieldDefinitions) entry.name,
-          ],
+          names: [for (final entry in settings.fieldDefinitions) entry.name],
         ),
       ],
     );
@@ -1149,7 +1137,7 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
       order: const NumericFocusOrder(0),
       child: TabBar(
         controller: _tabController,
-        isScrollable: true,
+        isScrollable: false,
         tabs: [
           Tab(text: l10n.statuses),
           Tab(text: l10n.workflows),
@@ -1317,10 +1305,7 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
 }
 
 class _CatalogSummaryRow extends StatelessWidget {
-  const _CatalogSummaryRow({
-    required this.title,
-    required this.names,
-  });
+  const _CatalogSummaryRow({required this.title, required this.names});
 
   final String title;
   final List<String> names;
@@ -1386,7 +1371,11 @@ class _SettingsCatalogListTile extends StatelessWidget {
 }
 
 class SettingsEditorShell extends StatelessWidget {
-  const SettingsEditorShell({super.key, required this.title, required this.child});
+  const SettingsEditorShell({
+    super.key,
+    required this.title,
+    required this.child,
+  });
 
   final String title;
   final Widget child;
@@ -2625,4 +2614,3 @@ String _normalizedEditorId(String rawId, String fallbackName) {
       .replaceAll(RegExp(r'^-+|-+$'), '');
   return normalized;
 }
-

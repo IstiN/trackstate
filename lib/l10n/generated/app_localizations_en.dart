@@ -634,6 +634,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get repositoryAccessAttachmentsRestricted => 'Attachments limited';
 
   @override
+  String get repositoryAccessAttachmentAccessLimited =>
+      'Attachment access limited';
+
+  @override
   String get repositoryAccessSettings => 'Repository access';
 
   @override
