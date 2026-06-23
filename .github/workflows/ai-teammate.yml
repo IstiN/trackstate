@@ -32,7 +32,7 @@ permissions:
 jobs:
   ai-teammate:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 90
     concurrency:
       group: ai-teammate-${{ inputs.config_file }}-${{ inputs.concurrency_key }}
       cancel-in-progress: false
