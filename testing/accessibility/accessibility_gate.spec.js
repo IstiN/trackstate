@@ -4,10 +4,14 @@ const {
   collectAccessibilityViolations,
   formatViolations,
 } = require('./accessibility_gate');
+const {
+  installTs933SemanticsFailureSimulation,
+} = require('./ts933_semantics_failure_simulation');
 
 test('TrackState web app has no axe-core accessibility violations', async ({
   page,
 }) => {
+  await installTs933SemanticsFailureSimulation(page);
   await captureFlutterStartupDiagnostics(page, {
     log: (entry) => console.log(entry),
   });
