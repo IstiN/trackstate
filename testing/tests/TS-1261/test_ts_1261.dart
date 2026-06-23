@@ -18,7 +18,7 @@ const String _ticketSummary =
 const String _linkedBug = 'TS-1254';
 const String _testFilePath = 'testing/tests/TS-1261/test_ts_1261.dart';
 const String _sourceFilePath =
-    'lib/ui/features/tracker/views/trackstate_app.dart';
+    'lib/ui/features/tracker/views/widgets/settings_text_field.dart';
 const String _runCommand =
     'flutter test testing/tests/TS-1261/test_ts_1261.dart --reporter expanded';
 const Size _viewport = Size(1440, 900);
@@ -329,17 +329,12 @@ Future<Map<String, Object?>> _runThemeTokenCheck() async {
 }
 
 String? _extractSettingsTextFieldBlock(String source) {
-  const startMarker = 'class _SettingsTextField extends StatelessWidget {';
-  const endMarker = 'class _SurfaceCard extends StatelessWidget {';
+  const startMarker = 'class SettingsTextField extends StatelessWidget {';
   final start = source.indexOf(startMarker);
   if (start == -1) {
     return null;
   }
-  final end = source.indexOf(endMarker, start);
-  if (end == -1) {
-    return source.substring(start);
-  }
-  return source.substring(start, end);
+  return source.substring(start);
 }
 
 List<String> _missingExpectedLabels({
