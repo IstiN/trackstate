@@ -127,7 +127,7 @@ module.exports = {
     },
     {
         "description": "In Review Stories & Bugs \u2192 trigger pr_review",
-        "jql": "project = {jiraProject} AND issuetype in ('Story', 'Bug') AND status in ('In Review') AND (labels is EMPTY OR labels NOT IN ('pr_approved'))",
+        "jql": "project = {jiraProject} AND issuetype in ('Story', 'Bug', 'Epic') AND status in ('In Review') AND (labels is EMPTY OR labels NOT IN ('pr_approved')) AND (issuetype != Bug OR labels NOT IN ('bug_fix_batch'))",
         "configFile": "agents/pr_review.json",
         "skipIfLabel": "sm_story_review_triggered",
         "addLabel": "sm_story_review_triggered",
@@ -135,7 +135,7 @@ module.exports = {
     },
     {
         "description": "In Rework Stories & Bugs \u2192 trigger pr_rework",
-        "jql": "project = {jiraProject} AND issuetype in ('Story', 'Bug') AND status in ('In Rework')",
+        "jql": "project = {jiraProject} AND issuetype in ('Story', 'Bug', 'Epic') AND status in ('In Rework') AND (issuetype != Bug OR labels NOT IN ('bug_fix_batch'))",
         "configFile": "agents/pr_rework.json",
         "skipIfLabel": "sm_story_rework_triggered",
         "addLabel": "sm_story_rework_triggered",
@@ -159,7 +159,7 @@ module.exports = {
     },
     {
         "description": "In Review Stories & Bugs (pr_approved) \u2192 retry merge",
-        "jql": "project = {jiraProject} AND issuetype in ('Story', 'Bug') AND status in ('In Review') AND labels = 'pr_approved' ORDER BY created ASC",
+        "jql": "project = {jiraProject} AND issuetype in ('Story', 'Bug', 'Epic') AND status in ('In Review') AND labels = 'pr_approved' ORDER BY created ASC",
         "configFile": "agents/retry_merge.json",
         "localExecution": true,
         "enabled": true
@@ -173,7 +173,7 @@ module.exports = {
     },
     {
         "description": "Review/Rework/Blocked Stories & Bugs with already merged PR \u2192 recover Merged status",
-        "jql": "project = {jiraProject} AND issuetype in ('Story', 'Bug') AND status in ('In Review', 'In Rework', 'Blocked') ORDER BY updated ASC",
+        "jql": "project = {jiraProject} AND issuetype in ('Story', 'Bug', 'Epic') AND status in ('In Review', 'In Rework', 'Blocked') ORDER BY updated ASC",
         "configFile": "agents/recover_merged_pr.json",
         "localExecution": true,
         "enabled": true
@@ -209,6 +209,15 @@ module.exports = {
         "skipIfLabel": "sm_bug_merged_triggered",
         "enabled": true,
         "localExecution": true
+    },
+    {
+        "description": "Merged bug-fix batch Epics \u2192 finalize linked bugs as Done",
+        "jql": "project = {jiraProject} AND issuetype = 'Epic' AND status in ('Merged') AND labels = 'bug_fix_batch' ORDER BY updated ASC",
+        "configFile": "agents/bug_fix_batch_merge_finalize.json",
+        "skipIfLabel": "sm_bug_fix_batch_finalize_triggered",
+        "addLabel": "sm_bug_fix_batch_finalize_triggered",
+        "localExecution": true,
+        "enabled": true
     },
     {
         "description": "Ready For Testing Bugs \u2192 generate test cases",
@@ -281,8 +290,18 @@ module.exports = {
         "enabled": true
     },
     {
+        "description": "Ready For Development bug-fix batch Epics \u2192 trigger batch development",
+        "jql": "project = {jiraProject} AND issuetype = 'Epic' AND status in ('Ready For Development') AND labels = 'bug_fix_batch' ORDER BY updated ASC",
+        "configFile": "agents/bug_fix_batch_development.json",
+        "concurrencyKey": "bug_development",
+        "skipIfLabel": "sm_bug_fix_batch_development_triggered",
+        "addLabel": "sm_bug_fix_batch_development_triggered",
+        "limit": 1,
+        "enabled": true
+    },
+    {
         "description": "Backlog / To Do / Ready For Development / In Development Bugs \u2192 trigger bug_development",
-        "jql": "project = {jiraProject} AND issuetype in ('Bug') AND status in ('Backlog', 'To Do', 'Ready For Development', 'In Development', 'In Progress') AND updated <= -15m ORDER BY updated ASC",
+        "jql": "project = {jiraProject} AND issuetype in ('Bug') AND status in ('Backlog', 'To Do', 'Ready For Development', 'In Development', 'In Progress') AND labels NOT IN ('bug_fix_batch') AND updated <= -15m ORDER BY updated ASC",
         "configFile": "agents/bug_development.json",
         "concurrencyKey": "bug_development",
         "skipIfLabel": "sm_bug_development_triggered",
@@ -449,6 +468,14 @@ module.exports = {
             './.dmtools/prompts/development_focus.md',
             BUG_DEV_ANTIPATTERNS
         ],
+        bug_fix_batch_development: [
+            GOAL_INSTRUCTIONS,
+            DESIGN_REFERENCE,
+            SETUP_REPO_INSTRUCTIONS,
+            './.dmtools/instructions/architecture/trackstate_scope.md',
+            './.dmtools/prompts/development_focus.md',
+            BUG_DEV_ANTIPATTERNS
+        ],
         bug_rca: [
             GOAL_INSTRUCTIONS,
             './.dmtools/instructions/architecture/trackstate_scope.md'
@@ -569,6 +596,10 @@ module.exports = {
             TRACKSTATE_FLUTTER_RULES,
             TRACKSTATE_WEB_FOCUS_RULES
         ],
+        bug_fix_batch_development: [
+            TRACKSTATE_FLUTTER_RULES,
+            TRACKSTATE_WEB_FOCUS_RULES
+        ],
         test_case_automation: [
             TRACKSTATE_TEST_AUTOMATION_RULES
         ],
@@ -672,6 +703,14 @@ module.exports = {
             }
         },
         bug_development: {
+            customParams: {
+                autoStartReview: true,
+                autoStartReviewConfigFile: 'agents/pr_review.json',
+                managedSubmodules: TRACKSTATE_SETUP_SUBMODULES,
+                feedbackLoop: FLUTTER_FEEDBACK
+            }
+        },
+        bug_fix_batch_development: {
             customParams: {
                 autoStartReview: true,
                 autoStartReviewConfigFile: 'agents/pr_review.json',
