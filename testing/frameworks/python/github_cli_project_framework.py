@@ -10,6 +10,9 @@ from urllib.request import Request, urlopen
 
 from testing.core.interfaces.project_cli_probe import ProjectCliProbe
 from testing.core.models.cli_command_result import CliCommandResult
+from testing.frameworks.python.gh_cli_rate_limit import (
+    run_with_rate_limit_retry,
+)
 
 
 class GitHubCliProjectFramework(ProjectCliProbe):
@@ -245,13 +248,16 @@ class GitHubCliProjectFramework(ProjectCliProbe):
             )
 
     def _run(self, command: tuple[str, ...]) -> CliCommandResult:
-        completed = subprocess.run(
-            command,
-            cwd=self._repository_root,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        def _run_once() -> subprocess.CompletedProcess[str]:
+            return subprocess.run(
+                command,
+                cwd=self._repository_root,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+        completed = run_with_rate_limit_retry(_run_once)
         return CliCommandResult(
             command=command,
             exit_code=completed.returncode,
