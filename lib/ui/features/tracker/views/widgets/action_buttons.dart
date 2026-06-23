@@ -101,21 +101,27 @@ class SecondaryButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.ts;
+    final enabled = onPressed != null;
     return Semantics(
       button: true,
+      enabled: enabled,
+      focusable: enabled,
       identifier: semanticsIdentifier,
       label: label,
       sortKey: semanticsSortKey(semanticsSortOrder),
-      child: OutlinedButton.icon(
-        key: buttonKey,
-        onPressed: onPressed,
-        style: OutlinedButton.styleFrom(
-          foregroundColor: colors.text,
-          minimumSize: height == null ? null : Size(0, height!),
-          side: BorderSide(color: colors.border),
+      onTap: enabled ? onPressed : null,
+      child: ExcludeSemantics(
+        child: OutlinedButton.icon(
+          key: buttonKey,
+          onPressed: onPressed,
+          style: OutlinedButton.styleFrom(
+            foregroundColor: colors.text,
+            minimumSize: height == null ? null : Size(0, height!),
+            side: BorderSide(color: colors.border),
+          ),
+          icon: TrackStateIcon(icon, size: 16, color: colors.text),
+          label: Text(label),
         ),
-        icon: TrackStateIcon(icon, size: 16, color: colors.text),
-        label: Text(label),
       ),
     );
   }
