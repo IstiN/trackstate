@@ -272,6 +272,15 @@ module.exports = {
         "enabled": true
     },
     {
+        "description": "Stories in Bug To Fix \u2192 group open bugs into a bug-fix batch Epic",
+        "jql": "project = {jiraProject} AND issuetype in ('Story') AND status in ('Bug To Fix') ORDER BY updated ASC",
+        "configFile": "agents/bug_fix_batch_coordinator.json",
+        "skipIfLabel": "sm_bug_fix_batch_coordinator_triggered",
+        "addLabel": "sm_bug_fix_batch_coordinator_triggered",
+        "localExecution": true,
+        "enabled": true
+    },
+    {
         "description": "Backlog / To Do / Ready For Development / In Development Bugs \u2192 trigger bug_development",
         "jql": "project = {jiraProject} AND issuetype in ('Bug') AND status in ('Backlog', 'To Do', 'Ready For Development', 'In Development', 'In Progress') AND updated <= -15m ORDER BY updated ASC",
         "configFile": "agents/bug_development.json",
