@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../TS-39/support/ts39_runtime_service_factory.dart';
+import '../../components/factories/trackstate_runtime_service_factory.dart';
 
 void main() {
   setUp(() {

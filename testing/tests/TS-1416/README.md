@@ -12,7 +12,7 @@ Run `flutter test testing/tests/TS-1416/ts1416_hosted_runtime_onboarding_test.da
 
 ## Environment and configuration
 
-No extra secrets are required. The test uses `testing/tests/TS-1416/config.yaml` and reuses the hosted-runtime fixture client from `testing/tests/TS-39/support/`.
+No extra secrets are required. The test uses `testing/tests/TS-1416/config.yaml` and the shared hosted-runtime fixture client from `testing/fixtures/hosted_runtime_client_fixture.dart`.
 
 ## Expected passing output
 
