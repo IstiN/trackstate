@@ -12,6 +12,9 @@ from testing.core.interfaces.github_api_client import (
     GitHubApiClient,
     GitHubApiClientError,
 )
+from testing.frameworks.python.gh_cli_rate_limit import (
+    run_with_rate_limit_retry,
+)
 
 
 _HTTP_STATUS_PATTERN = re.compile(r"HTTP\s+(\d{3})")
@@ -42,23 +45,27 @@ class GhCliApiClient(GitHubApiClient):
 
         environment = os.environ.copy()
         environment.setdefault("GH_PAGER", "cat")
-        try:
-            completed = subprocess.run(
-                command,
-                cwd=self._repository_root,
-                env=environment,
-                check=False,
-                capture_output=True,
-                text=True,
-                input=input_text,
-                timeout=timeout_seconds,
-            )
-        except subprocess.TimeoutExpired as error:
-            message = (
-                f"gh api {' '.join(command[2:])} timed out after {timeout_seconds}s.\n"
-                f"STDOUT:\n{error.stdout or ''}\nSTDERR:\n{error.stderr or ''}"
-            )
-            raise GitHubApiClientError(message) from error
+
+        def _run_once() -> subprocess.CompletedProcess[str]:
+            try:
+                return subprocess.run(
+                    command,
+                    cwd=self._repository_root,
+                    env=environment,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    input=input_text,
+                    timeout=timeout_seconds,
+                )
+            except subprocess.TimeoutExpired as error:
+                message = (
+                    f"gh api {' '.join(command[2:])} timed out after {timeout_seconds}s.\n"
+                    f"STDOUT:\n{error.stdout or ''}\nSTDERR:\n{error.stderr or ''}"
+                )
+                raise GitHubApiClientError(message) from error
+
+        completed = run_with_rate_limit_retry(_run_once)
         if completed.returncode != 0:
             message = (
                 f"gh api {' '.join(command[2:])} failed with exit code "
