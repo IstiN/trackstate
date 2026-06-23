@@ -567,35 +567,46 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _buildCatalogHeader(
-          l10n: l10n,
-          title: l10n.fields,
-          addLabel: l10n.addField,
-          onAdd: canEdit ? () => _editField(l10n: l10n) : null,
+        FocusTraversalOrder(
+          order: const NumericFocusOrder(0),
+          child: _buildCatalogHeader(
+            l10n: l10n,
+            title: l10n.fields,
+            addLabel: l10n.addField,
+            onAdd: canEdit ? () => _editField(l10n: l10n) : null,
+          ),
         ),
-        for (final field in settings.fieldDefinitions)
-          _SettingsCatalogListTile(
-            title: field.name,
-            subtitle:
-                '${l10n.catalogId}: ${field.id} • '
-                '${l10n.catalogType}: ${field.type} • '
-                '${field.required ? l10n.catalogRequired : l10n.optional}'
-                '${field.reserved ? ' • ${l10n.catalogReserved}' : ''}',
-            onEdit: canEdit
-                ? () => _editField(l10n: l10n, initial: field)
-                : null,
-            onDelete: canEdit && !field.reserved
-                ? () => _replaceDraft(
-                    settings.copyWith(
-                      fieldDefinitions: [
-                        for (final entry in settings.fieldDefinitions)
-                          if (entry.id != field.id) entry,
-                      ],
-                    ),
-                  )
-                : null,
-            editLabel: '${l10n.editField} ${field.name}',
-            deleteLabel: '${l10n.deleteField} ${field.name}',
+        for (var index = 0; index < settings.fieldDefinitions.length; index++)
+          FocusTraversalOrder(
+            order: NumericFocusOrder(index + 1),
+            child: Builder(
+              builder: (context) {
+                final field = settings.fieldDefinitions[index];
+                return _SettingsCatalogListTile(
+                  title: field.name,
+                  subtitle:
+                      '${l10n.catalogId}: ${field.id} • '
+                      '${l10n.catalogType}: ${field.type} • '
+                      '${field.required ? l10n.catalogRequired : l10n.optional}'
+                      '${field.reserved ? ' • ${l10n.catalogReserved}' : ''}',
+                  onEdit: canEdit
+                      ? () => _editField(l10n: l10n, initial: field)
+                      : null,
+                  onDelete: canEdit && !field.reserved
+                      ? () => _replaceDraft(
+                          settings.copyWith(
+                            fieldDefinitions: [
+                              for (final entry in settings.fieldDefinitions)
+                                if (entry.id != field.id) entry,
+                            ],
+                          ),
+                        )
+                      : null,
+                  editLabel: '${l10n.editField} ${field.name}',
+                  deleteLabel: '${l10n.deleteField} ${field.name}',
+                );
+              },
+            ),
           ),
       ],
     );
@@ -1068,16 +1079,12 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
       children: [
         _CatalogSummaryRow(
           title: l10n.statuses,
-          names: [
-            for (final entry in settings.statusDefinitions) entry.name,
-          ],
+          names: [for (final entry in settings.statusDefinitions) entry.name],
         ),
         const SizedBox(height: 12),
         _CatalogSummaryRow(
           title: l10n.workflows,
-          names: [
-            for (final entry in settings.workflowDefinitions) entry.name,
-          ],
+          names: [for (final entry in settings.workflowDefinitions) entry.name],
         ),
         const SizedBox(height: 12),
         _CatalogSummaryRow(
@@ -1089,9 +1096,7 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
         const SizedBox(height: 12),
         _CatalogSummaryRow(
           title: l10n.fields,
-          names: [
-            for (final entry in settings.fieldDefinitions) entry.name,
-          ],
+          names: [for (final entry in settings.fieldDefinitions) entry.name],
         ),
       ],
     );
@@ -1132,7 +1137,7 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
       order: const NumericFocusOrder(0),
       child: TabBar(
         controller: _tabController,
-        isScrollable: true,
+        isScrollable: false,
         tabs: [
           Tab(text: l10n.statuses),
           Tab(text: l10n.workflows),
@@ -1300,10 +1305,7 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
 }
 
 class _CatalogSummaryRow extends StatelessWidget {
-  const _CatalogSummaryRow({
-    required this.title,
-    required this.names,
-  });
+  const _CatalogSummaryRow({required this.title, required this.names});
 
   final String title;
   final List<String> names;
@@ -1369,7 +1371,11 @@ class _SettingsCatalogListTile extends StatelessWidget {
 }
 
 class SettingsEditorShell extends StatelessWidget {
-  const SettingsEditorShell({super.key, required this.title, required this.child});
+  const SettingsEditorShell({
+    super.key,
+    required this.title,
+    required this.child,
+  });
 
   final String title;
   final Widget child;
@@ -2082,16 +2088,10 @@ class _FieldEditorState extends State<_FieldEditor> {
         SettingsTextField(label: l10n.name, controller: _nameController),
         const SizedBox(height: 12),
         _isReserved
-            ? TextButton(
-                onPressed: null,
-                style: TextButton.styleFrom(
-                  alignment: Alignment.centerLeft,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 16,
-                  ),
-                ),
-                child: Text('${l10n.catalogType} $_type'),
+            ? SettingsTextField(
+                label: l10n.catalogType,
+                initialValue: _type,
+                enabled: false,
               )
             : DropdownButtonFormField<String>(
                 initialValue: _type,
@@ -2614,4 +2614,3 @@ String _normalizedEditorId(String rawId, String fallbackName) {
       .replaceAll(RegExp(r'^-+|-+$'), '');
   return normalized;
 }
-

@@ -2368,6 +2368,7 @@ extension _TrackStateCliCommands on TrackStateCli {
       repository: target.value,
       branch: branch,
       client: _httpClient,
+      disableHostedSyncRequestCaching: true,
     );
     await repository.connect(
       RepositoryConnection(

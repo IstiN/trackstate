@@ -494,6 +494,69 @@ void main() {
       },
     );
 
+    test(
+      'disables hosted sync request caching for mutation commands',
+      () async {
+        final providerFactory = _FakeTrackStateCliProviderFactory(
+          hostedProvider: _FakeHostedTrackStateProvider(
+            user: const RepositoryUser(
+              login: 'octocat',
+              displayName: 'Octo Cat',
+            ),
+            permission: const RepositoryPermission(
+              canRead: true,
+              canWrite: true,
+              isAdmin: false,
+              canCreateBranch: true,
+              canManageAttachments: false,
+              canCheckCollaborators: false,
+            ),
+          ),
+        );
+        final repositoryFactory = _FakeTrackStateCliRepositoryFactory(
+          hostedRepository: _FakeSearchRepository(
+            snapshot: const TrackerSnapshot(
+              project: ProjectConfig(
+                key: 'DEMO',
+                name: 'Demo',
+                repository: 'owner/repo',
+                branch: 'main',
+                defaultLocale: 'en',
+                supportedLocales: <String>['en'],
+                issueTypeDefinitions: [],
+                statusDefinitions: [],
+                fieldDefinitions: [],
+              ),
+              issues: [],
+            ),
+          ),
+        );
+        final cli = TrackStateCli(
+          environment: const TrackStateCliEnvironment(
+            environment: <String, String>{
+              trackStateCliTokenEnvironmentVariable: 'env-token',
+            },
+          ),
+          providerFactory: providerFactory,
+          repositoryFactory: repositoryFactory,
+        );
+
+        await cli.run(const <String>[
+          'create',
+          '--target',
+          'hosted',
+          '--provider',
+          'github',
+          '--repository',
+          'owner/repo',
+          '--summary',
+          'Hosted mutation caching test',
+        ]);
+
+        expect(repositoryFactory.lastDisableHostedSyncRequestCaching, isTrue);
+      },
+    );
+
     test('rejects hosted targets without credentials', () async {
       final cli = TrackStateCli(
         environment: const TrackStateCliEnvironment(

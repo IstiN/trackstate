@@ -1,4 +1,3 @@
-
 part of 'trackstate_app.dart';
 
 class _DesktopWorkspaceSwitcherOverlay extends StatelessWidget {
@@ -250,7 +249,8 @@ class _TopBar extends StatelessWidget {
               !viewModel.usesLocalPersistence &&
               viewModel.hostedRepositoryAccessMode ==
                   HostedRepositoryAccessMode.disconnected &&
-              viewModel.isInitialSearchLoading;
+              (viewModel.exposesHostedAccessGates ||
+                  viewModel.isInitialSearchLoading);
           final condensedDesktop =
               !compact &&
               constraints.maxWidth < (canOpenWorkspaceOnboarding ? 1380 : 1240);
@@ -774,12 +774,16 @@ _WorkspaceDisplaySummary _activeWorkspaceSummary(
     activeWorkspace: activeWorkspace,
     localWorkspaceAvailability: localWorkspaceAvailability,
   );
+  final semanticStateLabel =
+      stateLabel == l10n.repositoryAccessAttachmentsRestricted
+      ? l10n.repositoryAccessAttachmentAccessLimited
+      : stateLabel;
   return _WorkspaceDisplaySummary(
     displayName: displayName,
     detailLabel: '$typeLabel · $stateLabel',
     textLabel: '$displayName · $typeLabel · $stateLabel',
     semanticLabel:
-        '${l10n.workspaceSwitcher}: $displayName, $typeLabel, $stateLabel',
+        '${l10n.workspaceSwitcher}: $displayName, $typeLabel, $semanticStateLabel',
     icon: isLocal ? TrackStateIconGlyph.folder : TrackStateIconGlyph.repository,
   );
 }
@@ -1184,6 +1188,18 @@ String _repositoryAccessLabel(
     RepositoryAccessState.connected => l10n.repositoryAccessConnected,
     RepositoryAccessState.connectGitHub => l10n.repositoryAccessConnectGitHub,
   };
+}
+
+String _repositoryAccessSemanticLabel(
+  AppLocalizations l10n,
+  TrackerViewModel viewModel,
+) {
+  if (viewModel.exposesHostedAccessGates &&
+      viewModel.hostedRepositoryAccessMode ==
+          HostedRepositoryAccessMode.attachmentRestricted) {
+    return l10n.repositoryAccessAttachmentAccessLimited;
+  }
+  return _repositoryAccessLabel(l10n, viewModel);
 }
 
 _SyncPillTone _workspaceSyncTone(TrackerViewModel viewModel) {
@@ -2133,4 +2149,3 @@ class _Hierarchy extends StatelessWidget {
     );
   }
 }
-

@@ -1,0 +1,9 @@
+test_id: TS-1434
+type: ui
+framework: flutter_test
+platform: linux
+dependencies: []
+notes:
+  - Reuses the editable Project settings repository fixture from TS-410.
+  - Opens the Settings Admin Workspace Fields tab and opens the first field editor.
+  - Verifies the field editor renders the visible "Type" label and exposes it as a screen-reader semantics label, reproducing the TS-1412 regression.

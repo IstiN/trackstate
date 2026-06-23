@@ -1455,12 +1455,12 @@ void main() {
         if (find
             .bySemanticsLabel(
               RegExp(
-                r'Workspace switcher: Hosted setup workspace, .*Attachments limited',
+                r'Workspace switcher: Hosted setup workspace, .*Attachment access limited',
               ),
             )
             .evaluate()
             .isNotEmpty) {
-          observedTriggerLabels.add('Attachments limited');
+          observedTriggerLabels.add('Attachment access limited');
         }
       }
 
@@ -1472,7 +1472,7 @@ void main() {
       );
       expect(
         observedTriggerLabels,
-        isNot(contains('Attachments limited')),
+        isNot(contains('Attachment access limited')),
         reason:
             'The late /user resolution must not flip the visible trigger into the post-auth attachment-restricted state until the user explicitly reconnects.',
       );

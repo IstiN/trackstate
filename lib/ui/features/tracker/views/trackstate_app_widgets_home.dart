@@ -115,6 +115,17 @@ class _TrackerHome extends StatelessWidget {
       );
     }
 
+    if (viewModel.isStartupGuardBlockingInteractiveShell) {
+      return Scaffold(
+        body: Center(
+          child: Semantics(
+            label: l10n.appTitle,
+            child: CircularProgressIndicator(color: colors.primary),
+          ),
+        ),
+      );
+    }
+
     return Shortcuts(
       shortcuts: const {
         SingleActivator(LogicalKeyboardKey.digit1): _SelectSectionIntent(

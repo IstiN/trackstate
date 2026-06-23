@@ -726,16 +726,10 @@ class FieldEditorState extends State<FieldEditor> {
         SettingsTextField(label: l10n.name, controller: _nameController),
         const SizedBox(height: 12),
         _isReserved
-            ? TextButton(
-                onPressed: null,
-                style: TextButton.styleFrom(
-                  alignment: Alignment.centerLeft,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 16,
-                  ),
-                ),
-                child: Text('${l10n.catalogType} $_type'),
+            ? SettingsTextField(
+                label: l10n.catalogType,
+                initialValue: _type,
+                enabled: false,
               )
             : DropdownButtonFormField<String>(
                 initialValue: _type,
