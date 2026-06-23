@@ -1,10 +1,7 @@
-import 'dart:ui' show Size;
-
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../testing/components/factories/testing_dependencies.dart';
-import '../testing/core/fakes/reactive_issue_detail_trackstate_repository.dart';
 import '../testing/tests/TS-1239/support/ts1239_repository_access_golden_fixture.dart';
 
 void main() {
