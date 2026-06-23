@@ -36,23 +36,11 @@ void main() {
         ]) {
           expectSingle(card, 'Settings content');
         }
-        expectSingle(robot.localGitTopBarControl, 'Local Git top-bar control');
-        if (robot.localGitTopBarControl.evaluate().isNotEmpty &&
-            robot.semanticsLabelOf(robot.localGitTopBarControl) !=
-                'Local Git') {
+        expectSingle(robot.localGitControl, 'Local Git control');
+        if (robot.localGitControl.evaluate().isNotEmpty &&
+            robot.semanticsLabelOf(robot.localGitControl) != 'Local Git') {
           failures.add(
-            'Local Git top-bar control semantics label was "${robot.semanticsLabelOf(robot.localGitTopBarControl)}" instead of "Local Git".',
-          );
-        }
-        expectSingle(
-          robot.localGitSettingsControl,
-          'Local Git settings control',
-        );
-        if (robot.localGitSettingsControl.evaluate().isNotEmpty &&
-            robot.semanticsLabelOf(robot.localGitSettingsControl) !=
-                'Local Git') {
-          failures.add(
-            'Local Git settings control semantics label was "${robot.semanticsLabelOf(robot.localGitSettingsControl)}" instead of "Local Git".',
+            'Local Git control semantics label was "${robot.semanticsLabelOf(robot.localGitControl)}" instead of "Local Git".',
           );
         }
 
@@ -70,45 +58,37 @@ void main() {
           expectSingle(card, 'GitHub settings content');
         }
         expectSingle(
-          robot.connectGitHubTopBarControl,
-          'Connect GitHub top-bar control',
+          robot.connectGitHubControl,
+          'Connect GitHub control',
           context:
               'Visible text on screen: ${robot.visibleTexts().join(' | ')}',
         );
-        if (robot.connectGitHubTopBarControl.evaluate().isNotEmpty &&
-            robot.semanticsLabelOf(robot.connectGitHubTopBarControl) !=
+        if (robot.connectGitHubControl.evaluate().isNotEmpty &&
+            robot.semanticsLabelOf(robot.connectGitHubControl) !=
                 'Connect GitHub') {
           failures.add(
-            'Connect GitHub top-bar control semantics label was "${robot.semanticsLabelOf(robot.connectGitHubTopBarControl)}" instead of "Connect GitHub".',
-          );
-        }
-        expectSingle(
-          robot.connectGitHubSettingsControl,
-          'Connect GitHub settings control',
-        );
-        if (robot.connectGitHubSettingsControl.evaluate().isNotEmpty &&
-            robot.semanticsLabelOf(robot.connectGitHubSettingsControl) !=
-                'Connect GitHub') {
-          failures.add(
-            'Connect GitHub settings control semantics label was "${robot.semanticsLabelOf(robot.connectGitHubSettingsControl)}" instead of "Connect GitHub".',
+            'Connect GitHub control semantics label was "${robot.semanticsLabelOf(robot.connectGitHubControl)}" instead of "Connect GitHub".',
           );
         }
 
         await robot.clearFocus();
         final focusOrder = await robot.collectFocusOrder(
+          tabs: 20,
           candidates: {
             'Search issues': robot.searchIssuesField,
-            'Connect GitHub': robot.connectGitHubTopBarControl,
+            'Connect GitHub': robot.connectGitHubControl,
+            'Local Git': robot.localGitControl,
             'Dark theme': robot.darkThemeControl,
           },
         );
         if (!containsAllInOrder([
           'Search issues',
-          'Connect GitHub',
           'Dark theme',
+          'Connect GitHub',
+          'Local Git',
         ]).matches(focusOrder, <dynamic, dynamic>{})) {
           failures.add(
-            'Keyboard Tab order was $focusOrder instead of including [Search issues, Connect GitHub, Dark theme] in order.',
+            'Keyboard Tab order was $focusOrder instead of including [Search issues, Dark theme, Connect GitHub, Local Git] in order.',
           );
         }
 
@@ -133,32 +113,20 @@ void main() {
         );
         await robot.openSettings();
 
-        expectSingle(robot.connectedTopBarControl, 'Connected top-bar control');
-        if (robot.connectedTopBarControl.evaluate().isNotEmpty &&
-            robot.semanticsLabelOf(robot.connectedTopBarControl) !=
-                'Connected') {
+        expectSingle(robot.connectedControl, 'Connected control');
+        if (robot.connectedControl.evaluate().isNotEmpty &&
+            robot.semanticsLabelOf(robot.connectedControl) != 'Connected') {
           failures.add(
-            'Connected top-bar control semantics label was "${robot.semanticsLabelOf(robot.connectedTopBarControl)}" instead of "Connected".',
-          );
-        }
-        expectSingle(
-          robot.connectedSettingsControl,
-          'Connected settings control',
-        );
-        if (robot.connectedSettingsControl.evaluate().isNotEmpty &&
-            robot.semanticsLabelOf(robot.connectedSettingsControl) !=
-                'Connected') {
-          failures.add(
-            'Connected settings control semantics label was "${robot.semanticsLabelOf(robot.connectedSettingsControl)}" instead of "Connected".',
+            'Connected control semantics label was "${robot.semanticsLabelOf(robot.connectedControl)}" instead of "Connected".',
           );
         }
 
         final connectedContrast = contrastRatio(
           robot.renderedTextColorWithin(
-            robot.connectedTopBarControl,
+            robot.connectedControl,
             'Connected',
           ),
-          robot.colors().primary,
+          robot.renderedButtonBackground(robot.connectedControl),
         );
         if (connectedContrast < 4.5) {
           failures.add(
