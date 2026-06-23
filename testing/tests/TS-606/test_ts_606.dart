@@ -64,19 +64,38 @@ void main() {
         };
 
         await robot.clearFocus();
-        final focusedReleaseTagPrefix = await _focusByTab(
+        final focusCandidatesWithStorage = <String, Finder>{
+          'Attachment storage mode': find.bySemanticsLabel(
+            RegExp('Attachment storage mode'),
+          ),
+          ...focusCandidates,
+        };
+        final reachedStorageSelector = await _focusByTab(
           tester,
           robot: robot,
-          label: 'Release tag prefix',
-          finder: focusCandidates['Release tag prefix']!,
+          label: 'Attachment storage mode',
+          finder: focusCandidatesWithStorage['Attachment storage mode']!,
           maxTabs: 24,
         );
-        if (!focusedReleaseTagPrefix) {
+        if (!reachedStorageSelector) {
           failures.add(
-            'Step 4 failed: keyboard Tab navigation did not move focus into the visible "Release tag prefix" field. '
+            'Step 4 failed: keyboard Tab navigation did not reach the "Attachment storage mode" selector to start the Attachments workflow cycle. '
             'Focused semantics snapshot: ${_formatSnapshot(_focusedSemanticsLabels(tester))}.',
           );
         } else {
+          await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+          await tester.pump();
+          final focusedReleaseTagPrefix =
+              robot.focusedLabel(<String, Finder>{
+                    'Release tag prefix': focusCandidates['Release tag prefix']!,
+                  }) ==
+                  'Release tag prefix';
+          if (!focusedReleaseTagPrefix) {
+            failures.add(
+              'Step 4 failed: keyboard Tab navigation did not move focus from "Attachment storage mode" into the visible "Release tag prefix" field. '
+              'Focused semantics snapshot: ${_formatSnapshot(_focusedSemanticsLabels(tester))}.',
+            );
+          } else {
           final focusTrace = await _collectFocusTraceFromCurrent(
             tester,
             robot: robot,
@@ -105,6 +124,7 @@ void main() {
               'Expected result failed: focus leaked from the Attachments workflow into global navigation instead of staying on the local action buttons. '
               'Observed focus cycle: ${_formatFocusTrace(focusTrace)}.',
             );
+          }
           }
         }
 
