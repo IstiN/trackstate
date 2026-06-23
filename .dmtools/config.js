@@ -8,6 +8,7 @@ const GOAL_INSTRUCTIONS = './.dmtools/instructions/goal/goal.md';
 const DESIGN_REFERENCE = './.dmtools/instructions/goal/DESIGN.md';
 const SETUP_REPO_INSTRUCTIONS = './.dmtools/instructions/product/trackstate_setup_repo.md';
 const TRACKSTATE_TEST_AUTOMATION_RULES = './.dmtools/instructions/agents/test_automation_hardening.md';
+const TRACKSTATE_BUG_TEST_AUTOMATION_SCOPE = './.dmtools/instructions/agents/bug_test_automation_scope.md';
 const TRACKSTATE_TEST_REVIEW_CHECKLIST = './.dmtools/instructions/agents/test_automation_review_checklist.md';
 const TRACKSTATE_FLUTTER_RULES = './.dmtools/instructions/agents/flutter_development_rules.md';
 const TRACKSTATE_WEB_FOCUS_RULES = './.dmtools/instructions/agents/flutter_web_focus_keyboard_rules.md';
@@ -586,10 +587,12 @@ module.exports = {
             TRACKSTATE_TEST_REVIEW_CHECKLIST
         ],
         bug_test_automation: [
-            TRACKSTATE_TEST_AUTOMATION_RULES
+            TRACKSTATE_TEST_AUTOMATION_RULES,
+            TRACKSTATE_BUG_TEST_AUTOMATION_SCOPE
         ],
         bug_test_automation_rework: [
-            TRACKSTATE_TEST_AUTOMATION_RULES
+            TRACKSTATE_TEST_AUTOMATION_RULES,
+            TRACKSTATE_BUG_TEST_AUTOMATION_SCOPE
         ],
         pr_bug_test_automation_review: [
             TRACKSTATE_TEST_AUTOMATION_RULES,
