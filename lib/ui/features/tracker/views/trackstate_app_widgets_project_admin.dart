@@ -579,34 +579,39 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
         for (var index = 0; index < settings.fieldDefinitions.length; index++)
           FocusTraversalOrder(
             order: NumericFocusOrder(index + 1),
-            child: _SettingsCatalogListTile(
-              title: settings.fieldDefinitions[index].name,
-              subtitle:
-                  '${l10n.catalogId}: ${settings.fieldDefinitions[index].id} • '
-                  '${l10n.catalogType}: ${settings.fieldDefinitions[index].type} • '
-                  '${settings.fieldDefinitions[index].required ? l10n.catalogRequired : l10n.optional}'
-                  '${settings.fieldDefinitions[index].reserved ? ' • ${l10n.catalogReserved}' : ''}',
-              onEdit: canEdit
-                  ? () => _editField(
-                      l10n: l10n,
-                      initial: settings.fieldDefinitions[index],
-                    )
-                  : null,
-              onDelete: canEdit && !settings.fieldDefinitions[index].reserved
-                  ? () => _replaceDraft(
-                      settings.copyWith(
-                        fieldDefinitions: [
-                          for (final entry in settings.fieldDefinitions)
-                            if (entry.id != settings.fieldDefinitions[index].id)
-                              entry,
-                        ],
-                      ),
-                    )
-                  : null,
-              editLabel:
-                  '${l10n.editField} ${settings.fieldDefinitions[index].name}',
-              deleteLabel:
-                  '${l10n.deleteField} ${settings.fieldDefinitions[index].name}',
+            child: Builder(
+              builder: (context) {
+                final field = settings.fieldDefinitions[index];
+                return _SettingsCatalogListTile(
+                  title: field.name,
+                  subtitle:
+                      '${l10n.catalogId}: ${field.id} • '
+                      '${l10n.catalogType}: ${field.type} • '
+                      '${field.required ? l10n.catalogRequired : l10n.optional}'
+                      '${field.reserved ? ' • ${l10n.catalogReserved}' : ''}',
+                  onEdit: canEdit
+                      ? () => _editField(
+                          l10n: l10n,
+                          initial: field,
+                        )
+                      : null,
+                  onDelete: canEdit && !field.reserved
+                      ? () => _replaceDraft(
+                          settings.copyWith(
+                            fieldDefinitions: [
+                              for (final entry in settings.fieldDefinitions)
+                                if (entry.id != field.id)
+                                  entry,
+                            ],
+                          ),
+                        )
+                      : null,
+                  editLabel:
+                      '${l10n.editField} ${field.name}',
+                  deleteLabel:
+                      '${l10n.deleteField} ${field.name}',
+                );
+              },
             ),
           ),
       ],
