@@ -13,7 +13,6 @@ _MIN_BACKOFF_SECONDS = 5.0
 _MAX_BACKOFF_SECONDS = 60.0
 _BACKOFF_MULTIPLIER = 2.0
 
-_RATE_LIMIT_STATUS_PATTERN = re.compile(r"\bHTTP\s+(403|429)\b")
 _RETRY_AFTER_PATTERN = re.compile(r"Retry-After:\s*(\d+)", re.IGNORECASE)
 _RATE_LIMIT_PHRASES = (
     "rate limit",
@@ -24,13 +23,9 @@ _RATE_LIMIT_PHRASES = (
 )
 
 
-def _is_rate_limit_error(stderr: str, status_code: int | None = None) -> bool:
+def _is_rate_limit_error(stderr: str) -> bool:
     """Return True when the stderr looks like a GitHub API rate-limit response."""
     normalized = stderr.lower()
-    if status_code in (403, 429):
-        return True
-    if _RATE_LIMIT_STATUS_PATTERN.search(stderr):
-        return True
     return any(phrase in normalized for phrase in _RATE_LIMIT_PHRASES)
 
 
@@ -78,5 +73,4 @@ def run_with_rate_limit_retry(
         if attempt >= max_retries:
             return completed
         time.sleep(_backoff_seconds(attempt, completed.stderr))
-    # Defensive fallback — the loop always returns above.
-    return run_command()
+    raise AssertionError("unreachable")

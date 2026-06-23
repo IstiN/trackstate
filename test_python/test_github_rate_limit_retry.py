@@ -95,6 +95,51 @@ class GhCliApiClientRateLimitRetryTest(unittest.TestCase):
         self.assertIn("rate limit", str(cm.exception).lower())
         self.assertEqual(mock_run.call_count, 5)
 
+    @mock.patch("testing.frameworks.python.gh_cli_api_client.subprocess.run")
+    @mock.patch("time.sleep", autospec=True)
+    def test_non_rate_limit_failure_raises_immediately(
+        self,
+        mock_sleep: mock.Mock,
+        mock_run: mock.Mock,
+    ) -> None:
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=(),
+            returncode=1,
+            stdout="",
+            stderr="gh api repos/test/repo failed with HTTP 404: Not Found",
+        )
+
+        with self.assertRaises(GitHubApiClientError) as cm:
+            self.client.request_text(endpoint="repos/test/repo")
+
+        self.assertIn("404", str(cm.exception))
+        self.assertEqual(mock_run.call_count, 1)
+        mock_sleep.assert_not_called()
+
+    @mock.patch("testing.frameworks.python.gh_cli_api_client.subprocess.run")
+    @mock.patch("time.sleep", autospec=True)
+    def test_permission_403_without_rate_limit_phrase_raises_immediately(
+        self,
+        mock_sleep: mock.Mock,
+        mock_run: mock.Mock,
+    ) -> None:
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=(),
+            returncode=1,
+            stdout="",
+            stderr=(
+                "gh api repos/test/repo failed with HTTP 403: "
+                "Resource not accessible by integration"
+            ),
+        )
+
+        with self.assertRaises(GitHubApiClientError) as cm:
+            self.client.request_text(endpoint="repos/test/repo")
+
+        self.assertIn("403", str(cm.exception))
+        self.assertEqual(mock_run.call_count, 1)
+        mock_sleep.assert_not_called()
+
 
 class GitHubCliProjectFrameworkRateLimitRetryTest(unittest.TestCase):
     def setUp(self) -> None:
@@ -148,6 +193,61 @@ class GitHubCliProjectFrameworkRateLimitRetryTest(unittest.TestCase):
         self.assertFalse(result.succeeded)
         self.assertIn("rate limit", result.stderr.lower())
         self.assertEqual(mock_run.call_count, 5)
+
+    @mock.patch(
+        "testing.frameworks.python.github_cli_project_framework.subprocess.run"
+    )
+    @mock.patch(
+        "time.sleep",
+        autospec=True,
+    )
+    def test_non_rate_limit_failure_returns_immediately(
+        self,
+        mock_sleep: mock.Mock,
+        mock_run: mock.Mock,
+    ) -> None:
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=(),
+            returncode=1,
+            stdout="",
+            stderr="gh api user failed with HTTP 404: Not Found",
+        )
+
+        result = self.framework.viewer_login()
+
+        self.assertFalse(result.succeeded)
+        self.assertIn("404", result.stderr)
+        self.assertEqual(mock_run.call_count, 1)
+        mock_sleep.assert_not_called()
+
+    @mock.patch(
+        "testing.frameworks.python.github_cli_project_framework.subprocess.run"
+    )
+    @mock.patch(
+        "time.sleep",
+        autospec=True,
+    )
+    def test_permission_403_without_rate_limit_phrase_returns_immediately(
+        self,
+        mock_sleep: mock.Mock,
+        mock_run: mock.Mock,
+    ) -> None:
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=(),
+            returncode=1,
+            stdout="",
+            stderr=(
+                "gh api user failed with HTTP 403: "
+                "Resource not accessible by integration"
+            ),
+        )
+
+        result = self.framework.viewer_login()
+
+        self.assertFalse(result.succeeded)
+        self.assertIn("403", result.stderr)
+        self.assertEqual(mock_run.call_count, 1)
+        mock_sleep.assert_not_called()
 
 
 if __name__ == "__main__":
