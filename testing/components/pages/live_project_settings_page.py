@@ -1872,6 +1872,42 @@ class LiveProjectSettingsPage:
             float(payload["y"]) + (float(payload["height"]) / 2),
         )
 
+    def open_connect_dialog(self) -> None:
+        """Click the Connect GitHub control to open the connection dialog."""
+        self._open_connect_dialog()
+
+    def observe_connect_dialog(self) -> dict[str, object]:
+        """Return the visible state of the Connect GitHub connection dialog."""
+        body_text = self.body_text()
+        token_count = self._session.count(self._token_input_selector)
+        return {
+            "body_text": body_text,
+            "dialog_title_visible": (
+                "Connect GitHub" in body_text
+                or "Manage GitHub access" in body_text
+            ),
+            "token_input_visible": token_count > 0,
+            "token_input_count": token_count,
+            "connect_token_visible": "Connect token" in body_text,
+            "remember_visible": "Remember on this browser" in body_text,
+            "cancel_visible": "Cancel" in body_text,
+        }
+
+    def dismiss_connect_dialog(
+        self,
+        *,
+        timeout_ms: int = 10_000,
+    ) -> None:
+        """Click the Cancel button on the Connect GitHub dialog if it is open."""
+        try:
+            self._session.click(
+                self._visible_button_selector,
+                has_text="Cancel",
+                timeout_ms=timeout_ms,
+            )
+        except WebAppTimeoutError:
+            pass
+
     def _click_visible_semantics_control(self, *, label: str, role: str) -> None:
         clicked = self._session.evaluate(
             """

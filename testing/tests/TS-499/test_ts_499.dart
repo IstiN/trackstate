@@ -106,7 +106,7 @@ void main() {
               scenario: scenario.name,
               context: 'attachment callout',
               semanticsLabel: attachmentSemantics,
-              requiredFragments: const ['Attachments'],
+              requiredFragments: const ['Attachment storage mode'],
               title: scenario.attachmentTitle,
               message: scenario.attachmentMessage,
             );
