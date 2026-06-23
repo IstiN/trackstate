@@ -14,6 +14,10 @@ void main() {
     (tester) async {
       final semantics = tester.ensureSemantics();
       final app = defaultTestingDependencies.createTrackStateAppScreen(tester);
+      // The fixture defaults to readOnlyPermission, but the provider starts
+      // in ProviderConnectionState.disconnected, so the initial state is
+      // disconnected (not read-only). This matches the unauthenticated banner
+      // scenario we need to test.
       final fixture = Ts1239RepositoryAccessGoldenFixture();
 
       await app.pump(fixture.createRepository());
