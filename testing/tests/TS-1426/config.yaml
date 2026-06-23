@@ -1,0 +1,13 @@
+test_id: TS-1426
+type: api
+framework: unittest
+platform: python
+dependencies:
+  - Python 3.12+
+  - pytest or unittest runner
+notes:
+  - Exercises the rate-limit retry helper with mocked subprocess results.
+  - No network access or GitHub credentials are required.
+runtime_inputs:
+  module: testing.frameworks.python.gh_cli_rate_limit
+  function: run_with_rate_limit_retry

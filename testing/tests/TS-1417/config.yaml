@@ -1,0 +1,7 @@
+test_id: TS-1417
+type: web
+framework: flutter_test
+platforms:
+  - vm
+  - chrome
+dependencies: []
