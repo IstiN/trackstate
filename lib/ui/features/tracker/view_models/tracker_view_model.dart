@@ -81,6 +81,7 @@ class TrackerViewModel extends ChangeNotifier {
   bool _didAutoResumeStartupRecoveryAfterAuthentication = false;
   bool _hasLoadedInitialSearchResults = false;
   bool _isRestoringLocalHostedAccess = false;
+  bool _isAutomaticAccessRestoreInProgress = false;
   bool _startupTimeoutFallbackAwaitingShellReady = false;
   HostedRepositoryAccessMode? _startupHostedAccessModeOverride;
   WorkspaceSyncService? _workspaceSyncService;
@@ -158,6 +159,12 @@ class TrackerViewModel extends ChangeNotifier {
   bool get usesLocalPersistence => _repository.usesLocalPersistence;
   bool get supportsGitHubAuth => _repository.supportsGitHubAuth;
   bool get isRestoringLocalHostedAccess => _isRestoringLocalHostedAccess;
+  bool get isStartupGuardBlockingInteractiveShell =>
+      kIsWeb &&
+      !usesLocalPersistence &&
+      supportsGitHubAuth &&
+      _isAutomaticAccessRestoreInProgress &&
+      !_startupTimeoutFallbackAwaitingShellReady;
   bool get supportsProjectSettingsAdmin =>
       _repository is ProjectSettingsRepository;
   ProviderSession? get providerSession => switch (_repository) {
@@ -306,6 +313,7 @@ class TrackerViewModel extends ChangeNotifier {
     _startupRecovery = retainedStartupRecovery;
     _didAutoResumeStartupRecoveryAfterAuthentication = false;
     _isRestoringLocalHostedAccess = false;
+    _isAutomaticAccessRestoreInProgress = false;
     _startupTimeoutFallbackAwaitingShellReady = false;
     _startupHostedAccessModeOverride = null;
     notifyListeners();
@@ -1958,6 +1966,14 @@ class TrackerViewModel extends ChangeNotifier {
     required Future<void> Function(Object error) onError,
     required Future<void> Function() onFinally,
   }) async {
+    final shouldGuardInteractiveShell =
+        kIsWeb && !usesLocalPersistence && supportsGitHubAuth;
+    if (shouldGuardInteractiveShell) {
+      _isAutomaticAccessRestoreInProgress = true;
+      if (!_disposed) {
+        notifyListeners();
+      }
+    }
     var settled = false;
 
     Future<void> finishSuccess(RepositoryUser user) async {
@@ -2002,6 +2018,13 @@ class TrackerViewModel extends ChangeNotifier {
       _startupTimeoutFallbackAwaitingShellReady = true;
       _publishStartupShellReadyDiagnosticIfNeeded();
       return false;
+    } finally {
+      if (shouldGuardInteractiveShell) {
+        _isAutomaticAccessRestoreInProgress = false;
+        if (!_disposed) {
+          notifyListeners();
+        }
+      }
     }
   }
 

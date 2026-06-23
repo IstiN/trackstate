@@ -177,6 +177,9 @@ class _SettingsState extends State<_Settings> {
       if (_canSelectHostedProvider) ...[
         _SettingsProviderButton(
           label: hostedLabel,
+          semanticLabel: widget.viewModel.usesLocalPersistence
+              ? null
+              : _repositoryAccessSemanticLabel(l10n, widget.viewModel),
           selected: _selectedProvider == _SettingsProviderSelection.hosted,
           tone:
               widget.viewModel.repositoryAccessState ==
@@ -907,8 +910,7 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
                         onPressed: () => setState(
                           () => _targetType = WorkspaceProfileTargetType.hosted,
                         ),
-                        focusTargetId:
-                            workspaceSwitcherTargetTypeHostedFocusId,
+                        focusTargetId: workspaceSwitcherTargetTypeHostedFocusId,
                         panelId: browserWorkspaceSwitcherSemanticsIdentifier,
                         child: _SettingsProviderButton(
                           label: l10n.workspaceTargetTypeHosted,

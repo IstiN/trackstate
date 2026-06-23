@@ -1417,9 +1417,8 @@ void main() {
                 required String repositoryPath,
                 required String defaultBranch,
                 required String writeBranch,
-              }) async => throw UnsupportedError(
-                'Unsupported operation: Process.run',
-              ),
+              }) async =>
+                  throw UnsupportedError('Unsupported operation: Process.run'),
         ),
       );
       await tester.pump();
@@ -2474,7 +2473,7 @@ void main() {
         find.descendant(
           of: trigger,
           matching: find.bySemanticsLabel(
-            'Workspace switcher: alpha/repo, Hosted, Attachments limited',
+            'Workspace switcher: alpha/repo, Hosted, Attachment access limited',
           ),
         ),
         findsOneWidget,

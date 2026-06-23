@@ -75,6 +75,7 @@ class GitHubTrackStateProvider
   late final http.Client _ownedClient = http.Client();
   final Map<String, Future<Map<String, Object?>>> _sharedWebUserProbes =
       <String, Future<Map<String, Object?>>>{};
+  String? _bootstrapReadToken;
   final String repositoryName;
   final String sourceRef;
   final bool _disableHostedSyncRequestCaching;
@@ -116,6 +117,7 @@ class GitHubTrackStateProvider
       return _fetchSharedWebUserProbeJson(connection.token);
     })();
     _connection = connection;
+    _bootstrapReadToken = null;
     return RepositoryUser(
       login: userJson['login']?.toString() ?? 'github',
       displayName: userJson['name']?.toString() ?? '',
@@ -164,10 +166,12 @@ class GitHubTrackStateProvider
   }
 
   void startStartupAuthProbe(String token) {
-    if (!kIsWeb || token.trim().isEmpty) {
+    final normalizedToken = token.trim();
+    if (!kIsWeb || normalizedToken.isEmpty) {
       return;
     }
-    _fetchSharedWebUserProbeJson(token);
+    _bootstrapReadToken = normalizedToken;
+    _fetchSharedWebUserProbeJson(normalizedToken);
   }
 
   @override
@@ -1716,7 +1720,9 @@ class GitHubTrackStateProvider
     String? token,
   }) async {
     final uri = _githubUri(path, queryParameters);
-    final headers = _githubHeaders(token ?? _connection?.token);
+    final headers = _githubHeaders(
+      token ?? _connection?.token ?? _bootstrapReadToken,
+    );
     final response = await (_useGetResponseFetcher
         ? () async {
             final fetched = await _getResponseFetcher(

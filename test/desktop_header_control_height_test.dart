@@ -57,7 +57,7 @@ void main() {
           .last;
       final workspaceSwitcherButton = find
           .bySemanticsLabel(
-            RegExp('^Workspace switcher: .*Attachments limited\$'),
+            RegExp('^Workspace switcher: .*Attachment access limited\$'),
           )
           .last;
       final themeToggle = find
@@ -98,55 +98,54 @@ void main() {
     }
   });
 
-  testWidgets(
-    'desktop top bar search field keeps zero vertical content padding',
-    (tester) async {
-      const attachmentRestrictedPermission = RepositoryPermission(
-        canRead: true,
-        canWrite: true,
-        isAdmin: false,
-        canCreateBranch: true,
-        canManageAttachments: false,
-        attachmentUploadMode: AttachmentUploadMode.noLfs,
-        canCheckCollaborators: false,
-      );
+  testWidgets('desktop top bar search field keeps zero vertical content padding', (
+    tester,
+  ) async {
+    const attachmentRestrictedPermission = RepositoryPermission(
+      canRead: true,
+      canWrite: true,
+      isAdmin: false,
+      canCreateBranch: true,
+      canManageAttachments: false,
+      attachmentUploadMode: AttachmentUploadMode.noLfs,
+      canCheckCollaborators: false,
+    );
 
-      tester.view.physicalSize = const Size(1440, 960);
-      tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1440, 960);
+    tester.view.devicePixelRatio = 1;
 
-      try {
-        await tester.pumpWidget(
-          TrackStateApp(
-            repository: ReactiveIssueDetailTrackStateRepository(
-              permission: attachmentRestrictedPermission,
-            ),
+    try {
+      await tester.pumpWidget(
+        TrackStateApp(
+          repository: ReactiveIssueDetailTrackStateRepository(
+            permission: attachmentRestrictedPermission,
           ),
-        );
-        await tester.pumpAndSettle();
+        ),
+      );
+      await tester.pumpAndSettle();
 
-        final searchField = tester.widget<TextField>(find.byType(TextField));
-        final contentPadding = searchField.decoration?.contentPadding;
-        final resolvedPadding = contentPadding! as EdgeInsets;
+      final searchField = tester.widget<TextField>(find.byType(TextField));
+      final contentPadding = searchField.decoration?.contentPadding;
+      final resolvedPadding = contentPadding! as EdgeInsets;
 
-        expect(contentPadding, isA<EdgeInsets>());
-        expect(
-          resolvedPadding.top,
-          0,
-          reason:
-              'Desktop search field should not add vertical content padding, or the browser text-editing host grows beyond the required 32px header height.',
-        );
-        expect(
-          resolvedPadding.bottom,
-          0,
-          reason:
-              'Desktop search field should not add vertical content padding, or the browser text-editing host grows beyond the required 32px header height.',
-        );
-      } finally {
-        tester.view.resetPhysicalSize();
-        tester.view.resetDevicePixelRatio();
-      }
-    },
-  );
+      expect(contentPadding, isA<EdgeInsets>());
+      expect(
+        resolvedPadding.top,
+        0,
+        reason:
+            'Desktop search field should not add vertical content padding, or the browser text-editing host grows beyond the required 32px header height.',
+      );
+      expect(
+        resolvedPadding.bottom,
+        0,
+        reason:
+            'Desktop search field should not add vertical content padding, or the browser text-editing host grows beyond the required 32px header height.',
+      );
+    } finally {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    }
+  });
 
   testWidgets(
     'desktop top bar exposes a shared semantics container for audited controls',
