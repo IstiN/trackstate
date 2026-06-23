@@ -1322,19 +1322,21 @@ class _SettingsProviderButton extends StatelessWidget {
       selected: selected,
       label: label,
       excludeSemantics: true,
-      child: SizedBox(
-        width: double.infinity,
-        child: selected
-            ? FilledButton(
-                onPressed: onPressed,
-                style: style,
-                child: Text(label),
-              )
-            : OutlinedButton(
-                onPressed: onPressed,
-                style: style,
-                child: Text(label),
-              ),
+      child: RepaintBoundary(
+        child: SizedBox(
+          width: double.infinity,
+          child: selected
+              ? FilledButton(
+                  onPressed: onPressed,
+                  style: style,
+                  child: Text(label),
+                )
+              : OutlinedButton(
+                  onPressed: onPressed,
+                  style: style,
+                  child: Text(label),
+                ),
+        ),
       ),
     );
   }
@@ -1368,12 +1370,9 @@ class _SettingsProviderButton extends StatelessWidget {
   }
 
   ButtonStyle _connectedStyle(BuildContext context, TrackStateColors colors) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final foreground = isDark ? colors.page : colors.page;
-
     return FilledButton.styleFrom(
       backgroundColor: colors.success,
-      foregroundColor: foreground,
+      foregroundColor: colors.page,
       alignment: Alignment.centerLeft,
       minimumSize: const Size.fromHeight(52),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
