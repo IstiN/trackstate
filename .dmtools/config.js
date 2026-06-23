@@ -59,8 +59,10 @@ module.exports = {
     // Keep codegraph_tools only in globalCliPrompts; adding it to additionalInstructions
     // as well duplicates the mermaid diagram in every agent prompt.
     globalAdditionalInstructions: [],
-    // SM parallelism: run only one AI teammate workflow at a time to keep PR review/rework first.
-    smMaxWorkflows: 1,
+    // SM parallelism: allow one development workflow plus one review/rework/merge
+    // workflow to run concurrently so open PRs are reviewed while the next bug is
+    // being developed. Bug development itself stays capped at 1 via concurrencyKey.
+    smMaxWorkflows: 2,
     smRules: [
     {
         "description": "In Testing Stories (pr_approved or already-merged test PR) \u2192 merge test automation PR",
