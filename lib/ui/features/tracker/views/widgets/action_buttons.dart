@@ -109,7 +109,7 @@ class SecondaryButton extends StatelessWidget {
       identifier: semanticsIdentifier,
       label: label,
       sortKey: semanticsSortKey(semanticsSortOrder),
-      onTap: onPressed,
+      onTap: enabled ? onPressed : null,
       child: ExcludeSemantics(
         child: OutlinedButton.icon(
           key: buttonKey,
