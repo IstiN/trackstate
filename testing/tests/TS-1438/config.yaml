@@ -1,0 +1,9 @@
+test_id: TS-1438
+type: ui
+framework: flutter_test
+platform: widget
+dependencies: []
+notes:
+  - Pumps the production SecondaryButton widget with a Connect GitHub label and verifies the semantics tree.
+  - Confirms the button exposes exactly one button semantics node with a tap action after the TS-1418 fix.
+  - Passes only when the outer Semantics node carries the tap action and the inner OutlinedButton is excluded from the semantics tree.
