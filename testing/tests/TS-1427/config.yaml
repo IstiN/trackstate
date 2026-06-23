@@ -1,0 +1,13 @@
+test_id: TS-1427
+type: api
+framework: unittest
+platform: python
+dependencies:
+  - Python 3.12+
+  - pytest or unittest runner
+notes:
+  - Verifies the diagnostic message produced after rate-limit retries are exhausted.
+  - No network access or GitHub credentials are required.
+runtime_inputs:
+  module: testing.frameworks.python.gh_cli_rate_limit
+  function: run_with_rate_limit_retry
