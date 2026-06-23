@@ -250,7 +250,8 @@ class _TopBar extends StatelessWidget {
               !viewModel.usesLocalPersistence &&
               viewModel.hostedRepositoryAccessMode ==
                   HostedRepositoryAccessMode.disconnected &&
-              viewModel.isInitialSearchLoading;
+              (viewModel.exposesHostedAccessGates ||
+                  viewModel.isInitialSearchLoading);
           final condensedDesktop =
               !compact &&
               constraints.maxWidth < (canOpenWorkspaceOnboarding ? 1380 : 1240);
