@@ -1322,19 +1322,21 @@ class _SettingsProviderButton extends StatelessWidget {
       selected: selected,
       label: label,
       excludeSemantics: true,
-      child: SizedBox(
-        width: double.infinity,
-        child: selected
-            ? FilledButton(
-                onPressed: onPressed,
-                style: style,
-                child: Text(label),
-              )
-            : OutlinedButton(
-                onPressed: onPressed,
-                style: style,
-                child: Text(label),
-              ),
+      child: RepaintBoundary(
+        child: SizedBox(
+          width: double.infinity,
+          child: selected
+              ? FilledButton(
+                  onPressed: onPressed,
+                  style: style,
+                  child: Text(label),
+                )
+              : OutlinedButton(
+                  onPressed: onPressed,
+                  style: style,
+                  child: Text(label),
+                ),
+        ),
       ),
     );
   }
