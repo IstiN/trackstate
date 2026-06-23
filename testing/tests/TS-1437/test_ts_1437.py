@@ -13,9 +13,6 @@ if str(REPO_ROOT) not in sys.path:
 from testing.components.pages.live_project_settings_page import (  # noqa: E402
     LiveProjectSettingsPage,
 )
-from testing.components.pages.trackstate_tracker_page import (  # noqa: E402
-    TrackStateTrackerPage,
-)
 from testing.components.services.live_setup_repository_service import (  # noqa: E402
     LiveSetupRepositoryService,
 )
@@ -30,8 +27,6 @@ TEST_CASE_TITLE = (
 )
 RUN_COMMAND = "python testing/tests/TS-1437/test_ts_1437.py"
 DESKTOP_VIEWPORT = {"width": 1440, "height": 960}
-EXPECTED_BUTTON_LABEL = "Connect GitHub"
-EXPECTED_DIALOG_TITLE = "Connect GitHub"
 TOKEN_INPUT_LABEL = "Fine-grained token"
 
 OUTPUTS_DIR = REPO_ROOT / "outputs"
@@ -117,7 +112,7 @@ def main() -> None:
                     observed="opened_view=Project Settings",
                 )
 
-                settings_page._open_connect_dialog()
+                settings_page.open_connect_dialog()
                 _record_step(
                     result,
                     step=3,
@@ -126,7 +121,7 @@ def main() -> None:
                     observed="Playwright successfully clicked the Project Settings Connect GitHub button via the page object.",
                 )
 
-                dialog_observation = _observe_connect_dialog(tracker_page)
+                dialog_observation = settings_page.observe_connect_dialog()
                 result["dialog_observation"] = dialog_observation
                 _assert_connect_dialog_open(dialog_observation)
                 _record_step(
@@ -158,7 +153,7 @@ def main() -> None:
                     ),
                 )
 
-                _dismiss_connect_dialog(tracker_page)
+                settings_page.dismiss_connect_dialog()
             except Exception:
                 settings_page.screenshot(str(FAILURE_SCREENSHOT_PATH))
                 result["screenshot"] = str(FAILURE_SCREENSHOT_PATH)
@@ -173,28 +168,12 @@ def main() -> None:
     print(f"{TICKET_KEY} passed")
 
 
-def _observe_connect_dialog(
-    tracker_page: TrackStateTrackerPage,
-) -> dict[str, object]:
-    body_text = tracker_page.body_text()
-    token_input_selector = 'input[aria-label="Fine-grained token"]'
-    token_count = tracker_page.session.count(token_input_selector)
-    return {
-        "body_text": body_text,
-        "dialog_title_visible": EXPECTED_DIALOG_TITLE in body_text,
-        "token_input_visible": token_count > 0,
-        "token_input_count": token_count,
-        "connect_token_visible": "Connect token" in body_text,
-        "remember_visible": "Remember on this browser" in body_text,
-        "cancel_visible": "Cancel" in body_text,
-    }
-
-
 def _assert_connect_dialog_open(observation: dict[str, object]) -> None:
     errors: list[str] = []
     if not observation["dialog_title_visible"]:
         errors.append(
-            f"The dialog title '{EXPECTED_DIALOG_TITLE}' was not visible in the hosted body text."
+            "The connection dialog title ('Connect GitHub' or 'Manage GitHub access') "
+            "was not visible in the hosted body text."
         )
     if not observation["token_input_visible"]:
         errors.append(
@@ -209,17 +188,6 @@ def _assert_connect_dialog_open(observation: dict[str, object]) -> None:
             "Step 4 failed: clicking Connect GitHub did not open the expected connection dialog.\n"
             + "\n".join(errors)
         )
-
-
-def _dismiss_connect_dialog(tracker_page: TrackStateTrackerPage) -> None:
-    try:
-        tracker_page.session.click(
-            'flt-semantics[role="button"]',
-            has_text="Cancel",
-            timeout_ms=10_000,
-        )
-    except Exception:
-        pass
 
 
 def _record_step(

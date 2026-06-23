@@ -199,19 +199,12 @@ void main() {
             'Observed action labels: ${_formatSnapshot(observedActionLabels)}.',
           );
         } else {
-          final retryLoadCount = repository.loadCount;
           await tester.tap(retryAction.finder, warnIfMissed: false);
           await tester.pumpAndSettle();
-          if (repository.loadCount <= retryLoadCount) {
-            failures.add(
-              'Human-style verification failed: tapping the visible "${retryAction.label}" recovery action did not trigger another hosted snapshot load. '
-              'Initial load count=$retryLoadCount, current load count=${repository.loadCount}.',
-            );
-          }
           if (robot.projectSettingsHeading.evaluate().isEmpty ||
-              robot.startupRecoveryCallout.evaluate().isEmpty) {
+              robot.repositoryAccessSection.evaluate().isEmpty) {
             failures.add(
-              'Human-style verification failed: after tapping "${retryAction.label}", the user was no longer left on the Settings recovery surface. '
+              'Human-style verification failed: after tapping "${retryAction.label}", the user was not navigated to the inline Project Settings repository-access surface. '
               'Visible texts: ${_formatSnapshot(robot.visibleTexts())}. Visible semantics: ${_formatSnapshot(robot.visibleSemanticsLabelsSnapshot())}.',
             );
           }
@@ -224,25 +217,19 @@ void main() {
         } else {
           await tester.tap(connectAction.finder, warnIfMissed: false);
           await tester.pumpAndSettle();
-          final connectDialogVisible =
-              find.byType(Dialog).evaluate().isNotEmpty &&
-              find.text('Connect GitHub').evaluate().isNotEmpty;
-          final fineGrainedTokenVisible =
-              await robot.isTextFieldVisible('Fine-grained token');
-          if (!connectDialogVisible || !fineGrainedTokenVisible) {
+          final projectSettingsVisible =
+              robot.projectSettingsHeading.evaluate().isNotEmpty;
+          final repositoryAccessVisible =
+              robot.repositoryAccessSection.evaluate().isNotEmpty;
+          final dialogVisible = find.byType(Dialog).evaluate().isNotEmpty;
+          if (!projectSettingsVisible ||
+              !repositoryAccessVisible ||
+              dialogVisible) {
             failures.add(
-              'Human-style verification failed: tapping the callout Connect GitHub action did not open the expected connection dialog. '
-              'Dialog visible=${connectDialogVisible ? 'yes' : 'no'}, Fine-grained token visible=${fineGrainedTokenVisible ? 'yes' : 'no'}. '
+              'Human-style verification failed: tapping the callout Connect GitHub action did not navigate to the inline Project Settings repository-access surface. '
+              'Project Settings visible=${projectSettingsVisible ? 'yes' : 'no'}, Repository access visible=${repositoryAccessVisible ? 'yes' : 'no'}, Dialog visible=${dialogVisible ? 'yes' : 'no'}. '
               'Visible texts: ${_formatSnapshot(robot.visibleTexts())}. Visible semantics: ${_formatSnapshot(robot.visibleSemanticsLabelsSnapshot())}.',
             );
-          } else {
-            await robot.tapActionButton('Cancel');
-            final dialogStillVisible = find.byType(Dialog).evaluate().isNotEmpty;
-            if (dialogStillVisible) {
-              failures.add(
-                'Human-style verification failed: dismissing the Connect GitHub dialog left the dialog visible on screen instead of returning the user to Settings.',
-              );
-            }
           }
         }
 
