@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trackstate/data/providers/trackstate_provider.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
+import 'package:trackstate/data/services/startup_auth_probe_diagnostics.dart';
 import 'package:trackstate/data/services/trackstate_auth_store.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
 import 'package:trackstate/ui/features/tracker/view_models/tracker_view_model.dart';
@@ -51,6 +52,53 @@ void main() {
     },
     timeout: const Timeout(Duration(seconds: 20)),
   );
+
+  test(
+    'startup auth probe fallback diagnostic captures the 11-second synchronization timeout',
+    () async {
+      const workspaceId = 'hosted:trackstate/trackstate@main';
+      final provider = _WritePermissionBeforeAuthProvider();
+      final repository = _DelayedConnectRepository(
+        provider: provider,
+        snapshot: await _snapshotForRepository('trackstate/trackstate'),
+      );
+      final messages = <String>[];
+      final previousDiagnostics = startupAuthProbeDiagnostics;
+      startupAuthProbeDiagnostics = StartupAuthProbeDiagnostics(
+        logger: messages.add,
+      );
+      addTearDown(() {
+        startupAuthProbeDiagnostics = previousDiagnostics;
+      });
+
+      final viewModel = TrackerViewModel(
+        repository: repository,
+        authStore: _FixedAuthStore(),
+        workspaceId: workspaceId,
+        guardInteractiveShellOverride: true,
+      );
+      addTearDown(viewModel.dispose);
+      addTearDown(provider.completeAuthentication);
+
+      await viewModel.load();
+
+      expect(messages, isNotEmpty);
+      final fallbackMessage = messages.firstWhere(
+        (message) => message.contains('TrackState startup fallback diagnostic:'),
+      );
+      expect(
+        fallbackMessage,
+        contains('timeout_seconds=11.00'),
+        reason:
+            'The fallback diagnostic must report the 11-second hosted startup probe timeout, not the 10-second access-restore timeout.',
+      );
+      expect(
+        fallbackMessage,
+        contains('shell_ready transition after timeout fallback'),
+      );
+    },
+    timeout: const Timeout(Duration(seconds: 20)),
+  );
 }
 
 class _WritePermissionBeforeAuthProvider implements TrackStateProviderAdapter {
@@ -68,6 +116,7 @@ class _WritePermissionBeforeAuthProvider implements TrackStateProviderAdapter {
 
   @override
   Future<RepositoryUser> authenticate(RepositoryConnection connection) async {
+    startupAuthProbeDiagnostics.recordAuthProbeStart('/user');
     await _authenticationGate.future;
     _authenticated = true;
     return const RepositoryUser(login: 'demo-user', displayName: 'Demo User');

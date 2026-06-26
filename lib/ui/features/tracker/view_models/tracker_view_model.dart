@@ -2151,7 +2151,7 @@ class TrackerViewModel extends ChangeNotifier {
       _startupHostedAccessModeOverride =
           HostedRepositoryAccessMode.disconnected;
       startupAuthProbeDiagnostics.recordFallbackShellReady(
-        timeout: startupAccessRestoreTimeout,
+        timeout: repository.hostedStartupProbeTimeout,
       );
     }
     notifyListeners();
