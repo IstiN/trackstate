@@ -162,10 +162,11 @@ class TrackerViewModel extends ChangeNotifier {
   bool get usesLocalPersistence => _repository.usesLocalPersistence;
   bool get supportsGitHubAuth => _repository.supportsGitHubAuth;
   bool get isRestoringLocalHostedAccess => _isRestoringLocalHostedAccess;
+  bool get _shouldGuardInteractiveShell =>
+      _guardInteractiveShellOverride ??
+      (kIsWeb && !usesLocalPersistence && supportsGitHubAuth);
   bool get isStartupGuardBlockingInteractiveShell {
-    final guardActive = _guardInteractiveShellOverride ??
-        (kIsWeb && !usesLocalPersistence && supportsGitHubAuth);
-    return guardActive &&
+    return _shouldGuardInteractiveShell &&
         _isAutomaticAccessRestoreInProgress &&
         !_startupTimeoutFallbackAwaitingShellReady &&
         _startupHostedAccessModeOverride !=
@@ -344,14 +345,11 @@ class TrackerViewModel extends ChangeNotifier {
     }
 
     try {
-      final shouldGuardInteractiveShell =
-          _guardInteractiveShellOverride ??
-          (kIsWeb && !usesLocalPersistence && supportsGitHubAuth);
       if (_repository is ProviderBackedTrackStateRepository &&
           !usesLocalPersistence &&
           supportsGitHubAuth) {
         deferredAccessRestore = _restoreGitHubConnection;
-        if (shouldGuardInteractiveShell) {
+        if (_shouldGuardInteractiveShell) {
           _isAutomaticAccessRestoreInProgress = true;
           if (!_disposed) {
             notifyListeners();
@@ -1988,10 +1986,7 @@ class TrackerViewModel extends ChangeNotifier {
     required Future<void> Function(Object error) onError,
     required Future<void> Function() onFinally,
   }) async {
-    final shouldGuardInteractiveShell =
-        _guardInteractiveShellOverride ??
-        (kIsWeb && !usesLocalPersistence && supportsGitHubAuth);
-    if (shouldGuardInteractiveShell) {
+    if (_shouldGuardInteractiveShell) {
       _isAutomaticAccessRestoreInProgress = true;
       if (!_disposed) {
         notifyListeners();
@@ -2039,14 +2034,14 @@ class TrackerViewModel extends ChangeNotifier {
         timeout: startupAccessRestoreTimeout,
       );
       _startupTimeoutFallbackAwaitingShellReady = true;
-      if (shouldGuardInteractiveShell) {
+      if (_shouldGuardInteractiveShell) {
         _startupHostedAccessModeOverride =
             HostedRepositoryAccessMode.disconnected;
       }
       _publishStartupShellReadyDiagnosticIfNeeded();
       return false;
     } finally {
-      if (shouldGuardInteractiveShell) {
+      if (_shouldGuardInteractiveShell) {
         _isAutomaticAccessRestoreInProgress = false;
         if (!_disposed) {
           notifyListeners();

@@ -24,9 +24,13 @@ void main() {
         guardInteractiveShellOverride: true,
       );
 
+      addTearDown(viewModel.dispose);
+      addTearDown(provider.completeAuthentication);
+
       final loadFuture = viewModel.load();
 
       // Wait for the snapshot to publish while the auth probe is still pending.
+      await pumpEventQueue();
       while (viewModel.snapshot == null) {
         await Future<void>.delayed(const Duration(milliseconds: 10));
       }
@@ -47,8 +51,6 @@ void main() {
         reason:
             'The interactive shell must be unblocked once the startup auth probe/restore completes.',
       );
-
-      viewModel.dispose();
     },
   );
 }
