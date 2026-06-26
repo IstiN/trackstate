@@ -162,14 +162,15 @@ class TrackerViewModel extends ChangeNotifier {
   bool get usesLocalPersistence => _repository.usesLocalPersistence;
   bool get supportsGitHubAuth => _repository.supportsGitHubAuth;
   bool get isRestoringLocalHostedAccess => _isRestoringLocalHostedAccess;
-  bool get isStartupGuardBlockingInteractiveShell =>
-      kIsWeb &&
-      !usesLocalPersistence &&
-      supportsGitHubAuth &&
-      _isAutomaticAccessRestoreInProgress &&
-      !_startupTimeoutFallbackAwaitingShellReady &&
-      _startupHostedAccessModeOverride !=
-          HostedRepositoryAccessMode.disconnected;
+  bool get isStartupGuardBlockingInteractiveShell {
+    final guardActive = _guardInteractiveShellOverride ??
+        (kIsWeb && !usesLocalPersistence && supportsGitHubAuth);
+    return guardActive &&
+        _isAutomaticAccessRestoreInProgress &&
+        !_startupTimeoutFallbackAwaitingShellReady &&
+        _startupHostedAccessModeOverride !=
+            HostedRepositoryAccessMode.disconnected;
+  }
   bool get supportsProjectSettingsAdmin =>
       _repository is ProjectSettingsRepository;
   ProviderSession? get providerSession => switch (_repository) {
@@ -343,10 +344,19 @@ class TrackerViewModel extends ChangeNotifier {
     }
 
     try {
+      final shouldGuardInteractiveShell =
+          _guardInteractiveShellOverride ??
+          (kIsWeb && !usesLocalPersistence && supportsGitHubAuth);
       if (_repository is ProviderBackedTrackStateRepository &&
           !usesLocalPersistence &&
           supportsGitHubAuth) {
         deferredAccessRestore = _restoreGitHubConnection;
+        if (shouldGuardInteractiveShell) {
+          _isAutomaticAccessRestoreInProgress = true;
+          if (!_disposed) {
+            notifyListeners();
+          }
+        }
         await _primeStartupGitHubAuthProbe();
       }
       await _loadSnapshotAndSearch(allowHostedStartupFallback: true);
@@ -1786,88 +1796,95 @@ class TrackerViewModel extends ChangeNotifier {
   }
 
   Future<void> _restoreGitHubConnection() async {
-    final target = await _connectionTarget();
-    if (target == null || _isConnected) return;
-    final callbackToken = _callbackToken();
-    final storedToken =
-        callbackToken ??
-        await _authStore.readToken(
-          repository: target.repository,
-          workspaceId: _workspaceId,
-        );
-    if (storedToken == null || storedToken.isEmpty) {
-      if (_callbackCode() != null) {
-        _message = TrackerMessage.githubAuthorizationCodeReturned();
-        if (!_isLoading && !_disposed) {
-          notifyListeners();
-        }
-      }
-      return;
-    }
     try {
-      if (kIsWeb) {
-        final repository = _repository;
-        if (repository is ProviderBackedTrackStateRepository) {
-          final providerAdapter = repository.providerAdapter;
-          if (providerAdapter is GitHubTrackStateProvider) {
-            providerAdapter.startStartupAuthProbe(storedToken);
+      final target = await _connectionTarget();
+      if (target == null || _isConnected) return;
+      final callbackToken = _callbackToken();
+      final storedToken =
+          callbackToken ??
+          await _authStore.readToken(
+            repository: target.repository,
+            workspaceId: _workspaceId,
+          );
+      if (storedToken == null || storedToken.isEmpty) {
+        if (_callbackCode() != null) {
+          _message = TrackerMessage.githubAuthorizationCodeReturned();
+          if (!_isLoading && !_disposed) {
+            notifyListeners();
           }
         }
+        return;
       }
-      final completedWithinTimeout =
-          await _runAutomaticRepositoryConnectionRestore(
-            connect: () => _repository.connect(
-              GitHubConnection(
-                repository: target.repository,
-                branch: target.branch,
-                token: storedToken,
+      try {
+        if (kIsWeb) {
+          final repository = _repository;
+          if (repository is ProviderBackedTrackStateRepository) {
+            final providerAdapter = repository.providerAdapter;
+            if (providerAdapter is GitHubTrackStateProvider) {
+              providerAdapter.startStartupAuthProbe(storedToken);
+            }
+          }
+        }
+        final completedWithinTimeout =
+            await _runAutomaticRepositoryConnectionRestore(
+              connect: () => _repository.connect(
+                GitHubConnection(
+                  repository: target.repository,
+                  branch: target.branch,
+                  token: storedToken,
+                ),
               ),
-            ),
-            onSuccess: (user) async {
-              _connectedUser = user;
-              _isConnected = true;
-              if (callbackToken != null) {
-                _startupHostedAccessModeOverride = null;
-              }
-              if (callbackToken != null) {
-                await _authStore.saveToken(
-                  callbackToken,
+              onSuccess: (user) async {
+                _connectedUser = user;
+                _isConnected = true;
+                if (callbackToken != null) {
+                  _startupHostedAccessModeOverride = null;
+                }
+                if (callbackToken != null) {
+                  await _authStore.saveToken(
+                    callbackToken,
+                    repository: _workspaceId == null ? target.repository : null,
+                    workspaceId: _workspaceId,
+                  );
+                }
+                await _resumeStartupRecoveryAfterAuthentication();
+                await _reloadHostedStartupShellFallbackIfNeeded();
+                if (callbackToken != null) {
+                  _message = TrackerMessage.githubConnected(
+                    login: user.login,
+                    repository: target.repository,
+                  );
+                }
+              },
+              onError: (error) async {
+                _message = TrackerMessage.storedGitHubTokenInvalid(error);
+                await _authStore.clearToken(
                   repository: _workspaceId == null ? target.repository : null,
                   workspaceId: _workspaceId,
                 );
-              }
-              await _resumeStartupRecoveryAfterAuthentication();
-              await _reloadHostedStartupShellFallbackIfNeeded();
-              if (callbackToken != null) {
-                _message = TrackerMessage.githubConnected(
-                  login: user.login,
-                  repository: target.repository,
-                );
-              }
-            },
-            onError: (error) async {
-              _message = TrackerMessage.storedGitHubTokenInvalid(error);
-              await _authStore.clearToken(
-                repository: _workspaceId == null ? target.repository : null,
-                workspaceId: _workspaceId,
-              );
-            },
-            onFinally: () async {
-              _bindProviderSession();
-            },
-          );
-      if (!completedWithinTimeout &&
-          _startupHostedAccessModeOverride == null &&
-          _snapshot != null) {
-        _startupHostedAccessModeOverride =
-            HostedRepositoryAccessMode.disconnected;
-        if (!_disposed) {
-          notifyListeners();
+              },
+              onFinally: () async {
+                _bindProviderSession();
+              },
+            );
+        if (!completedWithinTimeout &&
+            _startupHostedAccessModeOverride == null &&
+            _snapshot != null) {
+          _startupHostedAccessModeOverride =
+              HostedRepositoryAccessMode.disconnected;
+          if (!_disposed) {
+            notifyListeners();
+          }
         }
+      } on Object catch (_) {
+        _bindProviderSession();
+        rethrow;
       }
-    } on Object catch (_) {
-      _bindProviderSession();
-      rethrow;
+    } finally {
+      _isAutomaticAccessRestoreInProgress = false;
+      if (!_disposed) {
+        notifyListeners();
+      }
     }
   }
 
