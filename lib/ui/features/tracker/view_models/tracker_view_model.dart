@@ -167,7 +167,9 @@ class TrackerViewModel extends ChangeNotifier {
       !usesLocalPersistence &&
       supportsGitHubAuth &&
       _isAutomaticAccessRestoreInProgress &&
-      !_startupTimeoutFallbackAwaitingShellReady;
+      !_startupTimeoutFallbackAwaitingShellReady &&
+      _startupHostedAccessModeOverride !=
+          HostedRepositoryAccessMode.disconnected;
   bool get supportsProjectSettingsAdmin =>
       _repository is ProjectSettingsRepository;
   ProviderSession? get providerSession => switch (_repository) {
