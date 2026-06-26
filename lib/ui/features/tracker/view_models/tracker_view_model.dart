@@ -2016,6 +2016,10 @@ class TrackerViewModel extends ChangeNotifier {
         timeout: startupAccessRestoreTimeout,
       );
       _startupTimeoutFallbackAwaitingShellReady = true;
+      if (shouldGuardInteractiveShell) {
+        _startupHostedAccessModeOverride =
+            HostedRepositoryAccessMode.disconnected;
+      }
       _publishStartupShellReadyDiagnosticIfNeeded();
       return false;
     } finally {
