@@ -103,7 +103,7 @@ module.exports = {
     },
     {
         "description": "Backlog / To Do / Ready For Development / In Development Bugs → trigger bug_development",
-        "jql": "project = {jiraProject} AND issuetype in ('Bug') AND status in ('Backlog', 'To Do', 'Ready For Development', 'In Development', 'In Progress') AND labels NOT IN ('bug_fix_batch') AND updated <= -15m ORDER BY updated ASC",
+        "jql": "project = {jiraProject} AND issuetype in ('Bug') AND status in ('Backlog', 'To Do', 'Ready For Development', 'In Development', 'In Progress') AND (labels is EMPTY OR labels NOT IN ('bug_fix_batch')) ORDER BY updated ASC",
         "configFile": "agents/bug_development.json",
         "concurrencyKey": "bug_development",
         "skipIfLabel": "sm_bug_development_triggered",
