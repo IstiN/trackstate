@@ -21,6 +21,7 @@ void main() {
         repository: repository,
         authStore: _FixedAuthStore(),
         workspaceId: workspaceId,
+        guardInteractiveShellOverride: true,
       );
       addTearDown(viewModel.dispose);
       addTearDown(provider.completeAuthentication);
@@ -33,8 +34,14 @@ void main() {
         reason:
             'After the startup timeout the visible hosted access mode must be disconnected.',
       );
-      expect(viewModel.hasBlockedWriteAccess, isTrue);
       expect(viewModel.providerSession, isNotNull);
+      expect(
+        viewModel.providerSession?.canWrite,
+        isTrue,
+        reason:
+            'The fixture must simulate a permissive provider session before auth completes so the test proves the ViewModel gate overrides it.',
+      );
+      expect(viewModel.hasBlockedWriteAccess, isTrue);
       expect(
         viewModel.providerSession?.connectionState,
         isNot(ProviderConnectionState.connected),
