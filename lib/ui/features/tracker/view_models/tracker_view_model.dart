@@ -30,6 +30,7 @@ class TrackerViewModel extends ChangeNotifier {
     WorkspaceProfileService? workspaceProfileService,
     String? workspaceId,
     Uri Function()? currentUriProvider,
+    bool? guardInteractiveShellOverride,
   }) : _repository = repository,
        _issueMutationService =
            issueMutationService ?? IssueMutationService(repository: repository),
@@ -38,7 +39,8 @@ class TrackerViewModel extends ChangeNotifier {
            workspaceProfileService ??
            const SharedPreferencesWorkspaceProfileService(),
        _workspaceId = workspaceId,
-       _currentUriProvider = currentUriProvider ?? (() => Uri.base) {
+       _currentUriProvider = currentUriProvider ?? (() => Uri.base),
+       _guardInteractiveShellOverride = guardInteractiveShellOverride {
     _bindProviderSession();
   }
 
@@ -48,6 +50,7 @@ class TrackerViewModel extends ChangeNotifier {
   final WorkspaceProfileService _workspaceProfileService;
   final Uri Function() _currentUriProvider;
   String? _workspaceId;
+  final bool? _guardInteractiveShellOverride;
   ProviderSession? _boundProviderSession;
 
   TrackerSnapshot? _snapshot;
@@ -1967,7 +1970,8 @@ class TrackerViewModel extends ChangeNotifier {
     required Future<void> Function() onFinally,
   }) async {
     final shouldGuardInteractiveShell =
-        kIsWeb && !usesLocalPersistence && supportsGitHubAuth;
+        _guardInteractiveShellOverride ??
+        (kIsWeb && !usesLocalPersistence && supportsGitHubAuth);
     if (shouldGuardInteractiveShell) {
       _isAutomaticAccessRestoreInProgress = true;
       if (!_disposed) {
@@ -2016,6 +2020,10 @@ class TrackerViewModel extends ChangeNotifier {
         timeout: startupAccessRestoreTimeout,
       );
       _startupTimeoutFallbackAwaitingShellReady = true;
+      if (shouldGuardInteractiveShell) {
+        _startupHostedAccessModeOverride =
+            HostedRepositoryAccessMode.disconnected;
+      }
       _publishStartupShellReadyDiagnosticIfNeeded();
       return false;
     } finally {
