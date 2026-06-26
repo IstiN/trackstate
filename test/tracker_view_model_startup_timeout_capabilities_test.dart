@@ -54,13 +54,14 @@ void main() {
   );
 
   test(
-    'startup auth probe fallback diagnostic captures the 11-second synchronization timeout',
+    'startup auth probe fallback diagnostic captures the 11-second synchronization timeout via _loadSnapshotAndSearch',
     () async {
       const workspaceId = 'hosted:trackstate/trackstate@main';
       final provider = _WritePermissionBeforeAuthProvider();
-      final repository = _DelayedConnectRepository(
+      final repository = _SlowSnapshotRepository(
         provider: provider,
         snapshot: await _snapshotForRepository('trackstate/trackstate'),
+        snapshotDelay: const Duration(seconds: 15),
       );
       final messages = <String>[];
       final previousDiagnostics = startupAuthProbeDiagnostics;
@@ -97,7 +98,7 @@ void main() {
         contains('shell_ready transition after timeout fallback'),
       );
     },
-    timeout: const Timeout(Duration(seconds: 20)),
+    timeout: const Timeout(Duration(seconds: 30)),
   );
 }
 
@@ -230,6 +231,28 @@ class _DelayedConnectRepository extends ProviderBackedTrackStateRepository {
     replaceCachedState(snapshot: snapshot);
     return snapshot;
   }
+}
+
+class _SlowSnapshotRepository extends ProviderBackedTrackStateRepository {
+  _SlowSnapshotRepository({
+    required this.provider,
+    required this.snapshot,
+    required this.snapshotDelay,
+  }) : super(provider: provider);
+
+  final TrackerSnapshot snapshot;
+  final _WritePermissionBeforeAuthProvider provider;
+  final Duration snapshotDelay;
+
+  @override
+  Future<TrackerSnapshot> loadSnapshot() async {
+    await Future<void>.delayed(snapshotDelay);
+    replaceCachedState(snapshot: snapshot);
+    return snapshot;
+  }
+
+  @override
+  bool usesHostedStartupShellFallback(TrackerSnapshot? snapshot) => true;
 }
 
 class _FixedAuthStore implements TrackStateAuthStore {

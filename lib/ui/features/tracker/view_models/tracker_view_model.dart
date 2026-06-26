@@ -2209,7 +2209,7 @@ class TrackerViewModel extends ChangeNotifier {
       _section = TrackerSection.settings;
     }
     startupAuthProbeDiagnostics.recordFallbackShellReady(
-      timeout: startupAccessRestoreTimeout,
+      timeout: repository.hostedStartupProbeTimeout,
     );
     _publishStartupShellReadyDiagnosticIfNeeded();
     if (!_disposed) {
