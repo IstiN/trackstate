@@ -62,7 +62,7 @@ module.exports = {
     // SM parallelism: allow one development workflow plus one review/rework/merge
     // workflow to run concurrently so open PRs are reviewed while the next bug is
     // being developed. Bug development itself stays capped at 1 via concurrencyKey.
-    smMaxWorkflows: 2,
+    smMaxWorkflows: 1,
     smRules: [
     {
         "description": "In Review Stories & Bugs → trigger pr_review",
@@ -145,7 +145,7 @@ module.exports = {
         "configFile": "agents/bug_test_cases_generator.json",
         "skipIfLabel": "sm_bug_test_cases_triggered",
         "addLabel": "sm_bug_test_cases_triggered",
-        "enabled": true
+        "enabled": false
     },
     {
         "description": "Ready For Testing Bugs → automate linked test cases in bulk",
@@ -153,14 +153,14 @@ module.exports = {
         "configFile": "agents/bug_test_automation.json",
         "skipIfLabel": "sm_bug_test_automation_triggered",
         "addLabel": "sm_bug_test_automation_triggered",
-        "enabled": true
+        "enabled": false
     },
     {
         "description": "In Testing Bugs (pr_approved or already-merged test PR) → merge test automation PR",
         "jql": "project = {jiraProject} AND issuetype in ('Bug') AND status in ('In Testing') AND labels in ('pr_approved','test_pr_merged') AND labels NOT IN ('test_pr_finalized') ORDER BY created ASC",
         "configFile": "agents/bug_test_automation_merge.json",
         "localExecution": true,
-        "enabled": true
+        "enabled": false
     },
     {
         "description": "In Testing Bugs (test_pr_rework_needed) → rework test automation",
@@ -168,7 +168,7 @@ module.exports = {
         "configFile": "agents/bug_test_automation_rework.json",
         "skipIfLabel": "sm_bug_test_rework_triggered",
         "addLabel": "sm_bug_test_rework_triggered",
-        "enabled": true
+        "enabled": false
     },
     {
         "description": "In Testing Bugs with open test-automation PR → review",
@@ -176,14 +176,14 @@ module.exports = {
         "configFile": "agents/pr_bug_test_automation_review.json",
         "skipIfLabel": "sm_bug_test_review_triggered",
         "addLabel": "sm_bug_test_review_triggered",
-        "enabled": true
+        "enabled": false
     },
     {
         "description": "In Testing Stories (pr_approved or already-merged test PR) → merge test automation PR",
         "jql": "project = {jiraProject} AND issuetype in ('Story') AND status in ('In Testing') AND labels in ('pr_approved','test_pr_merged') AND labels NOT IN ('test_pr_finalized') ORDER BY created ASC",
         "configFile": "agents/story_test_automation_merge.json",
         "localExecution": true,
-        "enabled": true
+        "enabled": false
     },
     {
         "description": "Ready For Testing Stories → automate linked test cases in bulk",
@@ -194,7 +194,7 @@ module.exports = {
             "sm_test_cases_triggered"
         ],
         "addLabel": "sm_story_test_automation_triggered",
-        "enabled": true
+        "enabled": false
     },
     {
         "description": "In Testing Stories (test_pr_rework_needed) → rework test automation",
@@ -202,7 +202,7 @@ module.exports = {
         "configFile": "agents/story_test_automation_rework.json",
         "skipIfLabel": "sm_story_test_rework_triggered",
         "addLabel": "sm_story_test_rework_triggered",
-        "enabled": true
+        "enabled": false
     },
     {
         "description": "In Testing Stories with open test-automation PR → review",
@@ -210,14 +210,14 @@ module.exports = {
         "configFile": "agents/pr_story_test_automation_review.json",
         "skipIfLabel": "sm_story_test_review_triggered",
         "addLabel": "sm_story_test_review_triggered",
-        "enabled": true
+        "enabled": false
     },
     {
         "description": "In Testing Stories → check all TCs passed → Done",
         "jql": "project = {jiraProject} AND issuetype in ('Story') AND status in ('In Testing')",
         "configFile": "agents/story_done_check.json",
         "skipIfLabel": "sm_story_done_check_triggered",
-        "enabled": true,
+        "enabled": false,
         "localExecution": true
     },
     {
@@ -225,7 +225,7 @@ module.exports = {
         "jql": "project = {jiraProject} AND issuetype in ('Bug') AND status in ('In Testing')",
         "configFile": "agents/bug_done_check.json",
         "skipIfLabel": "sm_bug_done_check_triggered",
-        "enabled": true,
+        "enabled": false,
         "localExecution": true
     },
     {
@@ -233,7 +233,7 @@ module.exports = {
         "jql": "project = {jiraProject} AND issuetype in ('Test Case') AND status in ('Failed') ORDER BY updated ASC",
         "configFile": "agents/recover_failed_tc_bug_status.json",
         "localExecution": true,
-        "enabled": true
+        "enabled": false
     },
     {
         "description": "Failed Test Cases → create or link bugs in batch",
@@ -244,7 +244,7 @@ module.exports = {
         "addLabel": "sm_bulk_bugs_creation_triggered",
         "recoverStaleTriggerLabel": true,
         "limit": 1,
-        "enabled": true
+        "enabled": false
     },
     {
         "description": "Bug To Fix Tickets → all linked Bugs Done → move to Backlog / Ready For Testing",
@@ -267,7 +267,7 @@ module.exports = {
         "jql": "project = {jiraProject} AND issuetype in ('Test Case') AND status in ('In Development') AND updated <= -15m",
         "configFile": "agents/recover_stuck_test_case.json",
         "localExecution": true,
-        "enabled": true
+        "enabled": false
     },
     {
         "description": "Failed Test Cases → create or link bug (single, disabled by default — use bulk_bugs_creation instead)",
@@ -276,7 +276,7 @@ module.exports = {
         "skipIfLabel": "sm_bug_creation_triggered",
         "addLabel": "sm_bug_creation_triggered",
         "limit": 5,
-        "enabled": true
+        "enabled": false
     },
     {
         "description": "Backlog / To Do / Ready For Development Test Cases → In Development + automate",
@@ -285,7 +285,7 @@ module.exports = {
         "configFile": "agents/test_case_automation.json",
         "skipIfLabel": "sm_test_automation_triggered",
         "addLabel": "sm_test_automation_triggered",
-        "enabled": true
+        "enabled": false
     },
     {
         "description": "Merged Stories → Ready For Testing + generate test cases",
@@ -294,7 +294,7 @@ module.exports = {
         "configFile": "agents/test_cases_generator.json",
         "skipIfLabel": "sm_test_cases_triggered",
         "addLabel": "sm_test_cases_triggered",
-        "enabled": true
+        "enabled": false
     },
     {
         "description": "PO Review Stories with all subtasks Done → BA Analysis",
@@ -340,7 +340,8 @@ module.exports = {
             "ai_questions_asked"
         ],
         "addLabel": "sm_story_questions_triggered",
-        "limit": 1
+        "limit": 1,
+        "enabled": true
     },
     {
         "description": "Subtasks with 'q' label → trigger PO refinement",
@@ -364,7 +365,7 @@ module.exports = {
         "jql": "project = {jiraProject} AND issuetype in ('Test Case') AND status in ('In Review - Passed', 'In Review - Failed', 'Passed', 'Failed', 'Pull Request Review', 'Merged') AND labels NOT IN ('sm_test_rework_triggered') AND updated >= -2d ORDER BY created ASC",
         "configFile": "agents/recover_dirty_review_test_case.json",
         "localExecution": true,
-        "enabled": true
+        "enabled": false
     },
     {
         "description": "In Review Test Cases → trigger pr_test_automation_review",
@@ -380,7 +381,7 @@ module.exports = {
         "configFile": "agents/pr_test_automation_rework.json",
         "skipIfLabel": "sm_test_rework_triggered",
         "addLabel": "sm_test_rework_triggered",
-        "enabled": true
+        "enabled": false
     },
     {
         "description": "In Review Test Cases (pr_approved) → retry merge",
@@ -650,165 +651,441 @@ module.exports = {
     },
 
     jobParamPatches: {
-        test_cases_generator: {
-            confluencePages: [
-                GOAL_INSTRUCTIONS,
-                DESIGN_REFERENCE,
-                './agents/instructions/test_cases/test_case_creation_rules.md',
-                './.dmtools/instructions/test_cases/trackstate_functional_test_case_rules.md'
+    "test_cases_generator": {
+        "confluencePages": [
+            "./.dmtools/instructions/goal/goal.md",
+            "./.dmtools/instructions/goal/DESIGN.md",
+            "./agents/instructions/test_cases/test_case_creation_rules.md",
+            "./.dmtools/instructions/test_cases/trackstate_functional_test_case_rules.md"
+        ],
+        "postJSAction": "agents/js/triggerStoryTestAutomation.js",
+        "customParams": {
+            "autoStartStoryTestAutomation": false,
+            "autoStartStoryTestAutomationConfigFile": "agents/story_test_automation.json"
+        }
+    },
+    "bug_test_cases_generator": {
+        "postJSAction": "agents/js/triggerBugTestAutomation.js",
+        "customParams": {
+            "autoStartBugTestAutomation": false,
+            "autoStartBugTestAutomationConfigFile": "agents/bug_test_automation.json"
+        }
+    },
+    "story_questions": {
+        "customParams": {
+            "autoStartQuestionAnswer": false,
+            "autoStartQuestionAnswerConfigFile": "agents/po_refinement.json"
+        }
+    },
+    "story_acceptance_criteria": {
+        "customParams": {
+            "autoStartSolution": false,
+            "autoStartSolutionConfigFile": "agents/story_solution.json"
+        }
+    },
+    "story_acceptance_criterias": {
+        "customParams": {
+            "autoStartSolution": false,
+            "autoStartSolutionConfigFile": "agents/story_solution.json"
+        }
+    },
+    "story_solution": {
+        "customParams": {
+            "autoStartDevelopment": false,
+            "autoStartDevelopmentConfigFile": "agents/story_development.json"
+        }
+    },
+    "story_development": {
+        "customParams": {
+            "autoStartReview": false,
+            "autoStartReviewConfigFile": "agents/pr_review.json",
+            "managedSubmodules": [
+                {
+                    "path": "trackstate-setup",
+                    "branch": "main",
+                    "tagPrefix": "stable"
+                }
             ],
-            postJSAction: 'agents/js/triggerStoryTestAutomation.js',
-            customParams: {
-                autoStartStoryTestAutomation: true,
-                autoStartStoryTestAutomationConfigFile: 'agents/story_test_automation.json'
-            }
-        },
-        bug_test_cases_generator: {
-            postJSAction: 'agents/js/triggerBugTestAutomation.js',
-            customParams: {
-                autoStartBugTestAutomation: true,
-                autoStartBugTestAutomationConfigFile: 'agents/bug_test_automation.json'
-            }
-        },
-        story_questions: {
-            customParams: {
-                autoStartQuestionAnswer: true,
-                autoStartQuestionAnswerConfigFile: 'agents/po_refinement.json'
-            }
-        },
-        story_acceptance_criteria: {
-            customParams: {
-                autoStartSolution: true,
-                autoStartSolutionConfigFile: 'agents/story_solution.json'
-            }
-        },
-        story_acceptance_criterias: {
-            customParams: {
-                autoStartSolution: true,
-                autoStartSolutionConfigFile: 'agents/story_solution.json'
-            }
-        },
-        story_solution: {
-            customParams: {
-                autoStartDevelopment: true,
-                autoStartDevelopmentConfigFile: 'agents/story_development.json'
-            }
-        },
-        story_development: {
-            customParams: {
-                autoStartReview: true,
-                autoStartReviewConfigFile: 'agents/pr_review.json',
-                managedSubmodules: TRACKSTATE_SETUP_SUBMODULES,
-                feedbackLoop: FLUTTER_FEEDBACK
-            }
-        },
-        bug_development: {
-            customParams: {
-                autoStartReview: true,
-                autoStartReviewConfigFile: 'agents/pr_review.json',
-                managedSubmodules: TRACKSTATE_SETUP_SUBMODULES,
-                feedbackLoop: FLUTTER_FEEDBACK
-            }
-        },
-        bug_fix_batch_development: {
-            customParams: {
-                autoStartReview: true,
-                autoStartReviewConfigFile: 'agents/pr_review.json',
-                managedSubmodules: TRACKSTATE_SETUP_SUBMODULES,
-                feedbackLoop: FLUTTER_FEEDBACK
-            }
-        },
-        test_case_automation: {
-            customParams: {
-                autoStartReview: true,
-                autoStartReviewConfigFile: 'agents/pr_test_automation_review.json'
-            }
-        },
-        pr_review: {
-            customParams: {
-                autoStartRework: true,
-                autoStartReworkConfigFile: 'agents/pr_rework.json',
-                // If the PR already has this many review threads/comments, allow
-                // an APPROVE verdict to stand even when suggestions remain, so the
-                // review/rework loop eventually terminates.
-                maxReviewThreadsBeforeForceApprove: 100
-            }
-        },
-        pr_test_automation_review: {
-            customParams: {
-                autoStartRework: true,
-                autoStartReworkConfigFile: 'agents/pr_test_automation_rework.json',
-                maxReviewThreadsBeforeForceApprove: 100
-            }
-        },
-        pr_rework: {
-            customParams: {
-                autoStartReview: true,
-                autoStartReviewConfigFile: 'agents/pr_review.json',
-                managedSubmodules: TRACKSTATE_SETUP_SUBMODULES,
-                feedbackLoop: FLUTTER_FEEDBACK
-            }
-        },
-        pr_test_automation_rework: {
-            customParams: {
-                autoStartReview: true,
-                autoStartReviewConfigFile: 'agents/pr_test_automation_review.json',
-                feedbackLoop: POST_ACTION_FEEDBACK
-            }
-        },
-        story_test_automation: {
-            customParams: {
-                autoStartReview: false
-            }
-        },
-        story_test_automation_rework: {
-            customParams: {
-                autoStartReview: false,
-                removeLabel: 'sm_story_test_rework_triggered',
-                feedbackLoop: POST_ACTION_FEEDBACK
-            }
-        },
-        pr_story_test_automation_review: {
-            customParams: {
-                autoStartMerge: false,
-                autoStartRework: false,
-                maxReviewThreadsBeforeForceApprove: 100,
-                smFallback: true
-            }
-        },
-        bug_test_automation: {
-            customParams: {
-                autoStartReview: false
-            }
-        },
-        bug_test_automation_rework: {
-            customParams: {
-                autoStartReview: false,
-                removeLabel: 'sm_bug_test_rework_triggered',
-                feedbackLoop: POST_ACTION_FEEDBACK
-            }
-        },
-        pr_bug_test_automation_review: {
-            customParams: {
-                autoStartMerge: false,
-                autoStartRework: false,
-                maxReviewThreadsBeforeForceApprove: 100,
-                smFallback: true
-            }
-        },
-        retry_merge: {
-            customParams: {
-                autoStartRework: true,
-                autoStartReworkConfigFile: 'agents/pr_rework.json'
-            }
-        },
-        retry_merge_test: {
-            customParams: {
-                autoStartRework: true,
-                autoStartReworkConfigFile: 'agents/pr_test_automation_rework.json'
+            "feedbackLoop": {
+                "postAction": {
+                    "enabled": true,
+                    "maxAttempts": 2
+                },
+                "qualityGates": {
+                    "enabled": true,
+                    "gates": [
+                        {
+                            "name": "flutter-analyze",
+                            "command": "flutter analyze",
+                            "maxAttempts": 2
+                        },
+                        {
+                            "name": "flutter-test",
+                            "command": "flutter test --coverage",
+                            "maxAttempts": 2
+                        },
+                        {
+                            "name": "accessibility-build",
+                            "command": "bash tool/run_if_accessibility_needed.sh \"flutter build web --release --base-href / --pwa-strategy=none --dart-define TRACKSTATE_USE_DEMO_REPOSITORY=true --dart-define TRACKSTATE_REPOSITORY=IstiN/trackstate-setup --dart-define TRACKSTATE_SOURCE_REF=main --dart-define TRACKSTATE_DATA_REF=main\"",
+                            "maxAttempts": 1
+                        },
+                        {
+                            "name": "accessibility-axe",
+                            "command": "bash tool/run_if_accessibility_needed.sh \"npm run test:a11y\"",
+                            "maxAttempts": 1
+                        },
+                        {
+                            "name": "accessibility-log-validation",
+                            "command": "bash tool/run_if_accessibility_needed.sh \"node testing/accessibility/log_validation.node.test.js\"",
+                            "maxAttempts": 1
+                        }
+                    ]
+                },
+                "policyGates": {
+                    "enabled": true,
+                    "gates": [
+                        {
+                            "name": "theme-token-lint",
+                            "command": "dart run tool/check_theme_tokens.dart",
+                            "maxAttempts": 2
+                        },
+                        {
+                            "name": "web-safety-lint",
+                            "command": "dart run tool/check_web_safety.dart",
+                            "maxAttempts": 2
+                        },
+                        {
+                            "name": "file-line-limit-lint",
+                            "command": "dart run tool/check_file_line_limits.dart",
+                            "maxAttempts": 2
+                        },
+                        {
+                            "name": "code-duplication-lint",
+                            "command": "npx jscpd@4 lib/ --min-lines 5 --min-tokens 50 --ignore \"**/*.g.dart,**/*.freezed.dart,lib/l10n/generated/**,lib/**/*.gr.dart\" --threshold 1",
+                            "maxAttempts": 2
+                        }
+                    ]
+                }
             }
         }
     },
+    "bug_development": {
+        "customParams": {
+            "autoStartReview": false,
+            "autoStartReviewConfigFile": "agents/pr_review.json",
+            "managedSubmodules": [
+                {
+                    "path": "trackstate-setup",
+                    "branch": "main",
+                    "tagPrefix": "stable"
+                }
+            ],
+            "feedbackLoop": {
+                "postAction": {
+                    "enabled": true,
+                    "maxAttempts": 2
+                },
+                "qualityGates": {
+                    "enabled": true,
+                    "gates": [
+                        {
+                            "name": "flutter-analyze",
+                            "command": "flutter analyze",
+                            "maxAttempts": 2
+                        },
+                        {
+                            "name": "flutter-test",
+                            "command": "flutter test --coverage",
+                            "maxAttempts": 2
+                        },
+                        {
+                            "name": "accessibility-build",
+                            "command": "bash tool/run_if_accessibility_needed.sh \"flutter build web --release --base-href / --pwa-strategy=none --dart-define TRACKSTATE_USE_DEMO_REPOSITORY=true --dart-define TRACKSTATE_REPOSITORY=IstiN/trackstate-setup --dart-define TRACKSTATE_SOURCE_REF=main --dart-define TRACKSTATE_DATA_REF=main\"",
+                            "maxAttempts": 1
+                        },
+                        {
+                            "name": "accessibility-axe",
+                            "command": "bash tool/run_if_accessibility_needed.sh \"npm run test:a11y\"",
+                            "maxAttempts": 1
+                        },
+                        {
+                            "name": "accessibility-log-validation",
+                            "command": "bash tool/run_if_accessibility_needed.sh \"node testing/accessibility/log_validation.node.test.js\"",
+                            "maxAttempts": 1
+                        }
+                    ]
+                },
+                "policyGates": {
+                    "enabled": true,
+                    "gates": [
+                        {
+                            "name": "theme-token-lint",
+                            "command": "dart run tool/check_theme_tokens.dart",
+                            "maxAttempts": 2
+                        },
+                        {
+                            "name": "web-safety-lint",
+                            "command": "dart run tool/check_web_safety.dart",
+                            "maxAttempts": 2
+                        },
+                        {
+                            "name": "file-line-limit-lint",
+                            "command": "dart run tool/check_file_line_limits.dart",
+                            "maxAttempts": 2
+                        },
+                        {
+                            "name": "code-duplication-lint",
+                            "command": "npx jscpd@4 lib/ --min-lines 5 --min-tokens 50 --ignore \"**/*.g.dart,**/*.freezed.dart,lib/l10n/generated/**,lib/**/*.gr.dart\" --threshold 1",
+                            "maxAttempts": 2
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    "bug_fix_batch_development": {
+        "customParams": {
+            "autoStartReview": false,
+            "autoStartReviewConfigFile": "agents/pr_review.json",
+            "managedSubmodules": [
+                {
+                    "path": "trackstate-setup",
+                    "branch": "main",
+                    "tagPrefix": "stable"
+                }
+            ],
+            "feedbackLoop": {
+                "postAction": {
+                    "enabled": true,
+                    "maxAttempts": 2
+                },
+                "qualityGates": {
+                    "enabled": true,
+                    "gates": [
+                        {
+                            "name": "flutter-analyze",
+                            "command": "flutter analyze",
+                            "maxAttempts": 2
+                        },
+                        {
+                            "name": "flutter-test",
+                            "command": "flutter test --coverage",
+                            "maxAttempts": 2
+                        },
+                        {
+                            "name": "accessibility-build",
+                            "command": "bash tool/run_if_accessibility_needed.sh \"flutter build web --release --base-href / --pwa-strategy=none --dart-define TRACKSTATE_USE_DEMO_REPOSITORY=true --dart-define TRACKSTATE_REPOSITORY=IstiN/trackstate-setup --dart-define TRACKSTATE_SOURCE_REF=main --dart-define TRACKSTATE_DATA_REF=main\"",
+                            "maxAttempts": 1
+                        },
+                        {
+                            "name": "accessibility-axe",
+                            "command": "bash tool/run_if_accessibility_needed.sh \"npm run test:a11y\"",
+                            "maxAttempts": 1
+                        },
+                        {
+                            "name": "accessibility-log-validation",
+                            "command": "bash tool/run_if_accessibility_needed.sh \"node testing/accessibility/log_validation.node.test.js\"",
+                            "maxAttempts": 1
+                        }
+                    ]
+                },
+                "policyGates": {
+                    "enabled": true,
+                    "gates": [
+                        {
+                            "name": "theme-token-lint",
+                            "command": "dart run tool/check_theme_tokens.dart",
+                            "maxAttempts": 2
+                        },
+                        {
+                            "name": "web-safety-lint",
+                            "command": "dart run tool/check_web_safety.dart",
+                            "maxAttempts": 2
+                        },
+                        {
+                            "name": "file-line-limit-lint",
+                            "command": "dart run tool/check_file_line_limits.dart",
+                            "maxAttempts": 2
+                        },
+                        {
+                            "name": "code-duplication-lint",
+                            "command": "npx jscpd@4 lib/ --min-lines 5 --min-tokens 50 --ignore \"**/*.g.dart,**/*.freezed.dart,lib/l10n/generated/**,lib/**/*.gr.dart\" --threshold 1",
+                            "maxAttempts": 2
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    "test_case_automation": {
+        "customParams": {
+            "autoStartReview": false,
+            "autoStartReviewConfigFile": "agents/pr_test_automation_review.json"
+        }
+    },
+    "pr_review": {
+        "customParams": {
+            "autoStartRework": false,
+            "autoStartReworkConfigFile": "agents/pr_rework.json",
+            "maxReviewThreadsBeforeForceApprove": 100
+        }
+    },
+    "pr_test_automation_review": {
+        "customParams": {
+            "autoStartRework": false,
+            "autoStartReworkConfigFile": "agents/pr_test_automation_rework.json",
+            "maxReviewThreadsBeforeForceApprove": 100
+        }
+    },
+    "pr_rework": {
+        "customParams": {
+            "autoStartReview": false,
+            "autoStartReviewConfigFile": "agents/pr_review.json",
+            "managedSubmodules": [
+                {
+                    "path": "trackstate-setup",
+                    "branch": "main",
+                    "tagPrefix": "stable"
+                }
+            ],
+            "feedbackLoop": {
+                "postAction": {
+                    "enabled": true,
+                    "maxAttempts": 2
+                },
+                "qualityGates": {
+                    "enabled": true,
+                    "gates": [
+                        {
+                            "name": "flutter-analyze",
+                            "command": "flutter analyze",
+                            "maxAttempts": 2
+                        },
+                        {
+                            "name": "flutter-test",
+                            "command": "flutter test --coverage",
+                            "maxAttempts": 2
+                        },
+                        {
+                            "name": "accessibility-build",
+                            "command": "bash tool/run_if_accessibility_needed.sh \"flutter build web --release --base-href / --pwa-strategy=none --dart-define TRACKSTATE_USE_DEMO_REPOSITORY=true --dart-define TRACKSTATE_REPOSITORY=IstiN/trackstate-setup --dart-define TRACKSTATE_SOURCE_REF=main --dart-define TRACKSTATE_DATA_REF=main\"",
+                            "maxAttempts": 1
+                        },
+                        {
+                            "name": "accessibility-axe",
+                            "command": "bash tool/run_if_accessibility_needed.sh \"npm run test:a11y\"",
+                            "maxAttempts": 1
+                        },
+                        {
+                            "name": "accessibility-log-validation",
+                            "command": "bash tool/run_if_accessibility_needed.sh \"node testing/accessibility/log_validation.node.test.js\"",
+                            "maxAttempts": 1
+                        }
+                    ]
+                },
+                "policyGates": {
+                    "enabled": true,
+                    "gates": [
+                        {
+                            "name": "theme-token-lint",
+                            "command": "dart run tool/check_theme_tokens.dart",
+                            "maxAttempts": 2
+                        },
+                        {
+                            "name": "web-safety-lint",
+                            "command": "dart run tool/check_web_safety.dart",
+                            "maxAttempts": 2
+                        },
+                        {
+                            "name": "file-line-limit-lint",
+                            "command": "dart run tool/check_file_line_limits.dart",
+                            "maxAttempts": 2
+                        },
+                        {
+                            "name": "code-duplication-lint",
+                            "command": "npx jscpd@4 lib/ --min-lines 5 --min-tokens 50 --ignore \"**/*.g.dart,**/*.freezed.dart,lib/l10n/generated/**,lib/**/*.gr.dart\" --threshold 1",
+                            "maxAttempts": 2
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    "pr_test_automation_rework": {
+        "customParams": {
+            "autoStartReview": false,
+            "autoStartReviewConfigFile": "agents/pr_test_automation_review.json",
+            "feedbackLoop": {
+                "postAction": {
+                    "enabled": true,
+                    "maxAttempts": 2
+                }
+            }
+        }
+    },
+    "story_test_automation": {
+        "customParams": {
+            "autoStartReview": false
+        }
+    },
+    "story_test_automation_rework": {
+        "customParams": {
+            "autoStartReview": false,
+            "removeLabel": "sm_story_test_rework_triggered",
+            "feedbackLoop": {
+                "postAction": {
+                    "enabled": true,
+                    "maxAttempts": 2
+                }
+            }
+        }
+    },
+    "pr_story_test_automation_review": {
+        "customParams": {
+            "autoStartMerge": false,
+            "autoStartRework": false,
+            "maxReviewThreadsBeforeForceApprove": 100,
+            "smFallback": false
+        }
+    },
+    "bug_test_automation": {
+        "customParams": {
+            "autoStartReview": false
+        }
+    },
+    "bug_test_automation_rework": {
+        "customParams": {
+            "autoStartReview": false,
+            "removeLabel": "sm_bug_test_rework_triggered",
+            "feedbackLoop": {
+                "postAction": {
+                    "enabled": true,
+                    "maxAttempts": 2
+                }
+            }
+        }
+    },
+    "pr_bug_test_automation_review": {
+        "customParams": {
+            "autoStartMerge": false,
+            "autoStartRework": false,
+            "maxReviewThreadsBeforeForceApprove": 100,
+            "smFallback": false
+        }
+    },
+    "retry_merge": {
+        "customParams": {
+            "autoStartRework": false,
+            "autoStartReworkConfigFile": "agents/pr_rework.json"
+        }
+    },
+    "retry_merge_test": {
+        "customParams": {
+            "autoStartRework": false,
+            "autoStartReworkConfigFile": "agents/pr_test_automation_rework.json"
+        }
+    }
+},
 
     agentParamPatches: {},
 
