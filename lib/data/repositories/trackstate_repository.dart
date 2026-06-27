@@ -977,6 +977,7 @@ class ProviderBackedTrackStateRepository
           fallbackDescription: 'repository tree',
         ),
       );
+      _captureHostedStartupRecoveryFromTimeout(error.path);
       tree = const <RepositoryTreeEntry>[];
     }
     _snapshotTree = tree;
@@ -1041,6 +1042,7 @@ class ProviderBackedTrackStateRepository
           fallbackDescription: 'project metadata',
         ),
       );
+      _captureHostedStartupRecoveryFromTimeout(error.path);
     } on GitHubRateLimitException catch (error) {
       _captureHostedStartupRecovery(error);
     }
@@ -1574,6 +1576,7 @@ class ProviderBackedTrackStateRepository
             fallbackDescription: 'localized labels',
           ),
         );
+        _captureHostedStartupRecoveryFromTimeout(error.path);
         continue;
       } on GitHubRateLimitException catch (error) {
         _captureHostedStartupRecovery(error);
@@ -1644,6 +1647,7 @@ class ProviderBackedTrackStateRepository
           fallbackDescription: warningSubject,
         ),
       );
+      _captureHostedStartupRecoveryFromTimeout(error.path);
       return List<TrackStateConfigEntry>.from(fallbackEntries, growable: false);
     } on GitHubRateLimitException catch (error) {
       _captureHostedStartupRecovery(error);
@@ -1671,6 +1675,7 @@ class ProviderBackedTrackStateRepository
           fallbackDescription: warningSubject,
         ),
       );
+      _captureHostedStartupRecoveryFromTimeout(error.path);
       return const [];
     } on GitHubRateLimitException catch (error) {
       _captureHostedStartupRecovery(error);
@@ -1760,6 +1765,7 @@ class ProviderBackedTrackStateRepository
       loadWarnings.add(
         _hostedStartupTimeoutWarning(error.path, fallbackDescription: 'fields'),
       );
+      _captureHostedStartupRecoveryFromTimeout(error.path);
       return List<TrackStateFieldDefinition>.from(
         _fieldDefinitions,
         growable: false,
@@ -1795,6 +1801,7 @@ class ProviderBackedTrackStateRepository
           fallbackDescription: 'workflows',
         ),
       );
+      _captureHostedStartupRecoveryFromTimeout(error.path);
       return const [];
     } on GitHubRateLimitException catch (error) {
       _captureHostedStartupRecovery(error);
@@ -1898,6 +1905,7 @@ class ProviderBackedTrackStateRepository
             fallbackDescription: 'summary issue index',
           ),
         );
+        _captureHostedStartupRecoveryFromTimeout(error.path);
         entries.addAll(
           _fallbackHostedRepositoryIndexEntries(
             blobPaths: blobPaths,
@@ -1950,6 +1958,7 @@ class ProviderBackedTrackStateRepository
             fallbackDescription: 'deleted issue index',
           ),
         );
+        _captureHostedStartupRecoveryFromTimeout(error.path);
         return _dedupeDeletedIssueTombstones(deleted);
       } on GitHubRateLimitException catch (error) {
         _captureHostedStartupRecovery(error);
@@ -1981,6 +1990,7 @@ class ProviderBackedTrackStateRepository
                 fallbackDescription: 'deleted issue metadata',
               ),
             );
+            _captureHostedStartupRecoveryFromTimeout(error.path);
             return _dedupeDeletedIssueTombstones(deleted);
           } on GitHubRateLimitException catch (error) {
             _captureHostedStartupRecovery(error);
@@ -2014,6 +2024,7 @@ class ProviderBackedTrackStateRepository
             fallbackDescription: 'legacy deleted issue index',
           ),
         );
+        _captureHostedStartupRecoveryFromTimeout(error.path);
         return _dedupeDeletedIssueTombstones(deleted);
       } on GitHubRateLimitException catch (error) {
         _captureHostedStartupRecovery(error);
@@ -2097,6 +2108,13 @@ class ProviderBackedTrackStateRepository
       kind: TrackerStartupRecoveryKind.githubRateLimit,
       failedPath: error.requestPath,
       retryAfter: error.retryAfter,
+    );
+  }
+
+  void _captureHostedStartupRecoveryFromTimeout(String failedPath) {
+    _startupRecovery ??= TrackerStartupRecovery(
+      kind: TrackerStartupRecoveryKind.hostedBootstrapTimeout,
+      failedPath: failedPath,
     );
   }
 
