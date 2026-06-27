@@ -163,6 +163,13 @@ module.exports = {
         "enabled": true
     },
     {
+        "description": "In Testing Bugs with clean test-automation PR → auto-merge",
+        "jql": "project = {jiraProject} AND issuetype in ('Bug') AND status in ('In Testing') AND labels NOT IN ('pr_approved','test_pr_rework_needed','test_pr_merged','test_pr_finalized') ORDER BY created ASC",
+        "configFile": "agents/bug_test_automation_merge.json",
+        "localExecution": true,
+        "enabled": true
+    },
+    {
         "description": "In Testing Bugs (test_pr_rework_needed) → rework test automation",
         "jql": "project = {jiraProject} AND issuetype in ('Bug') AND status in ('In Testing') AND labels = 'test_pr_rework_needed' ORDER BY created ASC",
         "configFile": "agents/bug_test_automation_rework.json",
@@ -181,6 +188,13 @@ module.exports = {
     {
         "description": "In Testing Stories (pr_approved or already-merged test PR) → merge test automation PR",
         "jql": "project = {jiraProject} AND issuetype in ('Story') AND status in ('In Testing') AND labels in ('pr_approved','test_pr_merged') AND labels NOT IN ('test_pr_finalized') ORDER BY created ASC",
+        "configFile": "agents/story_test_automation_merge.json",
+        "localExecution": true,
+        "enabled": true
+    },
+    {
+        "description": "In Testing Stories with clean test-automation PR → auto-merge",
+        "jql": "project = {jiraProject} AND issuetype in ('Story') AND status in ('In Testing') AND labels NOT IN ('pr_approved','test_pr_rework_needed','test_pr_merged','test_pr_finalized') ORDER BY created ASC",
         "configFile": "agents/story_test_automation_merge.json",
         "localExecution": true,
         "enabled": true
@@ -364,6 +378,13 @@ module.exports = {
         "description": "Test Cases with dirty open PR → move to In Rework",
         "jql": "project = {jiraProject} AND issuetype in ('Test Case') AND status in ('In Review - Passed', 'In Review - Failed', 'Passed', 'Failed', 'Pull Request Review', 'Merged') AND labels NOT IN ('sm_test_rework_triggered') AND updated >= -2d ORDER BY created ASC",
         "configFile": "agents/recover_dirty_review_test_case.json",
+        "localExecution": true,
+        "enabled": true
+    },
+    {
+        "description": "In Review - Passed Test Cases with clean CI → auto-merge",
+        "jql": "project = {jiraProject} AND issuetype in ('Test Case') AND status = 'In Review - Passed' AND labels NOT IN ('pr_approved','test_pr_finalized') ORDER BY created ASC",
+        "configFile": "agents/retry_merge_test.json",
         "localExecution": true,
         "enabled": true
     },
