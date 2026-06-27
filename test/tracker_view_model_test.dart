@@ -546,7 +546,14 @@ void main() {
 
       expect(repository.loadCount, 2);
       expect(repository.connectCount, 1);
-      expect(viewModel.startupRecovery, isNull);
+      // The recovery must survive the snapshot reload after background auth
+      // succeeds so the user can still see the callout and retry (TS-1429).
+      expect(
+        viewModel.startupRecovery,
+        isNotNull,
+        reason:
+            'The startup recovery must remain visible after the snapshot is reloaded following a successful GitHub connection.',
+      );
       expect(viewModel.section, TrackerSection.settings);
     },
   );
