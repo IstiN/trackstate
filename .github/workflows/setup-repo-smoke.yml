@@ -70,12 +70,12 @@ jobs:
 
       - name: Run setup repo smoke validation
         env:
-          # NOTE: the trackstate_cli binary currently requires a PAT_TOKEN with
-          # repo/issues write scope for the trackstate-setup repository. The App
-          # token does not have sufficient permissions for these CLI operations.
-          TRACKSTATE_TOKEN: ${{ secrets.PAT_TOKEN }}
-          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
+          # Use the GitHub App token when enabled to avoid PAT rate limits.
+          # The App is installed on IstiN/trackstate-setup and must have
+          # contents/issues write permissions for the CLI operations below.
+          TRACKSTATE_TOKEN: ${{ steps.app-token.outputs.token || secrets.PAT_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.PAT_TOKEN }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token || secrets.PAT_TOKEN }}
         run: python testing/scripts/run_setup_repo_smoke.py
 
       - name: Upload smoke result
