@@ -27,8 +27,9 @@ jobs:
       cancel-in-progress: false
 
     env:
-      # Optional GitHub App credentials. When both are set, SM uses the App token
-      # instead of PAT_TOKEN, getting a separate (higher) GitHub API rate limit.
+      # Optional GitHub App credentials. When both are set AND the App is marked as
+      # installed (SM_GITHUB_APP_ENABLED=true), SM uses the App token instead of
+      # PAT_TOKEN, getting a separate (higher) GitHub API rate limit.
       # App ID can be a variable (not sensitive); private key must be a secret.
       HAS_APP_CREDS: ${{ (vars.SM_GITHUB_APP_ID != '' || secrets.SM_GITHUB_APP_ID != '') && secrets.SM_GITHUB_APP_PRIVATE_KEY != '' }}
 
@@ -40,10 +41,10 @@ jobs:
 
       - name: Generate GitHub App token
         id: app-token
-        if: env.HAS_APP_CREDS == 'true'
-        # Do not fail the whole SM run if the App is not installed yet;
-        # the workflow falls back to PAT_TOKEN in that case.
-        continue-on-error: true
+        # Only run the App token step when credentials are present AND the repo
+        # variable SM_GITHUB_APP_ENABLED is explicitly set to true. This avoids a
+        # 404 failure while the App is not yet installed; SM keeps using PAT_TOKEN.
+        if: env.HAS_APP_CREDS == 'true' && vars.SM_GITHUB_APP_ENABLED == 'true'
         uses: actions/create-github-app-token@v1
         with:
           app-id: ${{ vars.SM_GITHUB_APP_ID || secrets.SM_GITHUB_APP_ID }}
