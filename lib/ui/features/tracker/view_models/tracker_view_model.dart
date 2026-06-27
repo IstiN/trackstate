@@ -2165,6 +2165,8 @@ class TrackerViewModel extends ChangeNotifier {
       startupAuthProbeDiagnostics.recordFallbackShellReady(
         timeout: repository.hostedStartupProbeTimeout,
       );
+      _isLoading = false;
+      _publishStartupShellReadyDiagnosticIfNeeded();
     }
     notifyListeners();
     final requestToken = _beginSearchRequest();
