@@ -170,7 +170,8 @@ class TrackerViewModel extends ChangeNotifier {
         _isAutomaticAccessRestoreInProgress &&
         !_startupTimeoutFallbackAwaitingShellReady &&
         _startupHostedAccessModeOverride !=
-            HostedRepositoryAccessMode.disconnected;
+            HostedRepositoryAccessMode.disconnected &&
+        !hasStartupRecovery;
   }
   bool get supportsProjectSettingsAdmin =>
       _repository is ProjectSettingsRepository;
@@ -2407,11 +2408,13 @@ class TrackerViewModel extends ChangeNotifier {
       return;
     }
     _didAutoResumeStartupRecoveryAfterAuthentication = true;
+    final previousRecovery = _startupRecovery;
     try {
       await _loadSnapshotAndSearch();
     } on Object catch (error) {
       _startupRecovery = _startupRecoveryFrom(error) ?? _startupRecovery;
     }
+    _startupRecovery ??= previousRecovery;
     if (hasStartupRecovery && _snapshot != null) {
       _section = TrackerSection.settings;
     }
@@ -2424,11 +2427,13 @@ class TrackerViewModel extends ChangeNotifier {
         !repository.usesHostedStartupShellFallback(_snapshot)) {
       return;
     }
+    final previousRecovery = _startupRecovery;
     try {
       await _loadSnapshotAndSearch();
     } on Object catch (error) {
       _message = TrackerMessage.dataLoadFailed(error);
     }
+    _startupRecovery ??= previousRecovery;
   }
 
   void _mergeIssueIntoSnapshot(TrackStateIssue issue) {
