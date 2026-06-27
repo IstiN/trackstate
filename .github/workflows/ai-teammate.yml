@@ -37,6 +37,13 @@ jobs:
       group: ai-teammate-${{ inputs.config_file }}-${{ inputs.concurrency_key }}
       cancel-in-progress: false
 
+    env:
+      # Optional GitHub App credentials. When both are set AND the App is marked as
+      # enabled (AI_TEAMMATE_GITHUB_APP_ENABLED=true), the workflow uses short-lived
+      # App installation tokens instead of PAT_TOKEN for GitHub API calls. Each
+      # installation has its own (higher) 15 000 req/hour rate-limit bucket.
+      HAS_APP_CREDS: ${{ (vars.SM_GITHUB_APP_ID != '' || secrets.SM_GITHUB_APP_ID != '') && secrets.SM_GITHUB_APP_PRIVATE_KEY != '' }}
+
     steps:
       - name: Job info
         run: |
@@ -48,6 +55,26 @@ jobs:
           else
             echo "Encoded config: not provided"
           fi
+
+      - name: Generate IstiN GitHub App token
+        id: istin-app-token
+        if: env.HAS_APP_CREDS == 'true' && vars.AI_TEAMMATE_GITHUB_APP_ENABLED == 'true'
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.SM_GITHUB_APP_ID || secrets.SM_GITHUB_APP_ID }}
+          private-key: ${{ secrets.SM_GITHUB_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: trackstate
+
+      - name: Generate ai-teammate GitHub App token
+        id: ai-teammate-app-token
+        if: env.HAS_APP_CREDS == 'true' && vars.AI_TEAMMATE_GITHUB_APP_ENABLED == 'true'
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.SM_GITHUB_APP_ID || secrets.SM_GITHUB_APP_ID }}
+          private-key: ${{ secrets.SM_GITHUB_APP_PRIVATE_KEY }}
+          owner: ai-teammate
+          repositories: trackstate-setup
 
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -219,10 +246,10 @@ jobs:
           FIGMA_TOKEN: ${{ secrets.FIGMA_TOKEN }}
           FIGMA_BASE_PATH: ${{ vars.FIGMA_BASE_PATH }}
 
-          PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
-          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
-          SOURCE_GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
+          PAT_TOKEN: ${{ steps.istin-app-token.outputs.token || secrets.PAT_TOKEN }}
+          GH_TOKEN: ${{ steps.ai-teammate-app-token.outputs.token || secrets.PAT_TOKEN }}
+          GITHUB_TOKEN: ${{ steps.ai-teammate-app-token.outputs.token || secrets.PAT_TOKEN }}
+          SOURCE_GITHUB_TOKEN: ${{ steps.istin-app-token.outputs.token || secrets.PAT_TOKEN }}
           SOURCE_GITHUB_WORKSPACE: IstiN
           SOURCE_GITHUB_REPOSITORY: trackstate
 
