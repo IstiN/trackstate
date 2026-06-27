@@ -1837,6 +1837,11 @@ class TrackerViewModel extends ChangeNotifier {
                 _isConnected = true;
                 if (callbackToken != null) {
                   _startupHostedAccessModeOverride = null;
+                } else if (_snapshot != null &&
+                    _repository is ProviderBackedTrackStateRepository &&
+                    _repository.usesHostedStartupShellFallback(_snapshot)) {
+                  _startupHostedAccessModeOverride =
+                      HostedRepositoryAccessMode.disconnected;
                 }
                 if (callbackToken != null) {
                   await _authStore.saveToken(
@@ -2158,14 +2163,6 @@ class TrackerViewModel extends ChangeNotifier {
       previousSelectedIssue: _selectedIssue,
       preferredSelectedIssueKey: _selectedIssue?.key,
     );
-    if (repository is ProviderBackedTrackStateRepository &&
-        repository.usesHostedStartupShellFallback(snapshot)) {
-      _startupHostedAccessModeOverride =
-          HostedRepositoryAccessMode.disconnected;
-      startupAuthProbeDiagnostics.recordFallbackShellReady(
-        timeout: startupAccessRestoreTimeout,
-      );
-    }
     notifyListeners();
     final requestToken = _beginSearchRequest();
     if (shouldDeferInitialSearchUntilAfterShellReady) {
