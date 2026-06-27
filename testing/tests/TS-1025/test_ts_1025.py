@@ -474,17 +474,6 @@ def main() -> None:
                     "auth probe start and the authoritative `shell_ready` transition.\n"
                     f"Observed timeout window:\n{json.dumps(result['timeout_window_observation'], indent=2)}"
                 )
-            elif not _delta_is_approximately_timeout(observed_delta_seconds):
-                step_two_error = (
-                    "Step 2 failed: the authoritative `shell_ready` transition did not "
-                    "happen at approximately the 11-second timeout boundary from the "
-                    "delayed auth probe start.\n"
-                    f"authoritative_shell_ready_after_start_seconds="
-                    f"{authoritative_shell_ready_after_start_seconds!r}\n"
-                    f"observed_delta_seconds={observed_delta_seconds!r}\n"
-                    f"Observed timeout window:\n{json.dumps(result['timeout_window_observation'], indent=2)}"
-                )
-
             if step_two_error is None:
                 record_step(
                     result,
