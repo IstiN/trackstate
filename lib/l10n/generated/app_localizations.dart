@@ -1234,6 +1234,12 @@ abstract class AppLocalizations {
   /// **'Attachments limited'**
   String get repositoryAccessAttachmentsRestricted;
 
+  /// No description provided for @repositoryAccessAttachmentAccessLimited.
+  ///
+  /// In en, this message translates to:
+  /// **'Attachment access limited'**
+  String get repositoryAccessAttachmentAccessLimited;
+
   /// No description provided for @repositoryAccessSettings.
   ///
   /// In en, this message translates to:

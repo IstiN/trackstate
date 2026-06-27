@@ -1,6 +1,6 @@
 name: AI Teammate
 
-run-name: "${{ inputs.config_file }} : ${{ inputs.concurrency_key }}"
+run-name: "${{ inputs.config_file }} : ${{ inputs.display_key || inputs.concurrency_key }} : ${{ inputs.concurrency_key }}"
 
 on:
   workflow_dispatch:
@@ -14,6 +14,12 @@ on:
       concurrency_key:
         description: "Ticket key for concurrency grouping (e.g., TS-1)"
         required: true
+      display_key:
+        description: "Ticket key to show in the workflow run name"
+        required: false
+      input_jql:
+        description: "Optional Jira input JQL; defaults to key = concurrency_key"
+        required: false
       project_key:
         description: "Project key for multi-project config selection"
         required: false
@@ -26,6 +32,7 @@ permissions:
 jobs:
   ai-teammate:
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     concurrency:
       group: ai-teammate-${{ inputs.config_file }}-${{ inputs.concurrency_key }}
       cancel-in-progress: false
@@ -35,6 +42,7 @@ jobs:
         run: |
           echo "Config file: ${{ inputs.config_file }}"
           echo "Concurrency key: ${{ inputs.concurrency_key }}"
+          echo "Display key: ${{ inputs.display_key || inputs.concurrency_key }}"
           if [ -n "${{ inputs.encoded_config }}" ]; then
             echo "Encoded config: provided"
           else
@@ -47,17 +55,6 @@ jobs:
           submodules: true
           token: ${{ secrets.PAT_TOKEN || github.token }}
 
-      - name: Set up Java 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -65,33 +62,42 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Configure npm global prefix
-        if: vars.AI_AGENT_PROVIDER == 'copilot'
-        run: |
-          npm config set prefix ~/.npm-global
-          echo "$HOME/.npm-global/bin" >> "$GITHUB_PATH"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Export tool cache keys
+        env:
+          AI_TEAMMATE_CONFIG_FILE: ${{ inputs.config_file }}
+          AI_TEAMMATE_CONCURRENCY_KEY: ${{ inputs.concurrency_key }}
+          AI_TEAMMATE_DISPLAY_KEY: ${{ inputs.display_key || inputs.concurrency_key }}
+        run: bash agents/setup/cache.sh keys dmtools:v1.7.215 codegraph copilot:1.0.44 copilot-session kimi-session playwright kimi
 
-      - name: Cache npm global packages
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.PLAYWRIGHT_CACHE_PATH }}
+          key: ${{ env.PLAYWRIGHT_CACHE_KEY }}
+          restore-keys: |
+            playwright-browsers-
+
+      - name: Cache Copilot CLI
         if: vars.AI_AGENT_PROVIDER == 'copilot'
         uses: actions/cache@v4
         with:
-          path: |
-            ~/.npm-global
-            ~/.local/bin
-          key: ${{ runner.os }}-npm-global-copilot-1.0.44
+          path: ${{ env.COPILOT_CACHE_PATH }}
+          key: ${{ env.COPILOT_CACHE_KEY }}
           restore-keys: |
-            ${{ runner.os }}-npm-global-copilot-
-            ${{ runner.os }}-npm-global-
+            npm-global-copilot-
+
+      - name: Cache Copilot session
+        if: vars.AI_AGENT_PROVIDER == 'copilot'
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.COPILOT_SESSION_CACHE_PATH }}
+          key: ${{ env.COPILOT_SESSION_CACHE_KEY }}
+          restore-keys: |
+            ${{ env.COPILOT_SESSION_CACHE_RESTORE_KEY }}
 
       - name: Install Copilot CLI
         if: vars.AI_AGENT_PROVIDER == 'copilot'
-        run: |
-          if ! command -v copilot >/dev/null 2>&1; then
-            npm install -g @github/copilot@1.0.44
-          fi
-          copilot --version
-          echo "Copilot CLI ready"
+        run: bash agents/setup/install.sh node:20 copilot:1.0.44
 
       - name: Verify Copilot CLI installation
         if: vars.AI_AGENT_PROVIDER == 'copilot'
@@ -111,15 +117,79 @@ jobs:
           fi
           echo "Using Copilot model: ${COPILOT_MODEL}"
 
-      - name: Install DMTools CLI v1.7.195
+      - name: Cache DMTools
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.DMTOOLS_CACHE_PATH }}
+          key: ${{ env.DMTOOLS_CACHE_KEY }}
+          restore-keys: |
+            dmtools-
+
+      - name: Cache CodeGraph binary
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CODEGRAPH_CACHE_PATH }}
+          key: ${{ env.CODEGRAPH_CACHE_KEY }}
+          restore-keys: |
+            ${{ runner.os }}-npm-global-codegraph-
+            ${{ runner.os }}-npm-global-
+
+      - name: Cache CodeGraph index
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CODEGRAPH_INDEX_CACHE_PATH }}
+          key: ${{ env.CODEGRAPH_INDEX_CACHE_KEY }}-${{ github.sha }}
+          restore-keys: |
+            ${{ env.CODEGRAPH_INDEX_CACHE_KEY }}-${{ github.ref_name }}-
+            ${{ env.CODEGRAPH_INDEX_CACHE_KEY }}-
+
+      - name: Cache Kimi CLI
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.KIMI_CACHE_PATH }}
+          key: ${{ env.KIMI_CACHE_KEY }}
+          restore-keys: |
+            kimi-
+
+      - name: Cache Kimi session
+        if: vars.AI_AGENT_PROVIDER == 'kimi'
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.KIMI_SESSION_CACHE_PATH }}
+          key: ${{ env.KIMI_SESSION_CACHE_KEY }}
+          restore-keys: |
+            ${{ env.KIMI_SESSION_CACHE_RESTORE_KEY }}
+
+      - name: Install AI Teammate tools
+        env:
+          KIMI_API_KEY: ${{ secrets.KIMI_API_KEY }}
+          KIMI_MODEL: ${{ vars.KIMI_MODEL }}
+          KIMI_BASE_URL: ${{ vars.KIMI_BASE_URL }}
+          AI_TEAMMATE_CONFIG_FILE: ${{ inputs.config_file }}
+          AI_TEAMMATE_CONCURRENCY_KEY: ${{ inputs.concurrency_key }}
+          AI_TEAMMATE_DISPLAY_KEY: ${{ inputs.display_key || inputs.concurrency_key }}
+        run: bash agents/setup/install.sh java:17 node:20 dmtools:v1.7.215 codegraph playwright kimi
+
+      - name: Install CodeGraph usage guard
         run: |
-          curl -fsSL https://raw.githubusercontent.com/epam/dm.ai/v1.7.195/install.sh | bash -s v1.7.195
-
-      - name: Add DMTools to PATH
-        run: echo "$HOME/.dmtools/bin" >> "$GITHUB_PATH"
-
-      - name: Verify DMTools installation
-        run: dmtools -v || echo "dmtools version check failed"
+          real_codegraph="$(command -v codegraph)"
+          guard_dir="${RUNNER_TEMP}/agent-bin"
+          mkdir -p "${guard_dir}" "${GITHUB_WORKSPACE}/.dmtools"
+          cat > "${guard_dir}/codegraph" <<EOF
+          #!/usr/bin/env bash
+          set -euo pipefail
+          log="\${CODEGRAPH_USAGE_LOG:-${GITHUB_WORKSPACE}/.dmtools/codegraph-usage.log}"
+          mkdir -p "\$(dirname "\${log}")"
+          printf '%s\tcodegraph' "\$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "\${log}"
+          for arg in "\$@"; do
+            printf ' %q' "\${arg}" >> "\${log}"
+          done
+          printf '\n' >> "\${log}"
+          exec "${real_codegraph}" "\$@"
+          EOF
+          chmod +x "${guard_dir}/codegraph"
+          echo "${guard_dir}" >> "${GITHUB_PATH}"
+          echo "CODEGRAPH_USAGE_LOG=${GITHUB_WORKSPACE}/.dmtools/codegraph-usage.log" >> "${GITHUB_ENV}"
 
       - name: Configure Git author
         run: |
@@ -127,7 +197,10 @@ jobs:
           git config --global user.email "trackstate-ai@users.noreply.github.com"
 
       - name: Run AI Teammate
+        id: run_ai
         env:
+          DEFAULT_TRACKER: "jira"
+
           JIRA_EMAIL: ${{ secrets.JIRA_EMAIL }}
           JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
           JIRA_BASE_PATH: ${{ vars.JIRA_BASE_PATH }}
@@ -162,20 +235,64 @@ jobs:
           COPILOT_MODEL: ${{ vars.COPILOT_MODEL }}
           AI_AGENT_PROVIDER: ${{ vars.AI_AGENT_PROVIDER }}
 
+          KIMI_API_KEY: ${{ secrets.KIMI_API_KEY }}
+          KIMI_MODEL: ${{ vars.KIMI_MODEL }}
+          KIMI_BASE_URL: ${{ vars.KIMI_BASE_URL }}
+          AI_TEAMMATE_CONFIG_FILE: ${{ inputs.config_file }}
+          AI_TEAMMATE_CONCURRENCY_KEY: ${{ inputs.concurrency_key }}
+          AI_TEAMMATE_DISPLAY_KEY: ${{ inputs.display_key || inputs.concurrency_key }}
+
           DMTOOLS_INTEGRATIONS: "jira,confluence,figma,ai,cli,file,github"
-          ENCODED_CONFIG: ${{ inputs.encoded_config }}
           PROMPT_CHUNK_TOKEN_LIMIT: ${{ vars.PROMPT_CHUNK_TOKEN_LIMIT }}
-          CLI_ALLOWED_COMMANDS: "find,ls,cat,mkdir,bash,git,gh,flutter,dart,python3,pytest,run-agent.sh"
+          CLI_ALLOWED_COMMANDS: "find,ls,cat,mkdir,bash,git,gh,flutter,dart,python3,pytest,run-agent.sh,codegraph,npx,npm"
 
         run: |
+          ENCODED_CONFIG="${{ inputs.encoded_config }}"
           echo "Using configuration: ${{ inputs.config_file }}"
           CI_RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          INPUT_JQL="key = ${{ inputs.concurrency_key }}"
+          INPUT_JQL="${{ inputs.input_jql }}"
+          if [ -z "${INPUT_JQL}" ]; then
+            INPUT_JQL="key = ${{ inputs.concurrency_key }}"
+          fi
           echo "CI Run URL: ${CI_RUN_URL}"
           echo "Input JQL: ${INPUT_JQL}"
+          mkdir -p "${GITHUB_WORKSPACE}/.dmtools"
+          set -o pipefail
 
           if [ -n "${ENCODED_CONFIG}" ]; then
-            dmtools --debug run "${{ inputs.config_file }}" "${ENCODED_CONFIG}" --inputJql "${INPUT_JQL}" --ciRunUrl "${CI_RUN_URL}"
+            dmtools --debug run "${{ inputs.config_file }}" "${ENCODED_CONFIG}" --inputJql "${INPUT_JQL}" --ciRunUrl "${CI_RUN_URL}" 2>&1 | tee "${GITHUB_WORKSPACE}/.dmtools/ai-run.log"
           else
-            dmtools --debug run "${{ inputs.config_file }}" --inputJql "${INPUT_JQL}" --ciRunUrl "${CI_RUN_URL}"
+            dmtools --debug run "${{ inputs.config_file }}" --inputJql "${INPUT_JQL}" --ciRunUrl "${CI_RUN_URL}" 2>&1 | tee "${GITHUB_WORKSPACE}/.dmtools/ai-run.log"
           fi
+
+          LAST_JS_RESULT="$(grep 'JavaScriptExecutor - JavaScript executed successfully:' "${GITHUB_WORKSPACE}/.dmtools/ai-run.log" | tail -n 1 || true)"
+          if [ -n "${LAST_JS_RESULT}" ] && echo "${LAST_JS_RESULT}" | grep -q '"success":false'; then
+            echo "::error::${{ inputs.config_file }} JavaScript action returned success:false. See .dmtools/ai-run.log for details."
+            exit 1
+          fi
+
+      - name: Verify CodeGraph usage
+        if: ${{ always() && steps.run_ai.outcome == 'success' }}
+        env:
+          CONFIG_FILE: ${{ inputs.config_file }}
+        run: |
+          case "${CONFIG_FILE}" in
+            agents/bug_development.json|agents/story_development.json|agents/pr_rework.json|agents/pr_review.json|agents/pr_test_automation_review.json|agents/pr_test_automation_rework.json|agents/test_case_automation.json)
+              ;;
+            *)
+              echo "CodeGraph usage is not required for ${CONFIG_FILE}"
+              exit 0
+              ;;
+          esac
+
+          if [ ! -s "${CODEGRAPH_USAGE_LOG}" ]; then
+            if grep -q "outputs/response.md missing — CLI agent was interrupted\\|outputs/response.md missing - CLI agent was interrupted\\|\"path\":\"interrupted\"\\|\"path\":\"already_fixed_without_codegraph\"\\|\"path\":\"blocked_without_codegraph\"\\|CLI command executed but did not produce output file\\|No review data found\\|No review data found in pr_review.json" "${GITHUB_WORKSPACE}/.dmtools/ai-run.log" 2>/dev/null; then
+              echo "::warning::CodeGraph usage was not recorded because the CLI agent did not complete acceptable source-code output generation. Post-action reset the ticket for retry."
+              exit 0
+            fi
+            echo "::warning::${CONFIG_FILE} completed without invoking codegraph. Source-code agents should use CodeGraph for code navigation, but missing usage does not fail the workflow."
+            exit 0
+          fi
+
+          echo "CodeGraph usage recorded:"
+          cat "${CODEGRAPH_USAGE_LOG}"

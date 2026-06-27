@@ -156,6 +156,12 @@ def main() -> None:
                     live_issue_page.press_key("Tab")
                     obs = live_issue_page.wait_for_active_element_change(prev_obs)
                     traversal.append(_focused_element_dict(obs))
+                    focused_download = _find_download_focus(
+                        traversal,
+                        expected_download_label,
+                    )
+                    if focused_download.kind == "semantic-label":
+                        break
                     prev_obs = obs
                 result["tab_traversal"] = traversal
 

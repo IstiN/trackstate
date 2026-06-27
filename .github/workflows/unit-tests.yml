@@ -46,10 +46,29 @@ jobs:
               - 'tool/**'
               - '.dmtools/policies/**'
               - '.github/workflows/unit-tests.yml'
+            python-tests:
+              - 'testing/**/*.py'
+              - 'test_python/**/*.py'
+              - '.github/workflows/unit-tests.yml'
 
       - name: Skip full Flutter validation
         if: steps.changes.outputs.flutter != 'true'
         run: echo "No Flutter-related changes detected; skipping heavy Flutter validation."
+
+      - name: Setup Python
+        if: steps.changes.outputs.python-tests == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Python dependencies
+        if: steps.changes.outputs.python-tests == 'true'
+        run: pip install pyyaml
+
+      - name: Run Python unit tests
+        if: steps.changes.outputs.python-tests == 'true'
+        run: |
+          python -m unittest discover -s test_python -p "test_*.py" -v
 
       - name: Setup Flutter
         if: steps.changes.outputs.flutter == 'true'
@@ -59,9 +78,20 @@ jobs:
           channel: stable
           cache: true
 
+      - name: Setup Node.js
+        if: steps.changes.outputs.flutter == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: 'package.json'
+          cache: npm
+
       - name: Install dependencies
         if: steps.changes.outputs.flutter == 'true'
         run: flutter pub get
+
+      - name: Install Node dependencies
+        if: steps.changes.outputs.flutter == 'true'
+        run: npm ci
 
       - name: Analyze
         if: steps.changes.outputs.flutter == 'true'
@@ -75,20 +105,30 @@ jobs:
         if: steps.changes.outputs.flutter == 'true'
         run: dart run tool/check_web_safety.dart
 
+      - name: Check code duplication
+        if: steps.changes.outputs.flutter == 'true'
+        run: |
+          npx jscpd lib/ --min-lines 5 --min-tokens 50 \
+            --ignore "**/*.g.dart,**/*.freezed.dart,lib/l10n/generated/**,lib/**/*.gr.dart" \
+            --reporters console --threshold 1
+
       - name: Run unit and golden tests
         if: steps.changes.outputs.flutter == 'true'
         run: flutter test --coverage
 
       - name: Build web app
         if: steps.changes.outputs.flutter == 'true'
+        env:
+          TRACKSTATE_GITHUB_APP_CLIENT_ID: ${{ vars.TRACKSTATE_GITHUB_APP_CLIENT_ID }}
+          TRACKSTATE_GITHUB_AUTH_PROXY_URL: ${{ vars.TRACKSTATE_GITHUB_AUTH_PROXY_URL }}
         run: |
           flutter build web --release \
             --base-href /trackstate/ \
             --dart-define TRACKSTATE_REPOSITORY=IstiN/trackstate-setup \
             --dart-define TRACKSTATE_SOURCE_REF=main \
             --dart-define TRACKSTATE_DATA_REF=main \
-            --dart-define TRACKSTATE_GITHUB_APP_CLIENT_ID="${{ vars.TRACKSTATE_GITHUB_APP_CLIENT_ID }}" \
-            --dart-define TRACKSTATE_GITHUB_AUTH_PROXY_URL="${{ vars.TRACKSTATE_GITHUB_AUTH_PROXY_URL }}"
+            --dart-define TRACKSTATE_GITHUB_APP_CLIENT_ID="$TRACKSTATE_GITHUB_APP_CLIENT_ID" \
+            --dart-define TRACKSTATE_GITHUB_AUTH_PROXY_URL="$TRACKSTATE_GITHUB_AUTH_PROXY_URL"
 
   accessibility-checks:
     name: Accessibility checks
@@ -140,7 +180,7 @@ jobs:
         if: steps.changes.outputs.accessibility == 'true'
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version-file: 'package.json'
           cache: npm
 
       - name: Validate accessibility workflow contract
@@ -161,6 +201,9 @@ jobs:
 
       - name: Build web app for accessibility scan
         if: steps.changes.outputs.accessibility == 'true'
+        env:
+          TRACKSTATE_GITHUB_APP_CLIENT_ID: ${{ vars.TRACKSTATE_GITHUB_APP_CLIENT_ID }}
+          TRACKSTATE_GITHUB_AUTH_PROXY_URL: ${{ vars.TRACKSTATE_GITHUB_AUTH_PROXY_URL }}
         run: |
           flutter build web --release \
             --base-href / \
@@ -169,8 +212,8 @@ jobs:
             --dart-define TRACKSTATE_REPOSITORY=IstiN/trackstate-setup \
             --dart-define TRACKSTATE_SOURCE_REF=main \
             --dart-define TRACKSTATE_DATA_REF=main \
-            --dart-define TRACKSTATE_GITHUB_APP_CLIENT_ID="${{ vars.TRACKSTATE_GITHUB_APP_CLIENT_ID }}" \
-            --dart-define TRACKSTATE_GITHUB_AUTH_PROXY_URL="${{ vars.TRACKSTATE_GITHUB_AUTH_PROXY_URL }}"
+            --dart-define TRACKSTATE_GITHUB_APP_CLIENT_ID="$TRACKSTATE_GITHUB_APP_CLIENT_ID" \
+            --dart-define TRACKSTATE_GITHUB_AUTH_PROXY_URL="$TRACKSTATE_GITHUB_AUTH_PROXY_URL"
 
       - name: Run axe-core accessibility checks
         id: axe_accessibility_scan
@@ -194,6 +237,9 @@ jobs:
 
       - name: Build web app for browser regressions
         if: steps.changes.outputs.accessibility == 'true'
+        env:
+          TRACKSTATE_GITHUB_APP_CLIENT_ID: ${{ vars.TRACKSTATE_GITHUB_APP_CLIENT_ID }}
+          TRACKSTATE_GITHUB_AUTH_PROXY_URL: ${{ vars.TRACKSTATE_GITHUB_AUTH_PROXY_URL }}
         run: |
           flutter build web --release \
             --base-href / \
@@ -201,8 +247,8 @@ jobs:
             --dart-define TRACKSTATE_REPOSITORY=IstiN/trackstate-setup \
             --dart-define TRACKSTATE_SOURCE_REF=main \
             --dart-define TRACKSTATE_DATA_REF=main \
-            --dart-define TRACKSTATE_GITHUB_APP_CLIENT_ID="${{ vars.TRACKSTATE_GITHUB_APP_CLIENT_ID }}" \
-            --dart-define TRACKSTATE_GITHUB_AUTH_PROXY_URL="${{ vars.TRACKSTATE_GITHUB_AUTH_PROXY_URL }}"
+            --dart-define TRACKSTATE_GITHUB_APP_CLIENT_ID="$TRACKSTATE_GITHUB_APP_CLIENT_ID" \
+            --dart-define TRACKSTATE_GITHUB_AUTH_PROXY_URL="$TRACKSTATE_GITHUB_AUTH_PROXY_URL"
 
       - name: Run browser regression checks
         if: steps.changes.outputs.accessibility == 'true'

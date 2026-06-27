@@ -1,0 +1,26 @@
+test_id: TS-1366
+type: release
+framework: unittest
+platform: github-release
+dependencies:
+  - Python 3.12+
+  - PyYAML
+  - gh CLI available on PATH
+  - tar utility available on PATH
+  - file utility available on PATH (optional, for human-style verification)
+runtime_inputs:
+  repository: IstiN/trackstate
+  default_branch: main
+  release_tag_pattern: "^v\\d+\\.\\d+\\.\\d+$"
+  cli_archive_pattern: "trackstate-cli-linux-x64-*.tar.gz"
+  expected_member_name: trackstate
+  expected_permission_bits: 0o755
+  executable_permission_mask: 0o111
+  read_permission_mask: 0o444
+notes:
+  - Verifies that the published Linux x64 CLI archive is atomic and contains only the compiled executable.
+  - Downloads the CLI archive from the selected GitHub release and inspects it with the Python tarfile module.
+  - Checks that the archive contains exactly one regular file named `trackstate` and no directories or metadata files.
+  - Verifies the executable bit is preserved after extraction (owner/group/other read and execute bits).
+  - Attempts to run the extracted binary with `--help` as a real-user sanity check when the host OS can execute it.
+  - Reports blocked_by_human when no published release exposes a matching Linux x64 CLI archive.

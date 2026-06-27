@@ -39,7 +39,6 @@ class IssueMutationService {
     }
 
     try {
-      final snapshot = await providerRepository.loadSnapshot();
       final provider = providerRepository.providerAdapter;
       final permission = await provider.getPermission();
       if (!permission.canWrite) {
@@ -50,166 +49,195 @@ class IssueMutationService {
           message: 'Connect a repository session with write access first.',
         );
       }
-      await provider.ensureCleanWorktree();
 
-      final key = _nextIssueKey(snapshot);
-      final projectRoot = snapshot.project.key;
-      final writeBranch = await provider.resolveWriteBranch();
-      final blobPaths = await _blobPaths(provider, writeBranch);
-      final issueTypeDefinition =
-          _resolveConfigEntry(
-            issueTypeId ?? fields['issueType']?.toString(),
-            snapshot.project.issueTypeDefinitions,
-          ) ??
-          _resolveConfigEntry('story', snapshot.project.issueTypeDefinitions) ??
-          snapshot.project.issueTypeDefinitions.firstOrNull;
-      final priorityDefinition =
-          _resolveConfigEntry(
-            priorityId ?? fields['priority']?.toString(),
-            snapshot.project.priorityDefinitions,
-          ) ??
-          _resolveConfigEntry('medium', snapshot.project.priorityDefinitions) ??
-          snapshot.project.priorityDefinitions.firstOrNull;
-      final statusDefinition =
-          _defaultStatusDefinition(snapshot.project) ??
-          snapshot.project.statusDefinitions.firstOrNull;
-      if (issueTypeDefinition == null ||
-          priorityDefinition == null ||
-          statusDefinition == null) {
-        return _failure(
-          operation: operation,
-          issueKey: key,
-          category: IssueMutationErrorCategory.validation,
-          message: 'Project configuration is missing required issue defaults.',
-        );
+      const maxAttempts = 8;
+      for (var attempt = 0; attempt < maxAttempts; attempt++) {
+        try {
+          await provider.ensureCleanWorktree();
+          final snapshot = await providerRepository.loadSnapshot();
+
+          final key = _nextIssueKey(snapshot);
+          final projectRoot = snapshot.project.key;
+          final writeBranch = await provider.resolveWriteBranch();
+          final blobPaths = await _blobPaths(provider, writeBranch);
+          final issueTypeDefinition =
+              _resolveConfigEntry(
+                issueTypeId ?? fields['issueType']?.toString(),
+                snapshot.project.issueTypeDefinitions,
+              ) ??
+              _resolveConfigEntry(
+                'story',
+                snapshot.project.issueTypeDefinitions,
+              ) ??
+              snapshot.project.issueTypeDefinitions.firstOrNull;
+          final priorityDefinition =
+              _resolveConfigEntry(
+                priorityId ?? fields['priority']?.toString(),
+                snapshot.project.priorityDefinitions,
+              ) ??
+              _resolveConfigEntry(
+                'medium',
+                snapshot.project.priorityDefinitions,
+              ) ??
+              snapshot.project.priorityDefinitions.firstOrNull;
+          final statusDefinition =
+              _defaultStatusDefinition(snapshot.project) ??
+              snapshot.project.statusDefinitions.firstOrNull;
+          if (issueTypeDefinition == null ||
+              priorityDefinition == null ||
+              statusDefinition == null) {
+            return _failure(
+              operation: operation,
+              issueKey: key,
+              category: IssueMutationErrorCategory.validation,
+              message:
+                  'Project configuration is missing required issue defaults.',
+            );
+          }
+
+          final hierarchy = _resolveHierarchyForCreate(
+            snapshot: snapshot,
+            parentKey: parentKey,
+            epicKey: epicKey,
+            isEpicIssue: issueTypeDefinition.id == 'epic',
+          );
+          if (hierarchy.failure != null) {
+            return _failure(
+              operation: operation,
+              issueKey: key,
+              category: hierarchy.failure!.category,
+              message: hierarchy.failure!.message,
+              details: hierarchy.failure!.details,
+            );
+          }
+          if (_canonicalConfigId(issueTypeDefinition.id) == 'subtask' &&
+              hierarchy.parentKey == null) {
+            return _failure(
+              operation: operation,
+              issueKey: key,
+              category: IssueMutationErrorCategory.validation,
+              message: 'Sub-task issues require a parent issue.',
+            );
+          }
+
+          final issueRoot = hierarchy.issueRoot(projectRoot, key);
+          final issuePath = '$issueRoot/main.md';
+          if (blobPaths.contains(issuePath)) {
+            return _failure(
+              operation: operation,
+              issueKey: key,
+              category: IssueMutationErrorCategory.conflict,
+              message: 'Issue path $issuePath already exists.',
+            );
+          }
+
+          final timestamp = DateTime.now().toUtc().toIso8601String();
+          final author =
+              _normalizeNullableString(
+                reporter ?? providerRepository.session?.resolvedUserIdentity,
+              ) ??
+              'unassigned';
+          final normalizedAssignee =
+              _normalizeNullableString(assignee) ?? author;
+          final coreFields = _CreateIssueFields(
+            issueTypeId: issueTypeDefinition.id,
+            statusId: statusDefinition.id,
+            priorityId: priorityDefinition.id,
+            assignee: normalizedAssignee,
+            reporter: author,
+            parentKey: hierarchy.parentKey,
+            epicKey: hierarchy.epicKey,
+          );
+          final createPayload = _CreateIssuePayload(
+            summary: normalizedSummary,
+            description: description.trim(),
+            timestamp: timestamp,
+            fields: fields,
+            core: coreFields,
+          );
+
+          final markdown = _buildIssueMarkdown(
+            key: key,
+            projectKey: snapshot.project.key,
+            payload: createPayload,
+          );
+          final updatedIssues = <_IssueIndexState>[
+            for (final issue in snapshot.issues)
+              _IssueIndexState.fromIssue(issue),
+            _IssueIndexState(
+              key: key,
+              storagePath: issuePath,
+              parentKey: hierarchy.parentKey,
+              epicKey: hierarchy.epicKey,
+              isArchived: false,
+              summary: normalizedSummary,
+              issueTypeId: issueTypeDefinition.id,
+              statusId: statusDefinition.id,
+              priorityId: priorityDefinition.id,
+              assignee: normalizedAssignee,
+              labels: _stringListValue(fields['labels']),
+              updatedLabel: timestamp,
+              links: const [],
+            ),
+          ];
+          final indexPath = '$projectRoot/.trackstate/index/issues.json';
+          final changes = <RepositoryFileChange>[
+            RepositoryTextFileChange(path: issuePath, content: markdown),
+            RepositoryTextFileChange(
+              path: indexPath,
+              content: '${jsonEncode(_repositoryIndexJson(updatedIssues))}\n',
+              expectedRevision: await _existingTextRevision(
+                provider,
+                path: indexPath,
+                ref: writeBranch,
+                blobPaths: blobPaths,
+              ),
+            ),
+          ];
+
+          final acceptanceCriteria = _normalizeAcceptanceCriteriaContent(
+            fields['acceptanceCriteria'],
+          );
+          final acceptancePath = '$issueRoot/acceptance_criteria.md';
+          if (acceptanceCriteria != null) {
+            changes.add(
+              RepositoryTextFileChange(
+                path: acceptancePath,
+                content: acceptanceCriteria,
+              ),
+            );
+          }
+
+          final commitResult = await _applyChanges(
+            provider: provider,
+            branch: writeBranch,
+            message: 'Create $key',
+            changes: changes,
+          );
+          final refreshed = await providerRepository.loadSnapshot();
+          final createdIssue = refreshed.issues.firstWhere(
+            (candidate) => candidate.key == key,
+          );
+          return IssueMutationResult.success(
+            operation: operation,
+            issueKey: key,
+            value: createdIssue,
+            revision: commitResult.revision,
+          );
+        } catch (error) {
+          if (!_isRetriableCreateIndexConflict(error) ||
+              attempt == maxAttempts - 1) {
+            rethrow;
+          }
+        }
       }
 
-      final hierarchy = _resolveHierarchyForCreate(
-        snapshot: snapshot,
-        parentKey: parentKey,
-        epicKey: epicKey,
-        isEpicIssue: issueTypeDefinition.id == 'epic',
-      );
-      if (hierarchy.failure != null) {
-        return _failure(
-          operation: operation,
-          issueKey: key,
-          category: hierarchy.failure!.category,
-          message: hierarchy.failure!.message,
-          details: hierarchy.failure!.details,
-        );
-      }
-      if (_canonicalConfigId(issueTypeDefinition.id) == 'subtask' &&
-          hierarchy.parentKey == null) {
-        return _failure(
-          operation: operation,
-          issueKey: key,
-          category: IssueMutationErrorCategory.validation,
-          message: 'Sub-task issues require a parent issue.',
-        );
-      }
-
-      final issueRoot = hierarchy.issueRoot(projectRoot, key);
-      final issuePath = '$issueRoot/main.md';
-      if (blobPaths.contains(issuePath)) {
-        return _failure(
-          operation: operation,
-          issueKey: key,
-          category: IssueMutationErrorCategory.conflict,
-          message: 'Issue path $issuePath already exists.',
-        );
-      }
-
-      final timestamp = DateTime.now().toUtc().toIso8601String();
-      final author =
-          _normalizeNullableString(
-            reporter ?? providerRepository.session?.resolvedUserIdentity,
-          ) ??
-          'unassigned';
-      final normalizedAssignee = _normalizeNullableString(assignee) ?? author;
-      final coreFields = _CreateIssueFields(
-        issueTypeId: issueTypeDefinition.id,
-        statusId: statusDefinition.id,
-        priorityId: priorityDefinition.id,
-        assignee: normalizedAssignee,
-        reporter: author,
-        parentKey: hierarchy.parentKey,
-        epicKey: hierarchy.epicKey,
-      );
-      final createPayload = _CreateIssuePayload(
-        summary: normalizedSummary,
-        description: description.trim(),
-        timestamp: timestamp,
-        fields: fields,
-        core: coreFields,
-      );
-
-      final markdown = _buildIssueMarkdown(
-        key: key,
-        projectKey: snapshot.project.key,
-        payload: createPayload,
-      );
-      final updatedIssues = <_IssueIndexState>[
-        for (final issue in snapshot.issues) _IssueIndexState.fromIssue(issue),
-        _IssueIndexState(
-          key: key,
-          storagePath: issuePath,
-          parentKey: hierarchy.parentKey,
-          epicKey: hierarchy.epicKey,
-          isArchived: false,
-          summary: normalizedSummary,
-          issueTypeId: issueTypeDefinition.id,
-          statusId: statusDefinition.id,
-          priorityId: priorityDefinition.id,
-          assignee: normalizedAssignee,
-          labels: _stringListValue(fields['labels']),
-          updatedLabel: timestamp,
-          links: const [],
-        ),
-      ];
-      final indexPath = '$projectRoot/.trackstate/index/issues.json';
-      final changes = <RepositoryFileChange>[
-        RepositoryTextFileChange(path: issuePath, content: markdown),
-        RepositoryTextFileChange(
-          path: indexPath,
-          content: '${jsonEncode(_repositoryIndexJson(updatedIssues))}\n',
-          expectedRevision: await _existingTextRevision(
-            provider,
-            path: indexPath,
-            ref: writeBranch,
-            blobPaths: blobPaths,
-          ),
-        ),
-      ];
-
-      final acceptanceCriteria = _normalizeAcceptanceCriteriaContent(
-        fields['acceptanceCriteria'],
-      );
-      final acceptancePath = '$issueRoot/acceptance_criteria.md';
-      if (acceptanceCriteria != null) {
-        changes.add(
-          RepositoryTextFileChange(
-            path: acceptancePath,
-            content: acceptanceCriteria,
-          ),
-        );
-      }
-
-      final commitResult = await _applyChanges(
-        provider: provider,
-        branch: writeBranch,
-        message: 'Create $key',
-        changes: changes,
-      );
-      final refreshed = await providerRepository.loadSnapshot();
-      final createdIssue = refreshed.issues.firstWhere(
-        (candidate) => candidate.key == key,
-      );
-      return IssueMutationResult.success(
+      return _failure(
         operation: operation,
-        issueKey: key,
-        value: createdIssue,
-        revision: commitResult.revision,
+        issueKey: '',
+        category: IssueMutationErrorCategory.conflict,
+        message:
+            'Could not create an issue because the repository index kept changing.',
       );
     } catch (error) {
       return _mapError<TrackStateIssue>(
@@ -605,6 +633,12 @@ class IssueMutationService {
         frontmatter: frontmatter,
         body: document.body,
       );
+      final updatedIndexState = _issueIndexStateFromFrontmatter(
+        issue: issue,
+        frontmatter: frontmatter,
+        body: document.body,
+        project: snapshot.project,
+      );
       final blobPaths = await _blobPaths(provider, writeBranch);
       final indexPath = '${snapshot.project.key}/.trackstate/index/issues.json';
       final writeResult = await _applyChanges(
@@ -621,7 +655,7 @@ class IssueMutationService {
             path: indexPath,
             content:
                 '${jsonEncode(_repositoryIndexJson([for (final candidate in snapshot.issues)
-                  if (candidate.key == issue.key) _issueIndexStateFromFrontmatter(issue: issue, frontmatter: frontmatter, body: document.body, project: snapshot.project) else _IssueIndexState.fromIssue(candidate)]))}\n',
+                  if (candidate.key == issue.key) updatedIndexState else _IssueIndexState.fromIssue(candidate)]))}\n',
             expectedRevision: await _existingTextRevision(
               provider,
               path: indexPath,
@@ -639,7 +673,7 @@ class IssueMutationService {
       return IssueMutationResult.success(
         operation: operation,
         issueKey: issueKey,
-        value: refreshed,
+        value: _applyIssueIndexState(refreshed, updatedIndexState),
         revision: writeResult.revision,
       );
     } catch (error) {
@@ -1565,6 +1599,67 @@ TrackStateIssue _retargetIssueForHierarchyMove(
   );
 }
 
+TrackStateIssue _applyIssueIndexState(
+  TrackStateIssue issue,
+  _IssueIndexState state,
+) {
+  return TrackStateIssue(
+    key: issue.key,
+    project: issue.project,
+    issueType: issue.issueType,
+    issueTypeId: state.issueTypeId,
+    status: _issueStatusFromId(state.statusId),
+    statusId: state.statusId,
+    priority: _issuePriorityFromId(state.priorityId),
+    priorityId: state.priorityId,
+    summary: state.summary,
+    description: issue.description,
+    assignee: state.assignee,
+    reporter: issue.reporter,
+    labels: state.labels,
+    components: issue.components,
+    fixVersionIds: issue.fixVersionIds,
+    watchers: issue.watchers,
+    customFields: issue.customFields,
+    parentKey: state.parentKey,
+    epicKey: state.epicKey,
+    parentPath: issue.parentPath,
+    epicPath: issue.epicPath,
+    progress: issue.progress,
+    updatedLabel: state.updatedLabel,
+    acceptanceCriteria: issue.acceptanceCriteria,
+    comments: issue.comments,
+    links: issue.links,
+    attachments: issue.attachments,
+    isArchived: state.isArchived,
+    hasDetailLoaded: issue.hasDetailLoaded,
+    hasCommentsLoaded: issue.hasCommentsLoaded,
+    hasAttachmentsLoaded: issue.hasAttachmentsLoaded,
+    resolutionId: state.resolutionId,
+    storagePath: state.storagePath,
+    rawMarkdown: issue.rawMarkdown,
+  );
+}
+
+IssueStatus _issueStatusFromId(String statusId) {
+  return switch (_canonicalConfigId(statusId)) {
+    'todo' || 'to-do' => IssueStatus.todo,
+    'in-progress' => IssueStatus.inProgress,
+    'in-review' => IssueStatus.inReview,
+    'done' => IssueStatus.done,
+    _ => IssueStatus.inProgress,
+  };
+}
+
+IssuePriority _issuePriorityFromId(String priorityId) {
+  return switch (_canonicalConfigId(priorityId)) {
+    'highest' => IssuePriority.highest,
+    'high' => IssuePriority.high,
+    'low' => IssuePriority.low,
+    _ => IssuePriority.medium,
+  };
+}
+
 RepositoryIndex _deriveRepositoryIndex(
   List<TrackStateIssue> issues,
   List<DeletedIssueTombstone> deleted,
@@ -1939,6 +2034,17 @@ Future<String?> _existingRevisionForDelete(
     ref: ref,
     blobPaths: blobPaths,
   );
+}
+
+bool _isRetriableCreateIndexConflict(Object error) {
+  final message = error is TrackStateProviderException
+      ? error.message
+      : error is TrackStateRepositoryException
+      ? error.message
+      : '$error';
+  final lower = message.toLowerCase();
+  return lower.contains('changed in the current branch') &&
+      lower.contains('.trackstate/index/issues.json');
 }
 
 String _nextIssueKey(TrackerSnapshot snapshot) {

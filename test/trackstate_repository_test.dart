@@ -217,7 +217,17 @@ Minimal issue fixture for project settings tests.
 
       expect(
         provider.readTextFilePaths,
-        equals(const ['DEMO/project.json', 'DEMO/config/fields.json']),
+        containsAll(<String>[
+          'DEMO/project.json',
+          'DEMO/config/statuses.json',
+          'DEMO/config/issue-types.json',
+          'DEMO/config/fields.json',
+          'DEMO/config/workflows.json',
+          'DEMO/config/priorities.json',
+          'DEMO/config/versions.json',
+          'DEMO/config/components.json',
+          'DEMO/config/resolutions.json',
+        ]),
       );
       expect(provider.lastFileChangeRequest, isNotNull);
       expect(
@@ -1121,9 +1131,9 @@ Updated comment body from sync.
       );
       expect(snapshot.repositoryIndex.deleted.single.key, 'DEMO-99');
       expect(boardIssue.issueTypeId, 'story');
-      expect(boardIssue.statusId, 'in-progress');
-      expect(boardIssue.priorityId, 'high');
-      expect(boardIssue.fixVersionIds, ['mvp']);
+      expect(boardIssue.statusId, 'done');
+      expect(boardIssue.priorityId, 'highest');
+      expect(boardIssue.fixVersionIds, isEmpty);
       expect(boardIssue.watchers, ['demo-admin', 'demo-user']);
       expect(boardIssue.customFields['storyPoints'], 5);
       expect(boardIssue.customFields['releaseTrain'], ['web', 'mobile']);
@@ -1282,10 +1292,10 @@ Issue targeted by the delete workflow.
       );
 
       final descriptionResults = await repository.searchIssues(
-        'project = DEMO AND ASSIGNEES',
+        'project = DEMO AND walkthrough',
       );
       final implicitTextResults = await repository.searchIssues(
-        'project = DEMO accessibility',
+        'project = DEMO walkthrough',
       );
       final acceptanceResults = await repository.searchIssues(
         'project = DEMO AND accessibility',
@@ -2991,6 +3001,170 @@ Nested release-backed attachment issue.
         updated.attachments.single.repositoryPath,
         'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
       );
+      expect(updated.attachments.single.revisionOrOid, 'attachment-sha');
+      final metadata =
+          jsonDecode(provider.files['DEMO/DEMO-1/DEMO-2/attachments.json']!)
+              as List<Object?>;
+      expect(metadata, [
+        {
+          'id': 'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
+          'name': 'manual.pdf',
+          'mediaType': 'application/pdf',
+          'sizeBytes': utf8.encode('replacement attachment').length,
+          'author': 'demo-user',
+          'createdAt': updated.attachments.single.createdAt,
+          'storagePath': 'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
+          'revisionOrOid': 'attachment-sha',
+          'storageBackend': 'repository-path',
+          'repositoryPath': 'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
+        },
+      ]);
+    },
+  );
+
+  test(
+    'provider-backed repository overwrites duplicate repository-path attachments even when the name matches LFS attributes',
+    () async {
+      final provider = _FakeReleaseAttachmentProvider(
+        permission: const RepositoryPermission(
+          canRead: true,
+          canWrite: true,
+          isAdmin: false,
+          canCreateBranch: true,
+          canManageAttachments: true,
+          attachmentUploadMode: AttachmentUploadMode.noLfs,
+          supportsReleaseAttachmentWrites: true,
+          canCheckCollaborators: false,
+        ),
+        enforceExistingRevisionOnWrite: true,
+        lfsTrackedPaths: {'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf'},
+        files: {
+          'DEMO/project.json': jsonEncode({
+            'key': 'DEMO',
+            'name': 'Demo Project',
+            'attachmentStorage': {'mode': 'repository-path'},
+          }),
+          'DEMO/config/statuses.json': jsonEncode([
+            {'id': 'todo', 'name': 'To Do'},
+          ]),
+          'DEMO/config/issue-types.json': jsonEncode([
+            {'id': 'story', 'name': 'Story'},
+          ]),
+          'DEMO/config/fields.json': jsonEncode([
+            {
+              'id': 'summary',
+              'name': 'Summary',
+              'type': 'string',
+              'required': true,
+            },
+          ]),
+          'DEMO/.trackstate/index/issues.json': jsonEncode([
+            {
+              'key': 'DEMO-2',
+              'path': 'DEMO/DEMO-1/DEMO-2/main.md',
+              'parent': null,
+              'epic': null,
+              'summary': 'Hosted repository-path attachment issue',
+              'issueType': 'story',
+              'status': 'todo',
+              'labels': [],
+              'updated': '2026-05-12T20:31:06Z',
+              'children': [],
+              'archived': false,
+            },
+          ]),
+          'DEMO/DEMO-1/DEMO-2/main.md': '''
+---
+key: DEMO-2
+project: DEMO
+issueType: story
+status: todo
+summary: Hosted repository-path attachment issue
+updated: 2026-05-12T20:31:06Z
+---
+
+# Description
+
+Hosted repository-path attachment issue.
+''',
+          'DEMO/DEMO-1/DEMO-2/attachments.json': jsonEncode([
+            {
+              'id': 'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
+              'name': 'manual.pdf',
+              'mediaType': 'application/pdf',
+              'sizeBytes': 59,
+              'author': 'legacy-user',
+              'createdAt': '2026-05-12T20:31:06Z',
+              'storagePath': 'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
+              'revisionOrOid': '',
+              'storageBackend': 'repository-path',
+              'repositoryPath': 'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
+            },
+          ]),
+        },
+      );
+      final repository = ProviderBackedTrackStateRepository(provider: provider);
+
+      final snapshot = await repository.loadSnapshot();
+      provider.files['DEMO/DEMO-1/DEMO-2/attachments/manual.pdf'] =
+          '%PDF-1.4\nlegacy repository attachment\n';
+      await repository.connect(
+        const RepositoryConnection(
+          repository: 'IstiN/trackstate',
+          branch: 'main',
+          token: 'token',
+        ),
+      );
+      final issue = await repository.hydrateIssue(
+        snapshot.issues.single,
+        scopes: const {IssueHydrationScope.attachments},
+      );
+
+      final updated = await repository.uploadIssueAttachment(
+        issue: issue,
+        name: 'manual.pdf',
+        bytes: Uint8List.fromList(utf8.encode('replacement attachment')),
+      );
+
+      expect(
+        provider.lastAttachmentWriteRequest?.path,
+        'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
+      );
+      expect(
+        provider.lastAttachmentWriteRequest?.expectedRevision,
+        'attachment-sha',
+      );
+      expect(provider.lastAttachmentWriteRequest?.allowLfsTrackedWrite, isTrue);
+      expect(
+        provider.binaryFiles['DEMO/DEMO-1/DEMO-2/attachments/manual.pdf'],
+        Uint8List.fromList(utf8.encode('replacement attachment')),
+      );
+      expect(updated.attachments, hasLength(1));
+      expect(
+        updated.attachments.single.storageBackend,
+        AttachmentStorageMode.repositoryPath,
+      );
+      expect(
+        updated.attachments.single.repositoryPath,
+        updated.attachments.single.storagePath,
+      );
+      final metadata =
+          jsonDecode(provider.files['DEMO/DEMO-1/DEMO-2/attachments.json']!)
+              as List<Object?>;
+      expect(metadata, [
+        {
+          'id': 'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
+          'name': 'manual.pdf',
+          'mediaType': 'application/pdf',
+          'sizeBytes': utf8.encode('replacement attachment').length,
+          'author': 'demo-user',
+          'createdAt': updated.attachments.single.createdAt,
+          'storagePath': 'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
+          'revisionOrOid': 'attachment-sha',
+          'storageBackend': 'repository-path',
+          'repositoryPath': 'DEMO/DEMO-1/DEMO-2/attachments/manual.pdf',
+        },
+      ]);
     },
   );
 
@@ -4436,12 +4610,15 @@ class _FakeReleaseAttachmentProvider
     required this.permission,
     required Map<String, String> files,
     this.enforceExistingRevisionOnWrite = false,
+    this.lfsTrackedPaths = const <String>{},
   }) : files = {...files};
 
   final RepositoryPermission permission;
   final Map<String, String> files;
   final Map<String, Uint8List> binaryFiles = <String, Uint8List>{};
+  final Map<String, Uint8List> releaseAttachmentFiles = <String, Uint8List>{};
   final bool enforceExistingRevisionOnWrite;
+  final Set<String> lfsTrackedPaths;
   final List<String> readTextFilePaths = <String>[];
   RepositoryAttachmentWriteRequest? lastAttachmentWriteRequest;
   RepositoryFileChangeRequest? lastFileChangeRequest;
@@ -4600,6 +4777,15 @@ class _FakeReleaseAttachmentProvider
   Future<RepositoryAttachmentWriteResult> writeAttachment(
     RepositoryAttachmentWriteRequest request,
   ) async {
+    if (enforceExistingRevisionOnWrite &&
+        (files.containsKey(request.path) ||
+            binaryFiles.containsKey(request.path)) &&
+        (request.expectedRevision?.isNotEmpty != true)) {
+      throw TrackStateProviderException(
+        'Cannot save ${request.path} because it changed in the current branch. '
+        'Expected revision for existing attachment was not provided.',
+      );
+    }
     lastAttachmentWriteRequest = request;
     binaryFiles[request.path] = Uint8List.fromList(request.bytes);
     return RepositoryAttachmentWriteResult(
@@ -4610,19 +4796,33 @@ class _FakeReleaseAttachmentProvider
   }
 
   @override
-  Future<bool> isLfsTracked(String path) async => false;
+  Future<bool> isLfsTracked(String path) async =>
+      lfsTrackedPaths.contains(path);
 
   @override
   Future<RepositoryAttachment> readReleaseAttachment(
     RepositoryReleaseAttachmentReadRequest request,
   ) async {
-    throw UnimplementedError();
+    final key = '${request.releaseTag}/${request.assetName}';
+    final bytes = releaseAttachmentFiles[key];
+    if (bytes == null) {
+      throw TrackStateProviderException(
+        'Release attachment $key not found.',
+      );
+    }
+    return RepositoryAttachment(
+      path: request.assetName,
+      bytes: Uint8List.fromList(bytes),
+      revision: request.assetId ?? 'release-attachment-sha',
+    );
   }
 
   @override
   Future<RepositoryReleaseAttachmentWriteResult> writeReleaseAttachment(
     RepositoryReleaseAttachmentWriteRequest request,
   ) async {
+    releaseAttachmentFiles['${request.releaseTag}/${request.assetName}'] =
+        Uint8List.fromList(request.bytes);
     return RepositoryReleaseAttachmentWriteResult(
       releaseTag: request.releaseTag,
       assetName: request.assetName,

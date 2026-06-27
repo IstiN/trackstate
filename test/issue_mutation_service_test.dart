@@ -705,6 +705,35 @@ void main() {
   );
 
   test(
+    'service retries hosted issue creation after an index revision conflict',
+    () async {
+      final backend = _HostedRepositoryBackend(files: _mutationFixtureFiles());
+      final provider = _ConflictOnceGitHubProvider(client: backend.client);
+      final repository = ProviderBackedTrackStateRepository(
+        provider: provider,
+      );
+      await repository.loadSnapshot();
+      await repository.connect(
+        const RepositoryConnection(
+          repository: SetupTrackStateRepository.repositoryName,
+          branch: 'main',
+          token: 'token',
+        ),
+      );
+      final service = IssueMutationService(repository: repository);
+
+      final result = await service.createIssue(
+        summary: 'Recovered after index conflict',
+      );
+
+      expect(result.isSuccess, isTrue);
+      expect(result.value!.key, 'DEMO-11');
+      expect(provider.conflictInjections, 1);
+      expect(backend.exists('DEMO/DEMO-11/main.md'), isTrue);
+    },
+  );
+
+  test(
     'service preserves attachment backend metadata when moving issue hierarchies',
     () async {
       final repo = await _createMutationRepository();
@@ -1514,5 +1543,28 @@ class _HostedRepositoryBackend {
     }
     final chunk = value.toRadixString(16).padLeft(8, '0');
     return List.filled(5, chunk).join().substring(0, 40);
+  }
+}
+
+class _ConflictOnceGitHubProvider extends GitHubTrackStateProvider {
+  _ConflictOnceGitHubProvider({required super.client});
+
+  var conflictInjections = 0;
+
+  @override
+  Future<RepositoryCommitResult> applyFileChanges(
+    RepositoryFileChangeRequest request,
+  ) async {
+    if (conflictInjections == 0 &&
+        request.changes.any(
+          (change) => change.path.endsWith('.trackstate/index/issues.json'),
+        )) {
+      conflictInjections += 1;
+      throw TrackStateProviderException(
+        'Cannot save DEMO/.trackstate/index/issues.json because it changed in the current branch. '
+        'Expected revision stale-index, found current-index.',
+      );
+    }
+    return super.applyFileChanges(request);
   }
 }

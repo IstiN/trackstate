@@ -356,10 +356,14 @@ void main() {
         expect(summaryIdField.controller?.text, 'summary');
         expect(summaryIdField.enabled, isFalse);
 
-        final summaryTypeButton = tester.widget<TextButton>(
-          find.widgetWithText(TextButton, 'Type string'),
+        final summaryTypeField = tester.widget<TextField>(
+          find.descendant(
+            of: find.widgetWithText(TextFormField, 'string'),
+            matching: find.byType(TextField),
+          ),
         );
-        expect(summaryTypeButton.onPressed, isNull);
+        expect(summaryTypeField.decoration?.labelText, 'Type');
+        expect(summaryTypeField.enabled, isFalse);
 
         await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
         await tester.pumpAndSettle();

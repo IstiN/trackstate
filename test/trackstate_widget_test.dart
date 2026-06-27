@@ -289,6 +289,68 @@ void main() {
     }
   });
 
+  testWidgets('active search hides archived issues from hosted results', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    try {
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      await tester.pumpWidget(
+        TrackStateApp(
+          repository: DemoTrackStateRepository(
+            snapshot: _searchPaginationSnapshot(archivedIssueIndexes: {1}),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.bySemanticsLabel(RegExp('JQL Search')).first);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Paged issue 1'), findsNothing);
+      expect(find.text('Showing 6 of 7 issues'), findsOneWidget);
+    } finally {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+      semantics.dispose();
+    }
+  });
+
+  testWidgets('explicit archived query still shows archived issues', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    try {
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      await tester.pumpWidget(
+        TrackStateApp(
+          repository: DemoTrackStateRepository(
+            snapshot: _searchPaginationSnapshot(archivedIssueIndexes: {1}),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.bySemanticsLabel(RegExp('JQL Search')).first);
+      await tester.pumpAndSettle();
+
+      final searchField = find.byType(TextField).first;
+      await tester.enterText(searchField, 'archived = true ORDER BY key ASC');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Paged issue 1'), findsWidgets);
+      expect(find.text('Paged issue 2'), findsNothing);
+      expect(find.text('1 issue'), findsOneWidget);
+    } finally {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+      semantics.dispose();
+    }
+  });
+
   testWidgets(
     'first hosted load keeps the shell visible and shows bootstrap-backed placeholders',
     (tester) async {
@@ -401,6 +463,36 @@ void main() {
         expect(find.text('No issues match this query'), findsNothing);
         expect(find.text('TRACK-12'), findsWidgets);
         expect(find.text('Implement Git sync service'), findsWidgets);
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        semantics.dispose();
+      }
+    },
+  );
+
+  testWidgets(
+    'hosted bootstrap fallback excludes archived issues from active search',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+      try {
+        await tester.pumpWidget(
+          TrackStateApp(
+            repository: _FailingBootstrapSearchRepository(
+              snapshot: _searchPaginationSnapshot(archivedIssueIndexes: {1}),
+            ),
+          ),
+        );
+        await tester.pump();
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('JQL Search').first);
+        await tester.pumpAndSettle();
+
+        expect(find.text('Paged issue 1'), findsNothing);
+        expect(find.text('Paged issue 7'), findsOneWidget);
       } finally {
         tester.view.resetPhysicalSize();
         tester.view.resetDevicePixelRatio();
@@ -1633,7 +1725,9 @@ class _SlowHistoryReactiveRepository
   }
 }
 
-TrackerSnapshot _searchPaginationSnapshot() {
+TrackerSnapshot _searchPaginationSnapshot({
+  Set<int> archivedIssueIndexes = const <int>{},
+}) {
   final issues = [
     for (var index = 1; index <= 8; index += 1)
       TrackStateIssue(
@@ -1664,7 +1758,7 @@ TrackerSnapshot _searchPaginationSnapshot() {
         comments: const [],
         links: const [],
         attachments: const [],
-        isArchived: false,
+        isArchived: archivedIssueIndexes.contains(index),
         storagePath: 'TRACK/TRACK-$index/main.md',
         rawMarkdown: '',
       ),

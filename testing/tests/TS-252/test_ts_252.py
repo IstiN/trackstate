@@ -11,6 +11,9 @@ from testing.core.config.non_default_branch_release_config import (
 from testing.core.interfaces.non_default_branch_release_probe import (
     NonDefaultBranchReleaseProbe,
 )
+from testing.core.interfaces.non_default_branch_release_repository import (
+    NonDefaultBranchReleaseEnvironmentError,
+)
 from testing.tests.support.non_default_branch_release_probe_factory import (
     create_non_default_branch_release_probe,
 )
@@ -31,7 +34,12 @@ class PullRequestMergeToNonDefaultBranchDoesNotGenerateReleaseOrTagTest(
     def test_merge_to_non_default_branch_does_not_generate_release_or_semantic_tag(
         self,
     ) -> None:
-        observation = self.probe.validate()
+        try:
+            observation = self.probe.validate()
+        except NonDefaultBranchReleaseEnvironmentError as error:
+            # TS-1389: fail fast when the live GitHub environment is unavailable
+            # instead of letting the test hang until the outer timeout fires.
+            self.skipTest(str(error))
         self._write_result_if_requested(observation.to_dict())
 
         self.assertEqual(

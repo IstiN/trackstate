@@ -377,30 +377,58 @@ class LiveJqlSearchPage:
             index=index,
             timeout_ms=30_000,
         )
-        self._session.press(
-            field_selector,
-            "Control+A",
-            index=index,
-            timeout_ms=30_000,
-        )
-        self._session.press(
-            field_selector,
-            "Backspace",
-            index=index,
-            timeout_ms=30_000,
-        )
-        self._session.wait_for_input_value(
-            field_selector,
-            "",
-            index=index,
-            timeout_ms=30_000,
-        )
         self._session.fill(
             field_selector,
             query,
             index=index,
             timeout_ms=30_000,
         )
+        try:
+            self._session.wait_for_input_value(
+                field_selector,
+                query,
+                index=index,
+                timeout_ms=5_000,
+            )
+            return
+        except WebAppTimeoutError:
+            pass
+
+        for shortcut in ("Meta+A", "Control+A"):
+            self._session.click(
+                field_selector,
+                index=index,
+                timeout_ms=30_000,
+            )
+            self._session.press(
+                field_selector,
+                shortcut,
+                index=index,
+                timeout_ms=30_000,
+            )
+            self._session.press(
+                field_selector,
+                "Backspace",
+                index=index,
+                timeout_ms=30_000,
+            )
+            self._session.fill(
+                field_selector,
+                query,
+                index=index,
+                timeout_ms=30_000,
+            )
+            try:
+                self._session.wait_for_input_value(
+                    field_selector,
+                    query,
+                    index=index,
+                    timeout_ms=5_000,
+                )
+                return
+            except WebAppTimeoutError:
+                continue
+
         self._session.wait_for_input_value(
             field_selector,
             query,

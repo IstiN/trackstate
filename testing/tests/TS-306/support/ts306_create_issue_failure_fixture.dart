@@ -1,6 +1,7 @@
 import 'package:trackstate/data/providers/trackstate_provider.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/domain/models/trackstate_models.dart';
+import 'package:trackstate/domain/models/workspace_sync.dart';
 
 class Ts306CreateIssueFailureFixture {
   Ts306CreateIssueFailureFixture._({
@@ -75,6 +76,28 @@ class _Ts306CreateIssueFailureProvider
   {"id": "high", "name": "High"}
 ]
 ''',
+    '.trackstate/index/issues.json': '''
+[
+  {
+    "key": "TRACK-11",
+    "path": "TRACK-11/main.md",
+    "parent": null,
+    "epic": null,
+    "parentPath": null,
+    "epicPath": null,
+    "summary": "Existing search result",
+    "issueType": "story",
+    "status": "todo",
+    "priority": "medium",
+    "assignee": "qa-user",
+    "labels": ["existing"],
+    "updated": "2026-05-10T08:00:00Z",
+    "children": [],
+    "archived": false
+  }
+]
+''',
+    '.trackstate/index/tombstones.json': '[]\n',
     'TRACK-11/main.md': '''
 ---
 key: TRACK-11
@@ -140,6 +163,21 @@ Existing issue used to keep the repository snapshot realistic for TS-306.
   @override
   Future<RepositoryPermission> getPermission() async =>
       const RepositoryPermission(canRead: true, canWrite: true, isAdmin: false);
+
+  @override
+  Future<RepositorySyncCheck> checkSync({
+    RepositorySyncState? previousState,
+  }) async {
+    return RepositorySyncCheck(
+      state: RepositorySyncState(
+        providerType: providerType,
+        repositoryRevision: _revision,
+        sessionRevision: _revision,
+        connectionState: ProviderConnectionState.connected,
+        permission: await getPermission(),
+      ),
+    );
+  }
 
   @override
   Future<bool> isLfsTracked(String path) async => false;

@@ -130,7 +130,7 @@ void main() {
             failures: failures,
             context: 'GitHub Releases attachment callout',
             semanticsLabel: attachmentSemantics,
-            requiredFragments: const <String>['Attachments'],
+            requiredFragments: const <String>['Attachment storage mode'],
             title: _scenario.attachmentTitle,
             message: _scenario.attachmentMessage,
           );
@@ -184,12 +184,12 @@ const _Ts496Scenario _scenario = _Ts496Scenario(
   providerLabel: 'Attachments limited',
   statusTitle: 'GitHub Releases uploads are unavailable in the browser',
   statusMessage:
-      'Issue edits and comments can continue, but this project stores new attachments in GitHub Releases and this hosted session cannot complete release-backed uploads yet.',
+      'Issue edits and comments can continue. For new attachments, use the repository inbox workflow: commit files to <PROJECT>/.trackstate/upload-inbox/<ISSUE_KEY>/<file> and push to main so GitHub Actions uploads them to Releases.',
   statusVisibleText:
-      'Issue edits and comments can continue, but this project stores new attachments in GitHub Releases and this hosted session cannot complete release-backed uploads yet. Settings is the canonical place to review repository access and reconnect safely.',
+      'Issue edits and comments can continue. For new attachments, use the repository inbox workflow: commit files to <PROJECT>/.trackstate/upload-inbox/<ISSUE_KEY>/<file> and push to main so GitHub Actions uploads them to Releases. Settings is the canonical place to review repository access and reconnect safely.',
   attachmentTitle: 'GitHub Releases attachment storage',
   attachmentMessage:
-      'New attachments resolve to release tag ts496-<ISSUE_KEY>, but this hosted session cannot complete release-backed uploads in the browser yet.',
+      'New attachments resolve to release tag ts496-<ISSUE_KEY>. Browser sessions cannot upload directly to GitHub Releases, so use the repository inbox workflow: commit to <PROJECT>/.trackstate/upload-inbox/<ISSUE_KEY>/<file> and push to main.',
   unexpectedSupportedAttachmentMessage:
       'New attachments resolve to release tag ts496-<ISSUE_KEY>, and this hosted session can complete release-backed uploads in the browser.',
   permission: RepositoryPermission(

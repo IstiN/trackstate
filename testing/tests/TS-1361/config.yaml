@@ -1,0 +1,17 @@
+test_id: TS-1361
+type: install-script
+framework: unittest
+platform: linux
+dependencies:
+  - bash
+  - curl
+  - Python 3.12+
+  - PyYAML
+notes:
+  - Verifies that running the POSIX install script twice leaves exactly one PATH entry in the shell profile, that an existing trackstate binary on PATH (simulating /usr/local/bin) is detected and blocks installation, and that --force allows the managed install to proceed.
+runtime_inputs:
+  install_script_path: scripts/install/install.sh
+  platform: linux-x64
+  binary_name: trackstate
+  install_dir_relative: .trackstate/bin
+  conflict_dir_relative: local/bin

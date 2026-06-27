@@ -26,7 +26,6 @@ abstract interface class TrackStateAppComponent {
   Future<void> openSection(String label);
 
   Future<bool> openHierarchyChildCreateForIssue(String issueKey);
-
   Future<void> switchToLocalGitInSettings({
     required String repositoryPath,
     required String writeBranch,
@@ -214,7 +213,6 @@ abstract interface class TrackStateAppComponent {
     String label, {
     required String text,
   });
-
   Future<String?> readLabeledTextFieldValue(String label);
 
   List<String> visibleTextsSnapshot();

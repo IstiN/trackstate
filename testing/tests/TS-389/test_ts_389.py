@@ -30,6 +30,7 @@ TICKET_KEY = "TS-389"
 ISSUE_PATH = "DEMO/DEMO-1/DEMO-2"
 ATTACHMENT_NAME = "design_doc.pdf"
 ATTACHMENT_PATH_SUFFIX = f"attachments/{ATTACHMENT_NAME}"
+MANIFEST_PATH = f"{ISSUE_PATH}/attachments.json"
 INITIAL_ATTACHMENT_TEXT = "TS-389 original attachment baseline.\n"
 REPLACEMENT_ATTACHMENT_TEXT = (
     "TS-389 replacement attachment content.\n"
@@ -61,6 +62,7 @@ def main() -> None:
     _assert_preconditions(issue_fixture)
     attachment_path = f"{issue_fixture.path}/{ATTACHMENT_PATH_SUFFIX}"
     original_attachment = _fetch_repo_file_if_exists(service, attachment_path)
+    original_manifest = _fetch_repo_file_if_exists(service, MANIFEST_PATH)
     seeded_attachment_text = (
         original_attachment.content if original_attachment is not None else INITIAL_ATTACHMENT_TEXT
     )
@@ -281,7 +283,10 @@ def main() -> None:
                     page.confirm_replace_attachment()
                     page.wait_for_replace_attachment_dialog_to_close(timeout_ms=60_000)
                     matched, repo_text_after_confirm = poll_until(
-                        probe=lambda: service.fetch_repo_text(attachment_path),
+                        probe=lambda: service.fetch_repo_text(
+                            attachment_path,
+                            prefer_git_fallback=False,
+                        ),
                         is_satisfied=lambda text: text == REPLACEMENT_ATTACHMENT_TEXT,
                         timeout_seconds=90,
                         interval_seconds=3,
@@ -359,6 +364,26 @@ def main() -> None:
                 scenario_error = error
                 result["error"] = f"{type(error).__name__}: {error}"
                 result["traceback"] = traceback.format_exc()
+        if original_manifest is not None:
+            try:
+                current_manifest = _fetch_repo_file_if_exists(service, MANIFEST_PATH)
+                if current_manifest is None or current_manifest.content != original_manifest.content:
+                    service.write_repo_text(
+                        MANIFEST_PATH,
+                        content=original_manifest.content,
+                        message=f"{TICKET_KEY}: restore original attachments manifest",
+                    )
+            except Exception as error:  # pragma: no cover - cleanup failure is rare
+                if cleanup_error is None:
+                    cleanup_error = error
+                    result["cleanup"] = {
+                        "status": "failed",
+                        "error": f"{type(error).__name__}: {error}",
+                    }
+                    if scenario_error is None:
+                        scenario_error = error
+                        result["error"] = f"{type(error).__name__}: {error}"
+                        result["traceback"] = traceback.format_exc()
 
     if scenario_error is not None:
         if cleanup_error is not None and cleanup_error is not scenario_error:

@@ -27,10 +27,12 @@ void main() {
     expect(workflow, contains('.github/workflows/**'));
     expect(workflow, contains('jobs:'));
     expect(workflow, contains('name: actionlint'));
+    expect(workflow, contains('timeout-minutes:'));
+    expect(workflow, contains('Enforce job-level timeout-minutes'));
     expect(workflow, contains('Run actionlint'));
   });
 
-  test('setup repository keeps a single shipped actionlint PR gate', () {
+  test('setup repository detects workflow file changes on pushes and PRs', () {
     final workflowFile = repositoryFile(
       'trackstate-setup/.github/workflows/actionlint.yml',
     );
@@ -43,7 +45,8 @@ void main() {
       isTrue,
       reason:
           'trackstate-setup must keep the contributor-visible actionlint '
-          'workflow that validates workflow pull requests.',
+          'workflow that validates workflow edits before they break release '
+          'automation.',
     );
     expect(
       fallbackWorkflowFile.existsSync(),
@@ -59,22 +62,257 @@ void main() {
     expect(workflow, isNot(contains('pull_request_target:')));
     expect(
       workflow,
-      contains('Determine whether this PR changes workflow files'),
+      contains('Determine whether workflow files changed'),
     );
     expect(workflow, contains('git diff --name-only'));
+    expect(workflow, contains('github.event.before'));
+    expect(workflow, contains('github.sha'));
+    expect(workflow, contains('git merge-base'));
+    expect(workflow, isNot(contains('origin/HEAD')));
+    expect(workflow, contains('DEFAULT_BRANCH'));
+    expect(workflow, contains('git fetch origin'));
+    expect(workflow, isNot(contains('--depth=1')));
     expect(workflow, contains('.github/workflows/'));
-    expect(workflow, contains('No workflow file changes in this pull request'));
+    expect(workflow, contains('No workflow file changes'));
     expect(
       workflow,
       contains("steps.workflow-changes.outputs.changed == 'true'"),
     );
+    expect(workflow, isNot(contains('if: github.event_name == \'pull_request\'')));
+    expect(workflow, isNot(contains('if: github.event_name != \'pull_request\'')));
     expect(workflow, contains('fetch-depth: 0'));
     expect(
       workflow,
       contains(
-        'Skipping actionlint because this pull request does not modify '
+        'Skipping actionlint because this run does not modify '
         '.github/workflows/.',
       ),
     );
   });
+
+  test(
+    'change detection survives a new-branch push without origin/HEAD',
+    () async {
+      final workflowFile = repositoryFile(
+        'trackstate-setup/.github/workflows/actionlint.yml',
+      );
+      final workflow = workflowFile.readAsStringSync();
+      final script = _extractFirstRunScript(workflow);
+
+      final tempDir = await Directory.systemTemp.createTemp('ts-actionlint-');
+      try {
+        Future<ProcessResult> runGit(List<String> args) => Process.run(
+              'git',
+              args,
+              workingDirectory: tempDir.path,
+              runInShell: false,
+            );
+
+        await runGit(['init']);
+        await runGit(['config', 'user.email', 'test@example.com']);
+        await runGit(['config', 'user.name', 'Test User']);
+
+        final readme = File('${tempDir.path}/README.md');
+        await readme.writeAsString('# init');
+        await runGit(['add', '.']);
+        await runGit(['commit', '-m', 'init']);
+
+        await runGit(['checkout', '-b', 'disposable-feature']);
+        final workflowPath = '${tempDir.path}/.github/workflows/example.yml';
+        await File(workflowPath).create(recursive: true);
+        await File(workflowPath).writeAsString(
+          'name: example\n'
+          'on: push\n'
+          'jobs:\n'
+          '  example:\n'
+          '    runs-on: ubuntu-latest\n'
+          '    steps:\n'
+          '      - uses: actions/checkout@v6\n',
+        );
+        await runGit(['add', '.']);
+        await runGit(['commit', '-m', 'add workflow']);
+
+        final headResult = await runGit(['rev-parse', 'HEAD']);
+        final headSha = (headResult.stdout as String).trim();
+
+        final outputFile = File('${tempDir.path}/github_output');
+        final env = Map<String, String>.from(Platform.environment)
+          ..['BASE_SHA'] = '0000000000000000000000000000000000000000'
+          ..['HEAD_SHA'] = headSha
+          ..['GITHUB_OUTPUT'] = outputFile.path;
+
+        final result = await Process.run(
+          'bash',
+          ['-e', '-c', script],
+          workingDirectory: tempDir.path,
+          environment: env,
+          runInShell: false,
+        );
+
+        expect(
+          result.exitCode,
+          0,
+          reason:
+              'The change-detection script should not crash when origin/HEAD '
+              'and origin/main are absent.\nstdout:\n${result.stdout}\n'
+              'stderr:\n${result.stderr}',
+        );
+        expect(
+          outputFile.existsSync(),
+          isTrue,
+          reason: 'GITHUB_OUTPUT should be written.',
+        );
+        expect(
+          outputFile.readAsStringSync(),
+          contains('changed=true'),
+          reason: 'A workflow file change must be detected.',
+        );
+      } finally {
+        await tempDir.delete(recursive: true);
+      }
+    },
+  );
+
+  test(
+    'change detection resolves merge-base via fetch when DEFAULT_BRANCH is set',
+    () async {
+      final workflowFile = repositoryFile(
+        'trackstate-setup/.github/workflows/actionlint.yml',
+      );
+      final workflow = workflowFile.readAsStringSync();
+      final script = _extractFirstRunScript(workflow);
+
+      final tempDir = await Directory.systemTemp.createTemp('ts-actionlint-');
+      try {
+        Future<ProcessResult> runGit(List<String> args) => Process.run(
+              'git',
+              args,
+              workingDirectory: tempDir.path,
+              runInShell: false,
+            );
+
+        // Create a bare remote repository.
+        final remoteDir =
+            await Directory.systemTemp.createTemp('ts-actionlint-remote-');
+        await Process.run(
+          'git',
+          ['init', '--bare'],
+          workingDirectory: remoteDir.path,
+          runInShell: false,
+        );
+
+        // Clone the remote, create an initial commit on main.
+        await Process.run(
+          'git',
+          ['clone', remoteDir.path, '.'],
+          workingDirectory: tempDir.path,
+          runInShell: false,
+        );
+        await runGit(['config', 'user.email', 'test@example.com']);
+        await runGit(['config', 'user.name', 'Test User']);
+
+        final readme = File('${tempDir.path}/README.md');
+        await readme.writeAsString('# init');
+        await runGit(['add', '.']);
+        await runGit(['commit', '-m', 'init']);
+        await runGit(['push', '-u', 'origin', 'HEAD:main']);
+
+        // Create a feature branch with a workflow change.
+        await runGit(['checkout', '-b', 'feature-branch']);
+        final workflowPath = '${tempDir.path}/.github/workflows/example.yml';
+        await File(workflowPath).create(recursive: true);
+        await File(workflowPath).writeAsString(
+          'name: example\n'
+          'on: push\n'
+          'jobs:\n'
+          '  example:\n'
+          '    runs-on: ubuntu-latest\n'
+          '    steps:\n'
+          '      - uses: actions/checkout@v6\n',
+        );
+        await runGit(['add', '.']);
+        await runGit(['commit', '-m', 'add workflow']);
+
+        final headResult = await runGit(['rev-parse', 'HEAD']);
+        final headSha = (headResult.stdout as String).trim();
+
+        final outputFile = File('${tempDir.path}/github_output');
+        final env = Map<String, String>.from(Platform.environment)
+          ..['BASE_SHA'] = '0000000000000000000000000000000000000000'
+          ..['HEAD_SHA'] = headSha
+          ..['GITHUB_OUTPUT'] = outputFile.path
+          ..['DEFAULT_BRANCH'] = 'main';
+
+        final result = await Process.run(
+          'bash',
+          ['-e', '-c', script],
+          workingDirectory: tempDir.path,
+          environment: env,
+          runInShell: false,
+        );
+
+        expect(
+          result.exitCode,
+          0,
+          reason:
+              'The change-detection script should succeed when DEFAULT_BRANCH '
+              'is set and the remote is reachable.\nstdout:\n${result.stdout}\n'
+              'stderr:\n${result.stderr}',
+        );
+        expect(
+          outputFile.existsSync(),
+          isTrue,
+          reason: 'GITHUB_OUTPUT should be written.',
+        );
+        expect(
+          outputFile.readAsStringSync(),
+          contains('changed=true'),
+          reason: 'A workflow file change must be detected through the '
+              'fetch + merge-base path.',
+        );
+      } finally {
+        await tempDir.delete(recursive: true);
+      }
+    },
+  );
+}
+
+/// Extracts the first top-level `run: |` block from the actionlint workflow.
+/// This relies on the change-detection step remaining the first `run: |` step
+/// in the workflow file. If the YAML layout changes (e.g. a new `run: |` step
+/// is added before the change-detection step, or indentation conventions
+/// change), this helper will need to be updated.
+String _extractFirstRunScript(String workflow) {
+  const runMarker = 'run: |';
+  final runIndex = workflow.indexOf(runMarker);
+  expect(runIndex, greaterThan(-1), reason: 'workflow must contain a run block');
+
+  final lineStart = workflow.lastIndexOf('\n', runIndex) + 1;
+  final runIndent = runIndex - lineStart;
+  final blockStart = workflow.indexOf('\n', runIndex) + 1;
+
+  final rawLines = workflow.substring(blockStart).split('\n');
+  final scriptLines = <String>[];
+  int? contentIndent;
+
+  for (final raw in rawLines) {
+    if (raw.trim().isEmpty) {
+      scriptLines.add('');
+      continue;
+    }
+
+    final leading = raw.length - raw.trimLeft().length;
+    if (leading <= runIndent && raw.trimLeft().startsWith('- ')) {
+      break;
+    }
+
+    contentIndent ??= leading;
+    if (contentIndent > 0 && raw.startsWith(' ' * contentIndent)) {
+      scriptLines.add(raw.substring(contentIndent));
+    } else {
+      scriptLines.add(raw.trimLeft());
+    }
+  }
+
+  return scriptLines.join('\n');
 }

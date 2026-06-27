@@ -1,0 +1,20 @@
+test_id: TS-1403
+type: web
+framework: unittest
+platform: python
+dependencies:
+  - Playwright Chromium runtime
+  - Deployed TrackState.AI Pages URL
+runtime_inputs:
+  app_url: "${TRACKSTATE_LIVE_APP_URL:-https://istin.github.io/trackstate-setup/}"
+  page_interactive_budget_seconds: 3.0
+  page_interactive_warmup_runs: 1
+  shell_navigation_labels:
+    - Dashboard
+    - Board
+    - JQL Search
+    - Hierarchy
+    - Settings
+notes:
+  - Warms the cache with one load, then measures the next load.
+  - Time-to-interactive is the elapsed seconds until shell navigation labels are visible.

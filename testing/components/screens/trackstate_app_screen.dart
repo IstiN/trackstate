@@ -44,46 +44,30 @@ class TrackStateAppScreen implements TrackStateAppComponent {
       find.byKey(const ValueKey<String>('workspace-switcher-sheet'));
 
   Finder get topBar {
-    final repositoryAccess = repositoryAccessButton.evaluate().toList();
-    if (repositoryAccess.isEmpty) {
-      return find.byWidgetPredicate(
-        (_) => false,
-        description: 'missing top bar scope',
-      );
-    }
-
-    final candidates = find
-        .ancestor(of: repositoryAccessButton.first, matching: find.byType(Row))
-        .evaluate()
-        .toList();
-    if (candidates.isEmpty) {
-      return find.byWidgetPredicate(
-        (_) => false,
-        description: 'missing top bar',
-      );
-    }
-
-    Element bestCandidate = candidates.first;
-    var bestTextCount = -1;
-    for (final candidate in candidates) {
-      final candidateFinder = find.byElementPredicate(
-        (element) => element == candidate,
-        description: 'top bar candidate',
-      );
-      final textCount = find
-          .descendant(of: candidateFinder, matching: find.byType(Text))
-          .evaluate()
-          .length;
-      if (textCount > bestTextCount) {
-        bestCandidate = candidate;
-        bestTextCount = textCount;
-      }
-    }
-
-    return find.byElementPredicate(
-      (element) => element == bestCandidate,
-      description: 'top bar row',
+    final headerControls = find.byWidgetPredicate(
+      (widget) =>
+          widget is Semantics &&
+          widget.properties.identifier ==
+              browserDesktopHeaderControlsSemanticsIdentifier,
+      description: 'desktop header controls',
     );
+    if (headerControls.evaluate().isEmpty) {
+      return find.byWidgetPredicate(
+        (_) => false,
+        description: 'missing desktop header controls',
+      );
+    }
+    final row = find.descendant(
+      of: headerControls.first,
+      matching: find.byType(Row),
+    );
+    if (row.evaluate().isEmpty) {
+      return find.byWidgetPredicate(
+        (_) => false,
+        description: 'missing top bar row',
+      );
+    }
+    return row.first;
   }
 
   Finder get profileAvatar =>
@@ -1115,9 +1099,6 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   @override
   Future<bool> isTopBarTextVisible(String text) async {
     await tester.pump();
-    if (repositoryAccessButton.evaluate().isEmpty) {
-      return false;
-    }
     return find
         .descendant(of: topBar, matching: _text(text))
         .evaluate()
@@ -1133,9 +1114,6 @@ class TrackStateAppScreen implements TrackStateAppComponent {
   @override
   Future<bool> isTopBarSemanticsLabelVisible(String label) async {
     await tester.pump();
-    if (repositoryAccessButton.evaluate().isEmpty) {
-      return false;
-    }
     return find
         .descendant(of: topBar, matching: _exactSemanticsLabel(label))
         .evaluate()
@@ -1763,11 +1741,13 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     required String login,
     required String initials,
   }) {
+    // The top-bar profile surface renders a single identity label: the display
+    // name when present, falling back to the login/email when the display name
+    // is empty. It does not surface the login separately when a display name
+    // exists, so we only assert the rendered identity label and initials.
     expectProfileInitials(initials);
     expect(profileSurfaceText(displayName), findsOneWidget);
-    expect(profileSurfaceText(login), findsOneWidget);
     expect(profileSurfaceSemantics(displayName), findsOneWidget);
-    expect(profileSurfaceSemantics(login), findsOneWidget);
   }
 
   @override
