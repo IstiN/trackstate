@@ -17,6 +17,8 @@ String startupRecoveryTitle(
       l10n.startupRateLimitRecoveryTitle,
     TrackerStartupRecoveryKind.hostedBootstrapIndex =>
       l10n.startupHostedBootstrapIndexRecoveryTitle,
+    TrackerStartupRecoveryKind.hostedBootstrapTimeout =>
+      l10n.startupRateLimitRecoveryTitle,
   };
 }
 
@@ -37,6 +39,10 @@ String startupRecoveryMessage(
       recovery.detail?.trim().isNotEmpty == true
           ? recovery.detail!
           : l10n.startupHostedBootstrapIndexRecoveryMessage,
+    TrackerStartupRecoveryKind.hostedBootstrapTimeout =>
+      viewModel.snapshot == null
+          ? l10n.startupRateLimitRecoveryBlockingMessage
+          : l10n.startupRateLimitRecoveryShellMessage,
   };
 }
 

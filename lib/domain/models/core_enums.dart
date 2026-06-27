@@ -15,4 +15,4 @@ enum TrackerDataDomain {
 
 enum TrackerSectionKey { dashboard, board, search, hierarchy, settings }
 
-enum TrackerStartupRecoveryKind { githubRateLimit, hostedBootstrapIndex }
+enum TrackerStartupRecoveryKind { githubRateLimit, hostedBootstrapIndex, hostedBootstrapTimeout }

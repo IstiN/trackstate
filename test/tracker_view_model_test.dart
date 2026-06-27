@@ -546,8 +546,58 @@ void main() {
 
       expect(repository.loadCount, 2);
       expect(repository.connectCount, 1);
-      expect(viewModel.startupRecovery, isNull);
+      // The recovery must survive the snapshot reload after background auth
+      // succeeds so the user can still see the callout and retry (TS-1429).
+      expect(
+        viewModel.startupRecovery,
+        isNotNull,
+        reason:
+            'The startup recovery must remain visible after the snapshot is reloaded following a successful GitHub connection.',
+      );
       expect(viewModel.section, TrackerSection.settings);
+    },
+  );
+
+  test(
+    'view model reports connected access mode after auth when post-auth resume fails',
+    () async {
+      final snapshot = await const DemoTrackStateRepository().loadSnapshot();
+      final repository = _StartupRecoveryRepository(
+        loadResults: [
+          _withStartupRecovery(snapshot),
+          const GitHubRateLimitException(
+            message:
+                'GitHub API request failed for /repos/demo/contents/DEMO/project.json (403): {"message":"API rate limit exceeded"}',
+            requestPath: '/repos/demo/contents/DEMO/project.json',
+            statusCode: 403,
+          ),
+        ],
+      );
+      final viewModel = TrackerViewModel(repository: repository);
+
+      await viewModel.load();
+      expect(
+        viewModel.hostedRepositoryAccessMode,
+        HostedRepositoryAccessMode.disconnected,
+        reason: 'Before auth, non-provider hosted repos should look disconnected.',
+      );
+
+      await viewModel.connectGitHub('token');
+
+      expect(repository.loadCount, 2);
+      expect(repository.connectCount, 1);
+      expect(viewModel.isConnected, isTrue);
+      expect(viewModel.startupRecovery, isNotNull);
+      expect(
+        viewModel.hostedRepositoryAccessMode,
+        HostedRepositoryAccessMode.writable,
+        reason:
+            'After a successful auth, the access mode should reflect the connection even when the resumed load fails.',
+      );
+      expect(
+        viewModel.message?.kind,
+        TrackerMessageKind.githubConnectedDragCards,
+      );
     },
   );
 
