@@ -41,11 +41,15 @@ jobs:
       - name: Generate GitHub App token
         id: app-token
         if: env.HAS_APP_CREDS == 'true'
+        # Do not fail the whole SM run if the App is not installed yet;
+        # the workflow falls back to PAT_TOKEN in that case.
+        continue-on-error: true
         uses: actions/create-github-app-token@v1
         with:
           app-id: ${{ vars.SM_GITHUB_APP_ID || secrets.SM_GITHUB_APP_ID }}
           private-key: ${{ secrets.SM_GITHUB_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
+          repositories: trackstate
 
       - name: Checkout repository
         uses: actions/checkout@v4
