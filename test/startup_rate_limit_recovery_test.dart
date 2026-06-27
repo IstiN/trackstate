@@ -404,6 +404,143 @@ void main() {
       }
     },
   );
+
+  testWidgets(
+    'post-auth startup recovery shows Connect GitHub in top bar and Connected after authentication',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      final snapshot = await const DemoTrackStateRepository().loadSnapshot();
+      final repository = _WidgetStartupRecoveryRepository(
+        loadResults: [
+          _withStartupRecovery(snapshot),
+          const GitHubRateLimitException(
+            message:
+                'GitHub API request failed for /repos/demo/contents/DEMO/project.json (403): {"message":"API rate limit exceeded"}',
+            requestPath: '/repos/demo/contents/DEMO/project.json',
+            statusCode: 403,
+          ),
+        ],
+      );
+      tester.view.physicalSize = const Size(1440, 960);
+      tester.view.devicePixelRatio = 1;
+
+      try {
+        await tester.pumpWidget(TrackStateApp(repository: repository));
+        await tester.pumpAndSettle();
+
+        expect(find.text('GitHub startup limit reached'), findsOneWidget);
+        final headerControls = find.byWidgetPredicate(
+          (widget) =>
+              widget is Semantics &&
+              widget.properties.identifier ==
+                  browserDesktopHeaderControlsSemanticsIdentifier,
+          description: 'desktop header controls',
+        );
+        expect(headerControls, findsOneWidget);
+        expect(
+          find.descendant(
+            of: headerControls,
+            matching: find.bySemanticsLabel(RegExp(r'^Connect GitHub$')),
+          ),
+          findsOneWidget,
+          reason:
+              'The top bar should expose a Connect GitHub action while the app is in startup recovery.',
+        );
+
+        await tester.tap(
+          find
+              .descendant(
+                of: headerControls,
+                matching: find.bySemanticsLabel(RegExp(r'^Connect GitHub$')),
+              )
+              .first,
+        );
+        await tester.pumpAndSettle();
+
+        final dialog = find.byType(AlertDialog);
+        expect(dialog, findsOneWidget);
+        final tokenField = find.descendant(
+          of: dialog,
+          matching: find.byWidgetPredicate(
+            (widget) =>
+                widget is TextField &&
+                widget.decoration?.labelText == 'Fine-grained token',
+            description: 'Fine-grained token field',
+          ),
+        );
+        expect(tokenField, findsOneWidget);
+        await tester.enterText(tokenField, 'ghp_demo');
+        await tester.pump();
+
+        final connectButton = find.descendant(
+          of: dialog,
+          matching: find.widgetWithText(FilledButton, 'Connect token'),
+        );
+        expect(connectButton, findsOneWidget);
+        await tester.tap(connectButton);
+        await tester.pumpAndSettle();
+
+        await _waitForTestCondition(
+          tester,
+          () => repository.connectCount == 1 && repository.loadCount == 2,
+          timeout: const Duration(seconds: 5),
+        );
+
+        expect(repository.connectCount, 1);
+        expect(repository.loadCount, 2);
+        expect(
+          find.descendant(
+            of: find.byWidgetPredicate(
+              (widget) =>
+                  widget is Semantics &&
+                  widget.properties.identifier ==
+                      browserDesktopHeaderControlsSemanticsIdentifier,
+              description: 'desktop header controls',
+            ),
+            matching: find.bySemanticsLabel(RegExp(r'^Connect GitHub$')),
+          ),
+          findsNothing,
+          reason:
+              'The Connect GitHub action should disappear from the top bar after authentication succeeds.',
+        );
+        expect(
+          find.descendant(
+            of: find.byWidgetPredicate(
+              (widget) =>
+                  widget is Semantics &&
+                  widget.properties.identifier ==
+                      browserDesktopHeaderControlsSemanticsIdentifier,
+              description: 'desktop header controls',
+            ),
+            matching: find.textContaining('Connected'),
+          ),
+          findsOneWidget,
+          reason:
+              'The top bar workspace pill should show Connected after authentication.',
+        );
+      } finally {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        semantics.dispose();
+      }
+    },
+  );
+}
+
+Future<void> _waitForTestCondition(
+  WidgetTester tester,
+  bool Function() condition, {
+  Duration timeout = const Duration(seconds: 5),
+  Duration step = const Duration(milliseconds: 100),
+}) async {
+  final end = DateTime.now().add(timeout);
+  while (DateTime.now().isBefore(end)) {
+    await tester.pump(step);
+    if (condition()) {
+      return;
+    }
+  }
+  fail('Timed out waiting for test condition.');
 }
 
 class _RetryMigrationWorkspaceProfileService
@@ -507,6 +644,7 @@ class _WidgetStartupRecoveryRepository implements TrackStateRepository {
   final JqlSearchService _searchService = const JqlSearchService();
   TrackerSnapshot? _currentSnapshot;
   int loadCount = 0;
+  int connectCount = 0;
 
   @override
   bool get supportsGitHubAuth => true;
@@ -515,8 +653,10 @@ class _WidgetStartupRecoveryRepository implements TrackStateRepository {
   bool get usesLocalPersistence => false;
 
   @override
-  Future<RepositoryUser> connect(RepositoryConnection connection) async =>
-      const RepositoryUser(login: 'demo-user', displayName: 'Demo User');
+  Future<RepositoryUser> connect(RepositoryConnection connection) async {
+    connectCount += 1;
+    return const RepositoryUser(login: 'demo-user', displayName: 'Demo User');
+  }
 
   @override
   Future<TrackerSnapshot> loadSnapshot() async {

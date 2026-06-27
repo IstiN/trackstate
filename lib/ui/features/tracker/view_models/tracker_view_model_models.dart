@@ -23,7 +23,7 @@ enum HostedRepositoryAccessMode {
   attachmentRestricted,
 }
 
-const Duration startupAccessRestoreTimeout = Duration(seconds: 10);
+const Duration startupAccessRestoreTimeout = Duration(seconds: 11);
 
 enum TrackerMessageTone { info, error }
 
