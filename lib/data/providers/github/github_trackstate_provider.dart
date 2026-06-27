@@ -109,6 +109,23 @@ class GitHubTrackStateProvider
         prefix: 'GitHub connection failed',
       );
     }
+
+    // GitHub App installation access tokens cannot call /user unless the App
+    // has been granted the "Read user profile" account permission. Most SM
+    // installations do not grant that, so we synthesize a bot user for App
+    // tokens after confirming repository access.
+    if (_isGitHubAppInstallationToken(connection.token)) {
+      _connection = connection;
+      _bootstrapReadToken = null;
+      return RepositoryUser(
+        login: 'trackstate-sm-bot[bot]',
+        displayName: 'TrackState SM Bot',
+        accountId: null,
+        emailAddress: null,
+        active: true,
+      );
+    }
+
     final userJson = await (() async {
       if (!kIsWeb) {
         return (await _getGitHubJson('/user', token: connection.token))
@@ -133,6 +150,17 @@ class GitHubTrackStateProvider
     if (inFlight != null) {
       return inFlight;
     }
+
+    // Skip /user for GitHub App installation tokens on web as well.
+    if (_isGitHubAppInstallationToken(token)) {
+      startupAuthProbeDiagnostics.recordAuthProbeStart('/user');
+      startupAuthProbeDiagnostics.recordAuthProbeSuccess();
+      return Future<Map<String, Object?>>.value(<String, Object?>{
+        'login': 'trackstate-sm-bot[bot]',
+        'name': 'TrackState SM Bot',
+      });
+    }
+
     startupAuthProbeDiagnostics.recordAuthProbeStart('/user');
     late final Future<Map<String, Object?>> future;
     future =
@@ -1880,6 +1908,10 @@ String _defaultHostedSyncCacheBustToken() =>
 
 Uri _githubUri(String path, [Map<String, String>? queryParameters]) =>
     Uri.https('api.github.com', path, queryParameters);
+
+/// GitHub App installation access tokens start with `ghs_`.
+bool _isGitHubAppInstallationToken(String token) =>
+    token.trim().startsWith('ghs_');
 
 Uri _githubUploadUri(String path, [Map<String, String>? queryParameters]) =>
     Uri.https('uploads.github.com', path, queryParameters);

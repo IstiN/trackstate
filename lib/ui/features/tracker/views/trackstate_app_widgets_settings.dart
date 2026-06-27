@@ -275,7 +275,7 @@ class _SettingsState extends State<_Settings> {
                 ? l10n.connectGitHub
                 : null,
             onSecondaryAction: widget.viewModel.supportsGitHubAuth
-                ? () => _showRepositoryAccessDialog(context, widget.viewModel)
+                ? () => _selectProvider(_SettingsProviderSelection.hosted)
                 : null,
           ),
           const SizedBox(height: 16),

@@ -6,12 +6,12 @@ is still hanging.
 
 The automation:
 1. preloads local and hosted workspaces plus a stored GitHub token into the live app
-2. starts from the local workspace so the initial GitHub `/user` startup probe
-   is exercised deterministically, then delays that probe by 30 seconds so auth
-   stays unresolved after the 11-second timeout window
+2. starts from the active hosted workspace so the initial GitHub `/user` startup
+   probe is exercised deterministically, then delays that probe by 30 seconds so
+   auth stays unresolved after the 11-second timeout window
 3. waits past the timeout before asserting
-4. switches into the hosted workspace and verifies the exact `Needs sign-in`
-   fallback state plus the user-facing `Open settings` write gate
+4. verifies the exact `Needs sign-in` fallback state on the active hosted
+   workspace plus the user-facing `Open settings` write gate
 5. reads the hosted workspace access mode from the same live browser session to
    confirm the fallback stayed in the disconnected hosted state
 6. records a real product failure when the live app still does not expose any

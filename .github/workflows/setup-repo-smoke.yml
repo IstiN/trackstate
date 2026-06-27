@@ -23,12 +23,27 @@ jobs:
       github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+
+    env:
+      HAS_APP_CREDS: ${{ (vars.SM_GITHUB_APP_ID != '' || secrets.SM_GITHUB_APP_ID != '') && secrets.SM_GITHUB_APP_PRIVATE_KEY != '' }}
+
     steps:
+      - name: Generate GitHub App token
+        id: app-token
+        if: env.HAS_APP_CREDS == 'true' && vars.SM_GITHUB_APP_ENABLED == 'true'
+        continue-on-error: true
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.SM_GITHUB_APP_ID || secrets.SM_GITHUB_APP_ID }}
+          private-key: ${{ secrets.SM_GITHUB_APP_PRIVATE_KEY }}
+          owner: IstiN
+          repositories: trackstate-setup
+
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           submodules: true
-          token: ${{ secrets.PAT_TOKEN || github.token }}
+          token: ${{ steps.app-token.outputs.token || secrets.PAT_TOKEN || github.token }}
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -55,9 +70,12 @@ jobs:
 
       - name: Run setup repo smoke validation
         env:
-          TRACKSTATE_TOKEN: ${{ secrets.PAT_TOKEN }}
-          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
+          # Use the GitHub App token when enabled to avoid PAT rate limits.
+          # The App is installed on IstiN/trackstate-setup and must have
+          # contents/issues write permissions for the CLI operations below.
+          TRACKSTATE_TOKEN: ${{ steps.app-token.outputs.token || secrets.PAT_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.PAT_TOKEN }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token || secrets.PAT_TOKEN }}
         run: python testing/scripts/run_setup_repo_smoke.py
 
       - name: Upload smoke result

@@ -80,9 +80,9 @@ LINKED_BUG_NOTES = (
     "and samples the same browser session while that request is still pending."
 )
 REWORK_SUMMARY_ITEMS = (
-    "Started the live scenario from the local workspace so the delayed GitHub `/user` "
-    "startup probe is exercised deterministically, then switched into the hosted "
-    "workspace after `shell_ready` to inspect the fallback state.",
+    "Started the live scenario from the active hosted workspace so the delayed "
+    "GitHub `/user` startup probe is exercised deterministically and the timeout "
+    "fallback state is inspected on the active workspace without an extra switch.",
     "Moved the Step 4 capability scan behind `TrackStateTrackerPage` so the "
     "ticket flow depends on a reusable page component instead of raw browser "
     "session evaluation.",
@@ -314,7 +314,7 @@ def main() -> None:
                 action=REQUEST_STEPS[0],
                 observed=(
                     "Opened the deployed TrackState app with preloaded local and hosted "
-                    "workspaces, started from the local workspace, and delayed the GitHub "
+                    "workspaces, started from the active hosted workspace, and delayed the GitHub "
                     f"`/user` startup probe by {SIMULATED_PROBE_DELAY_SECONDS} seconds.\n"
                     f"startup_surface={json.dumps(startup_surface, ensure_ascii=True)}; "
                     f"auth_probe_started_after_start_seconds={auth_probe_started_after_start_seconds!r}; "
@@ -685,6 +685,7 @@ def _workspace_state(repository: str) -> dict[str, object]:
         default_branch=DEFAULT_BRANCH,
         local_display_name=LOCAL_DISPLAY_NAME,
         hosted_display_name=HOSTED_DISPLAY_NAME,
+        active_workspace="hosted",
     )
 
 
@@ -1090,7 +1091,7 @@ def _build_jira_comment(result: dict[str, Any], *, passed: bool) -> str:
         f"*Linked Bugs Considered:* {', '.join(LINKED_BUGS)}",
         "",
         "h4. What was tested",
-        "* Started from the active local workspace so the delayed GitHub {/user} startup probe is exercised deterministically, then switched into the hosted workspace after the shell rendered.",
+        "* Started from the active hosted workspace so the delayed GitHub {/user} startup probe is exercised deterministically and the timeout fallback state is inspected on the active workspace.",
         "* Waited beyond the 11-second timeout before asserting instead of checking immediately.",
         "* Checked the hosted fallback workspace state, the user-facing Create issue gate, and the same-browser hosted access mode persisted in workspace storage.",
         "",

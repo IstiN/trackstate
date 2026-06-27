@@ -30,6 +30,7 @@ class TrackerViewModel extends ChangeNotifier {
     WorkspaceProfileService? workspaceProfileService,
     String? workspaceId,
     Uri Function()? currentUriProvider,
+    bool? guardInteractiveShellOverride,
   }) : _repository = repository,
        _issueMutationService =
            issueMutationService ?? IssueMutationService(repository: repository),
@@ -38,7 +39,8 @@ class TrackerViewModel extends ChangeNotifier {
            workspaceProfileService ??
            const SharedPreferencesWorkspaceProfileService(),
        _workspaceId = workspaceId,
-       _currentUriProvider = currentUriProvider ?? (() => Uri.base) {
+       _currentUriProvider = currentUriProvider ?? (() => Uri.base),
+       _guardInteractiveShellOverride = guardInteractiveShellOverride {
     _bindProviderSession();
   }
 
@@ -48,6 +50,7 @@ class TrackerViewModel extends ChangeNotifier {
   final WorkspaceProfileService _workspaceProfileService;
   final Uri Function() _currentUriProvider;
   String? _workspaceId;
+  final bool? _guardInteractiveShellOverride;
   ProviderSession? _boundProviderSession;
 
   TrackerSnapshot? _snapshot;
@@ -159,12 +162,17 @@ class TrackerViewModel extends ChangeNotifier {
   bool get usesLocalPersistence => _repository.usesLocalPersistence;
   bool get supportsGitHubAuth => _repository.supportsGitHubAuth;
   bool get isRestoringLocalHostedAccess => _isRestoringLocalHostedAccess;
-  bool get isStartupGuardBlockingInteractiveShell =>
-      kIsWeb &&
-      !usesLocalPersistence &&
-      supportsGitHubAuth &&
-      _isAutomaticAccessRestoreInProgress &&
-      !_startupTimeoutFallbackAwaitingShellReady;
+  bool get _shouldGuardInteractiveShell =>
+      _guardInteractiveShellOverride ??
+      (kIsWeb && !usesLocalPersistence && supportsGitHubAuth);
+  bool get isStartupGuardBlockingInteractiveShell {
+    return _shouldGuardInteractiveShell &&
+        _isAutomaticAccessRestoreInProgress &&
+        !_startupTimeoutFallbackAwaitingShellReady &&
+        _startupHostedAccessModeOverride !=
+            HostedRepositoryAccessMode.disconnected &&
+        !hasStartupRecovery;
+  }
   bool get supportsProjectSettingsAdmin =>
       _repository is ProjectSettingsRepository;
   ProviderSession? get providerSession => switch (_repository) {
@@ -205,8 +213,12 @@ class TrackerViewModel extends ChangeNotifier {
       return startupOverride;
     }
     final session = providerSession;
-    if (session == null ||
-        session.connectionState != ProviderConnectionState.connected) {
+    if (session == null) {
+      return _isConnected
+          ? HostedRepositoryAccessMode.writable
+          : HostedRepositoryAccessMode.disconnected;
+    }
+    if (session.connectionState != ProviderConnectionState.connected) {
       return HostedRepositoryAccessMode.disconnected;
     }
     if (!session.canWrite) {
@@ -299,9 +311,6 @@ class TrackerViewModel extends ChangeNotifier {
 
   Future<void> load({bool deferAccessRestore = false}) async {
     final previousStartupRecovery = startupRecovery;
-    final retainedStartupRecovery = _snapshot == null
-        ? previousStartupRecovery
-        : null;
     startupAuthProbeDiagnostics.reset();
     _isLoading = true;
     _searchPage = const TrackStateIssueSearchPage.empty(
@@ -310,7 +319,6 @@ class TrackerViewModel extends ChangeNotifier {
     _searchResults = const [];
     _hasLoadedInitialSearchResults = false;
     _message = null;
-    _startupRecovery = retainedStartupRecovery;
     _didAutoResumeStartupRecoveryAfterAuthentication = false;
     _isRestoringLocalHostedAccess = false;
     _isAutomaticAccessRestoreInProgress = false;
@@ -342,10 +350,15 @@ class TrackerViewModel extends ChangeNotifier {
           !usesLocalPersistence &&
           supportsGitHubAuth) {
         deferredAccessRestore = _restoreGitHubConnection;
+        if (_shouldGuardInteractiveShell) {
+          _isAutomaticAccessRestoreInProgress = true;
+          if (!_disposed) {
+            notifyListeners();
+          }
+        }
         await _primeStartupGitHubAuthProbe();
       }
       await _loadSnapshotAndSearch(allowHostedStartupFallback: true);
-      _startupRecovery = _snapshot?.startupRecovery;
       if (usesLocalPersistence) {
         await _loadLocalRepositoryUser();
         deferredAccessRestore = _restoreLocalHostedAccess;
@@ -1781,88 +1794,104 @@ class TrackerViewModel extends ChangeNotifier {
   }
 
   Future<void> _restoreGitHubConnection() async {
-    final target = await _connectionTarget();
-    if (target == null || _isConnected) return;
-    final callbackToken = _callbackToken();
-    final storedToken =
-        callbackToken ??
-        await _authStore.readToken(
-          repository: target.repository,
-          workspaceId: _workspaceId,
-        );
-    if (storedToken == null || storedToken.isEmpty) {
-      if (_callbackCode() != null) {
-        _message = TrackerMessage.githubAuthorizationCodeReturned();
-        if (!_isLoading && !_disposed) {
-          notifyListeners();
-        }
-      }
-      return;
-    }
     try {
-      if (kIsWeb) {
-        final repository = _repository;
-        if (repository is ProviderBackedTrackStateRepository) {
-          final providerAdapter = repository.providerAdapter;
-          if (providerAdapter is GitHubTrackStateProvider) {
-            providerAdapter.startStartupAuthProbe(storedToken);
+      final target = await _connectionTarget();
+      if (target == null || _isConnected) return;
+      final callbackToken = _callbackToken();
+      final storedToken =
+          callbackToken ??
+          await _authStore.readToken(
+            repository: target.repository,
+            workspaceId: _workspaceId,
+          );
+      if (storedToken == null || storedToken.isEmpty) {
+        if (_callbackCode() != null) {
+          _message = TrackerMessage.githubAuthorizationCodeReturned();
+          if (!_isLoading && !_disposed) {
+            notifyListeners();
           }
         }
+        return;
       }
-      final completedWithinTimeout =
-          await _runAutomaticRepositoryConnectionRestore(
-            connect: () => _repository.connect(
-              GitHubConnection(
-                repository: target.repository,
-                branch: target.branch,
-                token: storedToken,
+      try {
+        if (kIsWeb) {
+          final repository = _repository;
+          if (repository is ProviderBackedTrackStateRepository) {
+            final providerAdapter = repository.providerAdapter;
+            if (providerAdapter is GitHubTrackStateProvider) {
+              providerAdapter.startStartupAuthProbe(storedToken);
+            }
+          }
+        }
+        final completedWithinTimeout =
+            await _runAutomaticRepositoryConnectionRestore(
+              connect: () => _repository.connect(
+                GitHubConnection(
+                  repository: target.repository,
+                  branch: target.branch,
+                  token: storedToken,
+                ),
               ),
-            ),
-            onSuccess: (user) async {
-              _connectedUser = user;
-              _isConnected = true;
-              if (callbackToken != null) {
-                _startupHostedAccessModeOverride = null;
-              }
-              if (callbackToken != null) {
-                await _authStore.saveToken(
-                  callbackToken,
+              onSuccess: (user) async {
+                _connectedUser = user;
+                _isConnected = true;
+                if (callbackToken != null) {
+                  _startupHostedAccessModeOverride = null;
+                } else if (_snapshot != null &&
+                    _repository is ProviderBackedTrackStateRepository &&
+                    _repository.usesHostedStartupShellFallback(_snapshot)) {
+                  // The shell was blocked while the deferred auth probe ran over
+                  // the fallback snapshot. Now that auth succeeded we can switch
+                  // from the guarded loading state to the disconnected/read-only
+                  // shell so the user sees the real UI instead of the spinner.
+                  _startupHostedAccessModeOverride =
+                      HostedRepositoryAccessMode.disconnected;
+                }
+                if (callbackToken != null) {
+                  await _authStore.saveToken(
+                    callbackToken,
+                    repository: _workspaceId == null ? target.repository : null,
+                    workspaceId: _workspaceId,
+                  );
+                }
+                await _resumeStartupRecoveryAfterAuthentication();
+                await _reloadHostedStartupShellFallbackIfNeeded();
+                if (callbackToken != null) {
+                  _message = TrackerMessage.githubConnected(
+                    login: user.login,
+                    repository: target.repository,
+                  );
+                }
+              },
+              onError: (error) async {
+                _message = TrackerMessage.storedGitHubTokenInvalid(error);
+                await _authStore.clearToken(
                   repository: _workspaceId == null ? target.repository : null,
                   workspaceId: _workspaceId,
                 );
-              }
-              await _resumeStartupRecoveryAfterAuthentication();
-              await _reloadHostedStartupShellFallbackIfNeeded();
-              if (callbackToken != null) {
-                _message = TrackerMessage.githubConnected(
-                  login: user.login,
-                  repository: target.repository,
-                );
-              }
-            },
-            onError: (error) async {
-              _message = TrackerMessage.storedGitHubTokenInvalid(error);
-              await _authStore.clearToken(
-                repository: _workspaceId == null ? target.repository : null,
-                workspaceId: _workspaceId,
-              );
-            },
-            onFinally: () async {
-              _bindProviderSession();
-            },
-          );
-      if (!completedWithinTimeout &&
-          _startupHostedAccessModeOverride == null &&
-          _snapshot != null) {
-        _startupHostedAccessModeOverride =
-            HostedRepositoryAccessMode.disconnected;
-        if (!_disposed) {
-          notifyListeners();
+              },
+              onFinally: () async {
+                _bindProviderSession();
+              },
+            );
+        if (!completedWithinTimeout &&
+            _startupHostedAccessModeOverride == null &&
+            _snapshot != null) {
+          _startupHostedAccessModeOverride =
+              HostedRepositoryAccessMode.disconnected;
+          if (!_disposed) {
+            notifyListeners();
+          }
         }
+      } on Object catch (_) {
+        _bindProviderSession();
+        rethrow;
       }
-    } on Object catch (_) {
-      _bindProviderSession();
-      rethrow;
+    } finally {
+      _isAutomaticAccessRestoreInProgress = false;
+      if (!_disposed) {
+        notifyListeners();
+      }
     }
   }
 
@@ -1966,9 +1995,7 @@ class TrackerViewModel extends ChangeNotifier {
     required Future<void> Function(Object error) onError,
     required Future<void> Function() onFinally,
   }) async {
-    final shouldGuardInteractiveShell =
-        kIsWeb && !usesLocalPersistence && supportsGitHubAuth;
-    if (shouldGuardInteractiveShell) {
+    if (_shouldGuardInteractiveShell) {
       _isAutomaticAccessRestoreInProgress = true;
       if (!_disposed) {
         notifyListeners();
@@ -2016,10 +2043,14 @@ class TrackerViewModel extends ChangeNotifier {
         timeout: startupAccessRestoreTimeout,
       );
       _startupTimeoutFallbackAwaitingShellReady = true;
+      if (_shouldGuardInteractiveShell) {
+        _startupHostedAccessModeOverride =
+            HostedRepositoryAccessMode.disconnected;
+      }
       _publishStartupShellReadyDiagnosticIfNeeded();
       return false;
     } finally {
-      if (shouldGuardInteractiveShell) {
+      if (_shouldGuardInteractiveShell) {
         _isAutomaticAccessRestoreInProgress = false;
         if (!_disposed) {
           notifyListeners();
@@ -2131,18 +2162,24 @@ class TrackerViewModel extends ChangeNotifier {
       }
       return repository.loadSnapshot();
     })();
+    final isFallback = repository is ProviderBackedTrackStateRepository &&
+        repository.usesHostedStartupShellFallback(snapshot);
     await _applyReloadedSnapshot(
       snapshot,
       previousSelectedIssue: _selectedIssue,
       preferredSelectedIssueKey: _selectedIssue?.key,
+      preserveStartupRecovery: isFallback,
     );
-    if (repository is ProviderBackedTrackStateRepository &&
-        repository.usesHostedStartupShellFallback(snapshot)) {
-      _startupHostedAccessModeOverride =
-          HostedRepositoryAccessMode.disconnected;
+    if (isFallback) {
+      // Do NOT set _startupHostedAccessModeOverride here. The interactive shell
+      // must stay blocked while the deferred startup auth probe is still
+      // running. The override is released once auth completes (see
+      // _restoreGitHubConnection.onSuccess) or when no deferred auth is pending.
       startupAuthProbeDiagnostics.recordFallbackShellReady(
-        timeout: startupAccessRestoreTimeout,
+        timeout: repository.hostedStartupProbeTimeout,
       );
+      _isLoading = false;
+      _publishStartupShellReadyDiagnosticIfNeeded();
     }
     notifyListeners();
     final requestToken = _beginSearchRequest();
@@ -2187,7 +2224,7 @@ class TrackerViewModel extends ChangeNotifier {
       _section = TrackerSection.settings;
     }
     startupAuthProbeDiagnostics.recordFallbackShellReady(
-      timeout: startupAccessRestoreTimeout,
+      timeout: repository.hostedStartupProbeTimeout,
     );
     _publishStartupShellReadyDiagnosticIfNeeded();
     if (!_disposed) {
@@ -2384,11 +2421,13 @@ class TrackerViewModel extends ChangeNotifier {
       return;
     }
     _didAutoResumeStartupRecoveryAfterAuthentication = true;
+    final previousRecovery = _startupRecovery;
     try {
       await _loadSnapshotAndSearch();
     } on Object catch (error) {
       _startupRecovery = _startupRecoveryFrom(error) ?? _startupRecovery;
     }
+    _startupRecovery ??= previousRecovery;
     if (hasStartupRecovery && _snapshot != null) {
       _section = TrackerSection.settings;
     }
@@ -2401,11 +2440,13 @@ class TrackerViewModel extends ChangeNotifier {
         !repository.usesHostedStartupShellFallback(_snapshot)) {
       return;
     }
+    final previousRecovery = _startupRecovery;
     try {
       await _loadSnapshotAndSearch();
     } on Object catch (error) {
       _message = TrackerMessage.dataLoadFailed(error);
     }
+    _startupRecovery ??= previousRecovery;
   }
 
   void _mergeIssueIntoSnapshot(TrackStateIssue issue) {
@@ -2531,6 +2572,24 @@ class TrackerViewModel extends ChangeNotifier {
     _workspaceSyncService = null;
     final snapshot = _snapshot;
     if (snapshot == null || _repository is! WorkspaceSyncRepository) {
+      _workspaceSyncStatus = const WorkspaceSyncStatus();
+      return;
+    }
+    // While the hosted session is in startup recovery and not yet connected,
+    // background sync should remain idle. Otherwise an unauthenticated sync
+    // check (e.g. on app resume or focus regain) would issue additional
+    // bootstrap requests and defeat retry-suppression guarantees.
+    //
+    // The `isFallbackSnapshot` guard is kept defensively: even though the
+    // repository now sets `startupRecovery` for every probe timeout, there
+    // may still be fallback-snapshot paths (e.g. older provider adapters or
+    // shell-ready shortcuts) that do not populate `startupRecovery`. The
+    // disjunct ensures sync stays suppressed in those cases too.
+    final isFallbackSnapshot = _repository is ProviderBackedTrackStateRepository &&
+        _repository.usesHostedStartupShellFallback(snapshot);
+    if ((snapshot.startupRecovery != null || isFallbackSnapshot) &&
+        exposesHostedAccessGates &&
+        !isConnected) {
       _workspaceSyncStatus = const WorkspaceSyncStatus();
       return;
     }
@@ -2824,10 +2883,13 @@ class TrackerViewModel extends ChangeNotifier {
     required TrackStateIssue? previousSelectedIssue,
     required String? preferredSelectedIssueKey,
     bool fallbackWhenMissing = true,
+    bool preserveStartupRecovery = false,
   }) async {
     final previousSelectedIssueKey = _selectedIssue?.key;
     _snapshot = snapshot;
-    _startupRecovery = snapshot.startupRecovery;
+    if (!preserveStartupRecovery || snapshot.startupRecovery != null) {
+      _startupRecovery = snapshot.startupRecovery;
+    }
     if (_jql.contains('project = TRACK') && snapshot.project.key != 'TRACK') {
       _jql = _jql.replaceFirst(
         'project = TRACK',

@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart' show OrdinalSortKey;
 
@@ -155,24 +154,6 @@ class AccessCallout extends StatelessWidget {
                 ),
               ),
             ],
-            if (kIsWeb)
-              Opacity(
-                opacity: 0,
-                alwaysIncludeSemantics: true,
-                child: IgnorePointer(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(title),
-                      Text(message),
-                      if (detailMessage != null) Text(detailMessage!),
-                      if (primaryActionLabel != null) Text(primaryActionLabel!),
-                      if (secondaryActionLabel != null)
-                        Text(secondaryActionLabel!),
-                    ],
-                  ),
-                ),
-              ),
             if ((primaryActionLabel != null && onPrimaryAction != null) ||
                 (secondaryActionLabel != null &&
                     onSecondaryAction != null)) ...[

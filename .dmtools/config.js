@@ -62,71 +62,10 @@ module.exports = {
     // SM parallelism: allow one development workflow plus one review/rework/merge
     // workflow to run concurrently so open PRs are reviewed while the next bug is
     // being developed. Bug development itself stays capped at 1 via concurrencyKey.
-    smMaxWorkflows: 2,
+    smMaxWorkflows: 1,
     smRules: [
     {
-        "description": "In Testing Stories (pr_approved or already-merged test PR) \u2192 merge test automation PR",
-        "jql": "project = {jiraProject} AND issuetype in ('Story') AND status in ('In Testing') AND labels in ('pr_approved','test_pr_merged') AND labels NOT IN ('test_pr_finalized') ORDER BY created ASC",
-        "configFile": "agents/story_test_automation_merge.json",
-        "localExecution": true,
-        "enabled": true
-    },
-    {
-        "description": "In Testing Bugs (pr_approved or already-merged test PR) \u2192 merge test automation PR",
-        "jql": "project = {jiraProject} AND issuetype in ('Bug') AND status in ('In Testing') AND labels in ('pr_approved','test_pr_merged') AND labels NOT IN ('test_pr_finalized') ORDER BY created ASC",
-        "configFile": "agents/bug_test_automation_merge.json",
-        "localExecution": true,
-        "enabled": true
-    },
-    {
-        "description": "Test Cases with dirty open PR \u2192 move to In Rework",
-        "jql": "project = {jiraProject} AND issuetype in ('Test Case') AND status in ('In Review - Passed', 'In Review - Failed', 'Passed', 'Failed', 'Pull Request Review', 'Merged') AND labels NOT IN ('sm_test_rework_triggered') AND updated >= -2d ORDER BY created ASC",
-        "configFile": "agents/recover_dirty_review_test_case.json",
-        "localExecution": true,
-        "enabled": true
-    },
-    {
-        "description": "In Rework Test Cases \u2192 trigger pr_test_automation_rework",
-        "jql": "project = {jiraProject} AND issuetype in ('Test Case') AND status in ('In Rework') ORDER BY created ASC",
-        "configFile": "agents/pr_test_automation_rework.json",
-        "skipIfLabel": "sm_test_rework_triggered",
-        "addLabel": "sm_test_rework_triggered",
-        "enabled": true
-    },
-    {
-        "description": "In Testing Stories (test_pr_rework_needed) \u2192 rework test automation",
-        "jql": "project = {jiraProject} AND issuetype in ('Story') AND status in ('In Testing') AND labels = 'test_pr_rework_needed' ORDER BY created ASC",
-        "configFile": "agents/story_test_automation_rework.json",
-        "skipIfLabel": "sm_story_test_rework_triggered",
-        "addLabel": "sm_story_test_rework_triggered",
-        "enabled": true
-    },
-    {
-        "description": "In Testing Bugs (test_pr_rework_needed) \u2192 rework test automation",
-        "jql": "project = {jiraProject} AND issuetype in ('Bug') AND status in ('In Testing') AND labels = 'test_pr_rework_needed' ORDER BY created ASC",
-        "configFile": "agents/bug_test_automation_rework.json",
-        "skipIfLabel": "sm_bug_test_rework_triggered",
-        "addLabel": "sm_bug_test_rework_triggered",
-        "enabled": true
-    },
-    {
-        "description": "In Testing Stories with open test-automation PR \u2192 review",
-        "jql": "project = {jiraProject} AND issuetype in ('Story') AND status in ('In Testing') AND (labels is EMPTY OR labels NOT IN ('pr_approved','test_pr_rework_needed','test_pr_merged','test_pr_finalized')) ORDER BY created ASC",
-        "configFile": "agents/pr_story_test_automation_review.json",
-        "skipIfLabel": "sm_story_test_review_triggered",
-        "addLabel": "sm_story_test_review_triggered",
-        "enabled": true
-    },
-    {
-        "description": "In Testing Bugs with open test-automation PR \u2192 review",
-        "jql": "project = {jiraProject} AND issuetype in ('Bug') AND status in ('In Testing') AND (labels is EMPTY OR labels NOT IN ('pr_approved','test_pr_rework_needed','test_pr_merged','test_pr_finalized')) ORDER BY created ASC",
-        "configFile": "agents/pr_bug_test_automation_review.json",
-        "skipIfLabel": "sm_bug_test_review_triggered",
-        "addLabel": "sm_bug_test_review_triggered",
-        "enabled": true
-    },
-    {
-        "description": "In Review Stories & Bugs \u2192 trigger pr_review",
+        "description": "In Review Stories & Bugs → trigger pr_review",
         "jql": "project = {jiraProject} AND issuetype in ('Story', 'Bug', 'Epic') AND status in ('In Review') AND (labels is EMPTY OR labels NOT IN ('pr_approved')) AND (issuetype != Bug OR labels NOT IN ('bug_fix_batch'))",
         "configFile": "agents/pr_review.json",
         "skipIfLabel": "sm_story_review_triggered",
@@ -134,7 +73,7 @@ module.exports = {
         "enabled": true
     },
     {
-        "description": "In Rework Stories & Bugs \u2192 trigger pr_rework",
+        "description": "In Rework Stories & Bugs → trigger pr_rework",
         "jql": "project = {jiraProject} AND issuetype in ('Story', 'Bug', 'Epic') AND status in ('In Rework') AND (issuetype != Bug OR labels NOT IN ('bug_fix_batch'))",
         "configFile": "agents/pr_rework.json",
         "skipIfLabel": "sm_story_rework_triggered",
@@ -142,67 +81,57 @@ module.exports = {
         "enabled": true
     },
     {
-        "description": "In Review Test Cases \u2192 trigger pr_test_automation_review",
-        "jql": "project = {jiraProject} AND issuetype in ('Test Case') AND status in ('In Review - Passed', 'In Review - Failed') AND (labels is EMPTY OR labels NOT IN ('pr_approved'))",
-        "configFile": "agents/pr_test_automation_review.json",
-        "skipIfLabel": "sm_test_review_triggered",
-        "addLabel": "sm_test_review_triggered",
-        "enabled": false
-    },
-    {
-        "description": "In Rework Test Cases \u2192 trigger pr_test_automation_rework",
-        "jql": "project = {jiraProject} AND issuetype in ('Test Case') AND status in ('In Rework')",
-        "configFile": "agents/pr_test_automation_rework.json",
-        "skipIfLabel": "sm_test_rework_triggered",
-        "addLabel": "sm_test_rework_triggered",
-        "enabled": false
-    },
-    {
-        "description": "In Review Stories & Bugs (pr_approved) \u2192 retry merge",
+        "description": "In Review Stories & Bugs (pr_approved) → retry merge",
         "jql": "project = {jiraProject} AND issuetype in ('Story', 'Bug', 'Epic') AND status in ('In Review') AND labels = 'pr_approved' ORDER BY created ASC",
         "configFile": "agents/retry_merge.json",
         "localExecution": true,
         "enabled": true
     },
     {
-        "description": "In Review Test Cases (pr_approved) \u2192 retry merge",
-        "jql": "project = {jiraProject} AND issuetype in ('Test Case') AND status in ('In Review - Passed', 'In Review - Failed') AND labels = 'pr_approved' ORDER BY created ASC",
-        "configFile": "agents/retry_merge_test.json",
-        "localExecution": true,
-        "enabled": false
-    },
-    {
-        "description": "Review/Rework/Blocked Stories & Bugs with already merged PR \u2192 recover Merged status",
+        "description": "Review/Rework/Blocked Stories & Bugs with already merged PR → recover Merged status",
         "jql": "project = {jiraProject} AND issuetype in ('Story', 'Bug', 'Epic') AND status in ('In Review', 'In Rework', 'Blocked') ORDER BY updated ASC",
         "configFile": "agents/recover_merged_pr.json",
         "localExecution": true,
         "enabled": true
     },
     {
-        "description": "Blocked Stories & Bugs with all resolved dependencies \u2192 move to Backlog",
+        "description": "Blocked Stories & Bugs with all resolved dependencies → move to Backlog",
         "jql": "project = {jiraProject} AND issuetype in ('Story', 'Bug') AND status in ('Blocked') ORDER BY updated ASC",
         "configFile": "agents/unblock_resolved_dependencies.json",
         "localExecution": true,
         "enabled": true
     },
     {
-        "description": "In Review Test Cases with dirty PR \u2192 move to In Rework",
-        "jql": "project = {jiraProject} AND issuetype in ('Test Case') AND status in ('In Review - Passed', 'In Review - Failed')",
-        "configFile": "agents/recover_dirty_review_test_case.json",
-        "localExecution": true,
-        "enabled": false
-    },
-    {
-        "description": "Merged Stories \u2192 Ready For Testing + generate test cases",
-        "jql": "project = {jiraProject} AND issuetype in ('Story') AND status in ('Merged')",
-        "targetStatus": "Ready For Testing",
-        "configFile": "agents/test_cases_generator.json",
-        "skipIfLabel": "sm_test_cases_triggered",
-        "addLabel": "sm_test_cases_triggered",
+        "description": "Backlog / To Do / Ready For Development / In Development Bugs → trigger bug_development",
+        "jql": "project = {jiraProject} AND issuetype in ('Bug') AND status in ('Backlog', 'To Do', 'Ready For Development', 'In Development', 'In Progress') AND (labels is EMPTY OR labels NOT IN ('bug_fix_batch')) ORDER BY updated ASC",
+        "configFile": "agents/bug_development.json",
+        "concurrencyKey": "bug_development",
+        "skipIfLabel": "sm_bug_development_triggered",
+        "addLabel": "sm_bug_development_triggered",
+        "limit": 1,
         "enabled": true
     },
     {
-        "description": "Merged Bugs \u2192 Ready For Testing",
+        "description": "Ready For Development bug-fix batch Epics → trigger batch development",
+        "jql": "project = {jiraProject} AND issuetype = 'Epic' AND status in ('Ready For Development') AND labels = 'bug_fix_batch' ORDER BY updated ASC",
+        "configFile": "agents/bug_fix_batch_development.json",
+        "concurrencyKey": "bug_development",
+        "skipIfLabel": "sm_bug_fix_batch_development_triggered",
+        "addLabel": "sm_bug_fix_batch_development_triggered",
+        "limit": 1,
+        "enabled": true
+    },
+    {
+        "description": "Stories in Bug To Fix → group open bugs into a bug-fix batch Epic",
+        "jql": "project = {jiraProject} AND issuetype in ('Story') AND status in ('Bug To Fix') ORDER BY updated ASC",
+        "configFile": "agents/bug_fix_batch_coordinator.json",
+        "skipIfLabel": "sm_bug_fix_batch_coordinator_triggered",
+        "addLabel": "sm_bug_fix_batch_coordinator_triggered",
+        "localExecution": true,
+        "enabled": true
+    },
+    {
+        "description": "Merged Bugs → Ready For Testing",
         "jql": "project = {jiraProject} AND issuetype in ('Bug') AND status in ('Merged')",
         "targetStatus": "Ready For Testing",
         "configFile": "agents/bug_merged.json",
@@ -211,24 +140,15 @@ module.exports = {
         "localExecution": true
     },
     {
-        "description": "Merged bug-fix batch Epics \u2192 finalize linked bugs as Done",
-        "jql": "project = {jiraProject} AND issuetype = 'Epic' AND status in ('Merged') AND labels = 'bug_fix_batch' ORDER BY updated ASC",
-        "configFile": "agents/bug_fix_batch_merge_finalize.json",
-        "skipIfLabel": "sm_bug_fix_batch_finalize_triggered",
-        "addLabel": "sm_bug_fix_batch_finalize_triggered",
-        "localExecution": true,
-        "enabled": true
-    },
-    {
-        "description": "Ready For Testing Bugs \u2192 generate test cases",
+        "description": "Ready For Testing Bugs → generate test cases",
         "jql": "project = {jiraProject} AND issuetype in ('Bug') AND status in ('Ready For Testing') AND (labels is EMPTY OR labels NOT IN ('sm_bug_test_cases_triggered'))",
         "configFile": "agents/bug_test_cases_generator.json",
         "skipIfLabel": "sm_bug_test_cases_triggered",
         "addLabel": "sm_bug_test_cases_triggered",
-        "enabled": true
+        "enabled": false
     },
     {
-        "description": "Ready For Testing Bugs \u2192 automate linked test cases in bulk",
+        "description": "Ready For Testing Bugs → automate linked test cases in bulk",
         "jql": "project = {jiraProject} AND issuetype in ('Bug') AND status in ('Ready For Testing')",
         "configFile": "agents/bug_test_automation.json",
         "skipIfLabel": "sm_bug_test_automation_triggered",
@@ -236,7 +156,51 @@ module.exports = {
         "enabled": true
     },
     {
-        "description": "Ready For Testing Stories \u2192 automate linked test cases in bulk",
+        "description": "In Testing Bugs (pr_approved or already-merged test PR) → merge test automation PR",
+        "jql": "project = {jiraProject} AND issuetype in ('Bug') AND status in ('In Testing') AND labels in ('pr_approved','test_pr_merged') AND labels NOT IN ('test_pr_finalized') ORDER BY created ASC",
+        "configFile": "agents/bug_test_automation_merge.json",
+        "localExecution": true,
+        "enabled": true
+    },
+    {
+        "description": "In Testing Bugs with clean test-automation PR → auto-merge",
+        "jql": "project = {jiraProject} AND issuetype in ('Bug') AND status in ('In Testing') AND labels NOT IN ('pr_approved','test_pr_rework_needed','test_pr_merged','test_pr_finalized') ORDER BY created ASC",
+        "configFile": "agents/bug_test_automation_merge.json",
+        "localExecution": true,
+        "enabled": true
+    },
+    {
+        "description": "In Testing Bugs (test_pr_rework_needed) → rework test automation",
+        "jql": "project = {jiraProject} AND issuetype in ('Bug') AND status in ('In Testing') AND labels = 'test_pr_rework_needed' ORDER BY created ASC",
+        "configFile": "agents/bug_test_automation_rework.json",
+        "skipIfLabel": "sm_bug_test_rework_triggered",
+        "addLabel": "sm_bug_test_rework_triggered",
+        "enabled": true
+    },
+    {
+        "description": "In Testing Bugs with open test-automation PR → review",
+        "jql": "project = {jiraProject} AND issuetype in ('Bug') AND status in ('In Testing') AND (labels is EMPTY OR labels NOT IN ('pr_approved','test_pr_rework_needed','test_pr_merged','test_pr_finalized')) ORDER BY created ASC",
+        "configFile": "agents/pr_bug_test_automation_review.json",
+        "skipIfLabel": "sm_bug_test_review_triggered",
+        "addLabel": "sm_bug_test_review_triggered",
+        "enabled": true
+    },
+    {
+        "description": "In Testing Stories (pr_approved or already-merged test PR) → merge test automation PR",
+        "jql": "project = {jiraProject} AND issuetype in ('Story') AND status in ('In Testing') AND labels in ('pr_approved','test_pr_merged') AND labels NOT IN ('test_pr_finalized') ORDER BY created ASC",
+        "configFile": "agents/story_test_automation_merge.json",
+        "localExecution": true,
+        "enabled": true
+    },
+    {
+        "description": "In Testing Stories with clean test-automation PR → auto-merge",
+        "jql": "project = {jiraProject} AND issuetype in ('Story') AND status in ('In Testing') AND labels NOT IN ('pr_approved','test_pr_rework_needed','test_pr_merged','test_pr_finalized') ORDER BY created ASC",
+        "configFile": "agents/story_test_automation_merge.json",
+        "localExecution": true,
+        "enabled": true
+    },
+    {
+        "description": "Ready For Testing Stories → automate linked test cases in bulk",
         "jql": "project = {jiraProject} AND issuetype in ('Story') AND status in ('Ready For Testing')",
         "configFile": "agents/story_test_automation.json",
         "skipIfLabel": "sm_story_test_automation_triggered",
@@ -247,7 +211,23 @@ module.exports = {
         "enabled": true
     },
     {
-        "description": "In Testing Stories \u2192 check all TCs passed \u2192 Done",
+        "description": "In Testing Stories (test_pr_rework_needed) → rework test automation",
+        "jql": "project = {jiraProject} AND issuetype in ('Story') AND status in ('In Testing') AND labels = 'test_pr_rework_needed' ORDER BY created ASC",
+        "configFile": "agents/story_test_automation_rework.json",
+        "skipIfLabel": "sm_story_test_rework_triggered",
+        "addLabel": "sm_story_test_rework_triggered",
+        "enabled": true
+    },
+    {
+        "description": "In Testing Stories with open test-automation PR → review",
+        "jql": "project = {jiraProject} AND issuetype in ('Story') AND status in ('In Testing') AND (labels is EMPTY OR labels NOT IN ('pr_approved','test_pr_rework_needed','test_pr_merged','test_pr_finalized')) ORDER BY created ASC",
+        "configFile": "agents/pr_story_test_automation_review.json",
+        "skipIfLabel": "sm_story_test_review_triggered",
+        "addLabel": "sm_story_test_review_triggered",
+        "enabled": true
+    },
+    {
+        "description": "In Testing Stories → check all TCs passed → Done",
         "jql": "project = {jiraProject} AND issuetype in ('Story') AND status in ('In Testing')",
         "configFile": "agents/story_done_check.json",
         "skipIfLabel": "sm_story_done_check_triggered",
@@ -255,7 +235,7 @@ module.exports = {
         "localExecution": true
     },
     {
-        "description": "In Testing Bugs \u2192 check all TCs passed \u2192 Done",
+        "description": "In Testing Bugs → check all TCs passed → Done",
         "jql": "project = {jiraProject} AND issuetype in ('Bug') AND status in ('In Testing')",
         "configFile": "agents/bug_done_check.json",
         "skipIfLabel": "sm_bug_done_check_triggered",
@@ -263,14 +243,14 @@ module.exports = {
         "localExecution": true
     },
     {
-        "description": "Failed Test Cases with linked Bugs \u2192 recover Bug To Fix",
+        "description": "Failed Test Cases with linked Bugs → recover Bug To Fix",
         "jql": "project = {jiraProject} AND issuetype in ('Test Case') AND status in ('Failed') ORDER BY updated ASC",
         "configFile": "agents/recover_failed_tc_bug_status.json",
         "localExecution": true,
         "enabled": true
     },
     {
-        "description": "Failed Test Cases \u2192 create or link bugs in batch",
+        "description": "Failed Test Cases → create or link bugs in batch",
         "jql": "project = {jiraProject} AND issuetype in ('Test Case') AND status in ('Failed') AND (labels is EMPTY OR labels NOT IN ('sm_bug_creation_triggered')) ORDER BY created ASC",
         "configFile": "agents/bulk_bugs_creation.json",
         "concurrencyKey": "bulk_bugs_creation",
@@ -281,36 +261,7 @@ module.exports = {
         "enabled": true
     },
     {
-        "description": "Stories in Bug To Fix \u2192 group open bugs into a bug-fix batch Epic",
-        "jql": "project = {jiraProject} AND issuetype in ('Story') AND status in ('Bug To Fix') ORDER BY updated ASC",
-        "configFile": "agents/bug_fix_batch_coordinator.json",
-        "skipIfLabel": "sm_bug_fix_batch_coordinator_triggered",
-        "addLabel": "sm_bug_fix_batch_coordinator_triggered",
-        "localExecution": true,
-        "enabled": true
-    },
-    {
-        "description": "Ready For Development bug-fix batch Epics \u2192 trigger batch development",
-        "jql": "project = {jiraProject} AND issuetype = 'Epic' AND status in ('Ready For Development') AND labels = 'bug_fix_batch' ORDER BY updated ASC",
-        "configFile": "agents/bug_fix_batch_development.json",
-        "concurrencyKey": "bug_development",
-        "skipIfLabel": "sm_bug_fix_batch_development_triggered",
-        "addLabel": "sm_bug_fix_batch_development_triggered",
-        "limit": 1,
-        "enabled": true
-    },
-    {
-        "description": "Backlog / To Do / Ready For Development / In Development Bugs \u2192 trigger bug_development",
-        "jql": "project = {jiraProject} AND issuetype in ('Bug') AND status in ('Backlog', 'To Do', 'Ready For Development', 'In Development', 'In Progress') AND labels NOT IN ('bug_fix_batch') AND updated <= -15m ORDER BY updated ASC",
-        "configFile": "agents/bug_development.json",
-        "concurrencyKey": "bug_development",
-        "skipIfLabel": "sm_bug_development_triggered",
-        "addLabel": "sm_bug_development_triggered",
-        "limit": 1,
-        "enabled": true
-    },
-    {
-        "description": "Bug To Fix Tickets \u2192 all linked Bugs Done \u2192 move to Backlog / Ready For Testing",
+        "description": "Bug To Fix Tickets → all linked Bugs Done → move to Backlog / Ready For Testing",
         "jql": "project = {jiraProject} AND issuetype in ('Test Case', 'Story') AND status in ('Bug To Fix')",
         "configFile": "agents/bug_to_fix_check.json",
         "skipIfLabel": "sm_bug_to_fix_check_triggered",
@@ -318,7 +269,7 @@ module.exports = {
         "enabled": true
     },
     {
-        "description": "Intake/In Development Tasks \u2192 all linked Stories/Bugs Done \u2192 Ready For Testing",
+        "description": "Intake/In Development Tasks → all linked Stories/Bugs Done → Ready For Testing",
         "jql": "project = {jiraProject} AND issuetype in ('Task') AND status in ('In Development', 'In Progress') AND (parent = {parentTicket} OR labels in ('ai_intake'))",
         "configFile": "agents/task_done_check.json",
         "skipIfLabel": "sm_task_done_check_triggered",
@@ -326,23 +277,23 @@ module.exports = {
         "enabled": true
     },
     {
-        "description": "Stuck In Development Test Cases \u2192 recover (check PR, route to Rework/Review/Backlog)",
+        "description": "Stuck In Development Test Cases → recover (check PR, route to Rework/Review/Backlog)",
         "jql": "project = {jiraProject} AND issuetype in ('Test Case') AND status in ('In Development') AND updated <= -15m",
         "configFile": "agents/recover_stuck_test_case.json",
         "localExecution": true,
         "enabled": true
     },
     {
-        "description": "Failed Test Cases \u2192 create or link bug (single, disabled by default \u2014 use bulk_bugs_creation instead)",
+        "description": "Failed Test Cases → create or link bug (single, disabled by default — use bulk_bugs_creation instead)",
         "jql": "project = {jiraProject} AND issuetype in ('Test Case') AND status in ('Failed')",
         "configFile": "agents/bug_creation.json",
         "skipIfLabel": "sm_bug_creation_triggered",
         "addLabel": "sm_bug_creation_triggered",
         "limit": 5,
-        "enabled": true
+        "enabled": false
     },
     {
-        "description": "Backlog / To Do / Ready For Development Test Cases \u2192 In Development + automate",
+        "description": "Backlog / To Do / Ready For Development Test Cases → In Development + automate",
         "jql": "project = {jiraProject} AND issuetype in ('Test Case') AND status in ('Backlog', 'To Do', 'Ready For Development')",
         "targetStatus": "In Development",
         "configFile": "agents/test_case_automation.json",
@@ -351,7 +302,16 @@ module.exports = {
         "enabled": true
     },
     {
-        "description": "PO Review Stories with all subtasks Done \u2192 BA Analysis",
+        "description": "Merged Stories → Ready For Testing + generate test cases",
+        "jql": "project = {jiraProject} AND issuetype in ('Story') AND status in ('Merged')",
+        "targetStatus": "Ready For Testing",
+        "configFile": "agents/test_cases_generator.json",
+        "skipIfLabel": "sm_test_cases_triggered",
+        "addLabel": "sm_test_cases_triggered",
+        "enabled": false
+    },
+    {
+        "description": "PO Review Stories with all subtasks Done → BA Analysis",
         "jql": "project = {jiraProject} AND issuetype in ('Story') AND status in ('PO Review')",
         "configFile": "agents/story_ba_check.json",
         "skipIfLabel": "sm_story_ba_check_triggered",
@@ -359,7 +319,7 @@ module.exports = {
         "enabled": true
     },
     {
-        "description": "BA Analysis Stories \u2192 generate Acceptance Criteria",
+        "description": "BA Analysis Stories → generate Acceptance Criteria",
         "jql": "project = {jiraProject} AND issuetype in ('Story') AND status in ('BA Analysis')",
         "configFile": "agents/story_acceptance_criteria.json",
         "skipIfLabels": [
@@ -370,7 +330,7 @@ module.exports = {
         "enabled": true
     },
     {
-        "description": "Solution Architecture Stories \u2192 generate Solution Design",
+        "description": "Solution Architecture Stories → generate Solution Design",
         "jql": "project = {jiraProject} AND issuetype in ('Story') AND status in ('Solution Architecture')",
         "configFile": "agents/story_solution.json",
         "skipIfLabel": "sm_story_solution_triggered",
@@ -378,15 +338,15 @@ module.exports = {
         "enabled": true
     },
     {
-        "description": "Subtasks with 'q' label \u2192 trigger PO refinement",
-        "jql": "project = {jiraProject} AND issuetype in ('Subtask') AND labels in ('q') and status not in (Done)",
-        "configFile": "agents/po_refinement.json",
-        "skipIfLabel": "sm_po_refinement_triggered",
-        "addLabel": "sm_po_refinement_triggered",
+        "description": "Ready For Development Stories → trigger story_development",
+        "jql": "project = {jiraProject} AND issuetype in ('Story') AND status in ('Ready For Development')",
+        "configFile": "agents/story_development.json",
+        "skipIfLabel": "sm_story_development_triggered",
+        "addLabel": "sm_story_development_triggered",
         "enabled": true
     },
     {
-        "description": "Backlog / To Do Stories \u2192 ask clarification questions",
+        "description": "Backlog / To Do Stories → ask clarification questions",
         "jql": "project = {jiraProject} AND issuetype in ('Story') AND status in ('Backlog', 'To Do')",
         "configFile": "agents/story_questions.json",
         "skipIfLabels": [
@@ -394,10 +354,19 @@ module.exports = {
             "ai_questions_asked"
         ],
         "addLabel": "sm_story_questions_triggered",
-        "limit": 1
+        "limit": 1,
+        "enabled": true
     },
     {
-        "description": "Backlog / To Do Tasks (children of parent ticket) \u2192 run intake agent",
+        "description": "Subtasks with 'q' label → trigger PO refinement",
+        "jql": "project = {jiraProject} AND issuetype in ('Subtask') AND labels in ('q') and status not in (Done)",
+        "configFile": "agents/po_refinement.json",
+        "skipIfLabel": "sm_po_refinement_triggered",
+        "addLabel": "sm_po_refinement_triggered",
+        "enabled": true
+    },
+    {
+        "description": "Backlog / To Do Tasks (children of parent ticket) → run intake agent",
         "jql": "project = {jiraProject} AND issuetype in ('Task') AND status in ('Backlog', 'To Do') AND parent = {parentTicket}",
         "targetStatus": "In Development",
         "configFile": "agents/intake.json",
@@ -406,11 +375,64 @@ module.exports = {
         "enabled": true
     },
     {
-        "description": "Ready For Development Stories \u2192 trigger story_development",
-        "jql": "project = {jiraProject} AND issuetype in ('Story') AND status in ('Ready For Development')",
-        "configFile": "agents/story_development.json",
-        "skipIfLabel": "sm_story_development_triggered",
-        "addLabel": "sm_story_development_triggered",
+        "description": "Test Cases with dirty open PR → move to In Rework",
+        "jql": "project = {jiraProject} AND issuetype in ('Test Case') AND status in ('In Review - Passed', 'In Review - Failed', 'Passed', 'Failed', 'Pull Request Review', 'Merged') AND labels NOT IN ('sm_test_rework_triggered') AND updated >= -2d ORDER BY created ASC",
+        "configFile": "agents/recover_dirty_review_test_case.json",
+        "localExecution": true,
+        "enabled": true
+    },
+    {
+        "description": "In Review - Passed Test Cases with clean CI → auto-merge",
+        "jql": "project = {jiraProject} AND issuetype in ('Test Case') AND status = 'In Review - Passed' AND labels NOT IN ('pr_approved','test_pr_finalized') ORDER BY created ASC",
+        "configFile": "agents/retry_merge_test.json",
+        "localExecution": true,
+        "enabled": true
+    },
+    {
+        "description": "In Review Test Cases → trigger pr_test_automation_review",
+        "jql": "project = {jiraProject} AND issuetype in ('Test Case') AND status in ('In Review - Passed', 'In Review - Failed') AND (labels is EMPTY OR labels NOT IN ('pr_approved'))",
+        "configFile": "agents/pr_test_automation_review.json",
+        "skipIfLabel": "sm_test_review_triggered",
+        "addLabel": "sm_test_review_triggered",
+        "enabled": true
+    },
+    {
+        "description": "In Rework Test Cases → trigger pr_test_automation_rework",
+        "jql": "project = {jiraProject} AND issuetype in ('Test Case') AND status in ('In Rework') ORDER BY created ASC",
+        "configFile": "agents/pr_test_automation_rework.json",
+        "skipIfLabel": "sm_test_rework_triggered",
+        "addLabel": "sm_test_rework_triggered",
+        "enabled": true
+    },
+    {
+        "description": "In Review Test Cases (pr_approved) → retry merge",
+        "jql": "project = {jiraProject} AND issuetype in ('Test Case') AND status in ('In Review - Passed', 'In Review - Failed') AND labels = 'pr_approved' ORDER BY created ASC",
+        "configFile": "agents/retry_merge_test.json",
+        "localExecution": true,
+        "enabled": true
+    },
+    {
+        "description": "In Rework Test Cases → trigger pr_test_automation_rework",
+        "jql": "project = {jiraProject} AND issuetype in ('Test Case') AND status in ('In Rework')",
+        "configFile": "agents/pr_test_automation_rework.json",
+        "skipIfLabel": "sm_test_rework_triggered",
+        "addLabel": "sm_test_rework_triggered",
+        "enabled": true
+    },
+    {
+        "description": "In Review Test Cases with dirty PR → move to In Rework",
+        "jql": "project = {jiraProject} AND issuetype in ('Test Case') AND status in ('In Review - Passed', 'In Review - Failed')",
+        "configFile": "agents/recover_dirty_review_test_case.json",
+        "localExecution": true,
+        "enabled": true
+    },
+    {
+        "description": "Merged bug-fix batch Epics → finalize linked bugs as Done",
+        "jql": "project = {jiraProject} AND issuetype = 'Epic' AND status in ('Merged') AND labels = 'bug_fix_batch' ORDER BY updated ASC",
+        "configFile": "agents/bug_fix_batch_merge_finalize.json",
+        "skipIfLabel": "sm_bug_fix_batch_finalize_triggered",
+        "addLabel": "sm_bug_fix_batch_finalize_triggered",
+        "localExecution": true,
         "enabled": true
     }
 ],
@@ -650,165 +672,441 @@ module.exports = {
     },
 
     jobParamPatches: {
-        test_cases_generator: {
-            confluencePages: [
-                GOAL_INSTRUCTIONS,
-                DESIGN_REFERENCE,
-                './agents/instructions/test_cases/test_case_creation_rules.md',
-                './.dmtools/instructions/test_cases/trackstate_functional_test_case_rules.md'
+    "test_cases_generator": {
+        "confluencePages": [
+            "./.dmtools/instructions/goal/goal.md",
+            "./.dmtools/instructions/goal/DESIGN.md",
+            "./agents/instructions/test_cases/test_case_creation_rules.md",
+            "./.dmtools/instructions/test_cases/trackstate_functional_test_case_rules.md"
+        ],
+        "postJSAction": "agents/js/triggerStoryTestAutomation.js",
+        "customParams": {
+            "autoStartStoryTestAutomation": false,
+            "autoStartStoryTestAutomationConfigFile": "agents/story_test_automation.json"
+        }
+    },
+    "bug_test_cases_generator": {
+        "postJSAction": "agents/js/triggerBugTestAutomation.js",
+        "customParams": {
+            "autoStartBugTestAutomation": false,
+            "autoStartBugTestAutomationConfigFile": "agents/bug_test_automation.json"
+        }
+    },
+    "story_questions": {
+        "customParams": {
+            "autoStartQuestionAnswer": false,
+            "autoStartQuestionAnswerConfigFile": "agents/po_refinement.json"
+        }
+    },
+    "story_acceptance_criteria": {
+        "customParams": {
+            "autoStartSolution": false,
+            "autoStartSolutionConfigFile": "agents/story_solution.json"
+        }
+    },
+    "story_acceptance_criterias": {
+        "customParams": {
+            "autoStartSolution": false,
+            "autoStartSolutionConfigFile": "agents/story_solution.json"
+        }
+    },
+    "story_solution": {
+        "customParams": {
+            "autoStartDevelopment": false,
+            "autoStartDevelopmentConfigFile": "agents/story_development.json"
+        }
+    },
+    "story_development": {
+        "customParams": {
+            "autoStartReview": false,
+            "autoStartReviewConfigFile": "agents/pr_review.json",
+            "managedSubmodules": [
+                {
+                    "path": "trackstate-setup",
+                    "branch": "main",
+                    "tagPrefix": "stable"
+                }
             ],
-            postJSAction: 'agents/js/triggerStoryTestAutomation.js',
-            customParams: {
-                autoStartStoryTestAutomation: true,
-                autoStartStoryTestAutomationConfigFile: 'agents/story_test_automation.json'
-            }
-        },
-        bug_test_cases_generator: {
-            postJSAction: 'agents/js/triggerBugTestAutomation.js',
-            customParams: {
-                autoStartBugTestAutomation: true,
-                autoStartBugTestAutomationConfigFile: 'agents/bug_test_automation.json'
-            }
-        },
-        story_questions: {
-            customParams: {
-                autoStartQuestionAnswer: true,
-                autoStartQuestionAnswerConfigFile: 'agents/po_refinement.json'
-            }
-        },
-        story_acceptance_criteria: {
-            customParams: {
-                autoStartSolution: true,
-                autoStartSolutionConfigFile: 'agents/story_solution.json'
-            }
-        },
-        story_acceptance_criterias: {
-            customParams: {
-                autoStartSolution: true,
-                autoStartSolutionConfigFile: 'agents/story_solution.json'
-            }
-        },
-        story_solution: {
-            customParams: {
-                autoStartDevelopment: true,
-                autoStartDevelopmentConfigFile: 'agents/story_development.json'
-            }
-        },
-        story_development: {
-            customParams: {
-                autoStartReview: true,
-                autoStartReviewConfigFile: 'agents/pr_review.json',
-                managedSubmodules: TRACKSTATE_SETUP_SUBMODULES,
-                feedbackLoop: FLUTTER_FEEDBACK
-            }
-        },
-        bug_development: {
-            customParams: {
-                autoStartReview: true,
-                autoStartReviewConfigFile: 'agents/pr_review.json',
-                managedSubmodules: TRACKSTATE_SETUP_SUBMODULES,
-                feedbackLoop: FLUTTER_FEEDBACK
-            }
-        },
-        bug_fix_batch_development: {
-            customParams: {
-                autoStartReview: true,
-                autoStartReviewConfigFile: 'agents/pr_review.json',
-                managedSubmodules: TRACKSTATE_SETUP_SUBMODULES,
-                feedbackLoop: FLUTTER_FEEDBACK
-            }
-        },
-        test_case_automation: {
-            customParams: {
-                autoStartReview: true,
-                autoStartReviewConfigFile: 'agents/pr_test_automation_review.json'
-            }
-        },
-        pr_review: {
-            customParams: {
-                autoStartRework: true,
-                autoStartReworkConfigFile: 'agents/pr_rework.json',
-                // If the PR already has this many review threads/comments, allow
-                // an APPROVE verdict to stand even when suggestions remain, so the
-                // review/rework loop eventually terminates.
-                maxReviewThreadsBeforeForceApprove: 100
-            }
-        },
-        pr_test_automation_review: {
-            customParams: {
-                autoStartRework: true,
-                autoStartReworkConfigFile: 'agents/pr_test_automation_rework.json',
-                maxReviewThreadsBeforeForceApprove: 100
-            }
-        },
-        pr_rework: {
-            customParams: {
-                autoStartReview: true,
-                autoStartReviewConfigFile: 'agents/pr_review.json',
-                managedSubmodules: TRACKSTATE_SETUP_SUBMODULES,
-                feedbackLoop: FLUTTER_FEEDBACK
-            }
-        },
-        pr_test_automation_rework: {
-            customParams: {
-                autoStartReview: true,
-                autoStartReviewConfigFile: 'agents/pr_test_automation_review.json',
-                feedbackLoop: POST_ACTION_FEEDBACK
-            }
-        },
-        story_test_automation: {
-            customParams: {
-                autoStartReview: false
-            }
-        },
-        story_test_automation_rework: {
-            customParams: {
-                autoStartReview: false,
-                removeLabel: 'sm_story_test_rework_triggered',
-                feedbackLoop: POST_ACTION_FEEDBACK
-            }
-        },
-        pr_story_test_automation_review: {
-            customParams: {
-                autoStartMerge: false,
-                autoStartRework: false,
-                maxReviewThreadsBeforeForceApprove: 100,
-                smFallback: true
-            }
-        },
-        bug_test_automation: {
-            customParams: {
-                autoStartReview: false
-            }
-        },
-        bug_test_automation_rework: {
-            customParams: {
-                autoStartReview: false,
-                removeLabel: 'sm_bug_test_rework_triggered',
-                feedbackLoop: POST_ACTION_FEEDBACK
-            }
-        },
-        pr_bug_test_automation_review: {
-            customParams: {
-                autoStartMerge: false,
-                autoStartRework: false,
-                maxReviewThreadsBeforeForceApprove: 100,
-                smFallback: true
-            }
-        },
-        retry_merge: {
-            customParams: {
-                autoStartRework: true,
-                autoStartReworkConfigFile: 'agents/pr_rework.json'
-            }
-        },
-        retry_merge_test: {
-            customParams: {
-                autoStartRework: true,
-                autoStartReworkConfigFile: 'agents/pr_test_automation_rework.json'
+            "feedbackLoop": {
+                "postAction": {
+                    "enabled": true,
+                    "maxAttempts": 2
+                },
+                "qualityGates": {
+                    "enabled": true,
+                    "gates": [
+                        {
+                            "name": "flutter-analyze",
+                            "command": "flutter analyze",
+                            "maxAttempts": 2
+                        },
+                        {
+                            "name": "flutter-test",
+                            "command": "flutter test --coverage",
+                            "maxAttempts": 2
+                        },
+                        {
+                            "name": "accessibility-build",
+                            "command": "bash tool/run_if_accessibility_needed.sh \"flutter build web --release --base-href / --pwa-strategy=none --dart-define TRACKSTATE_USE_DEMO_REPOSITORY=true --dart-define TRACKSTATE_REPOSITORY=IstiN/trackstate-setup --dart-define TRACKSTATE_SOURCE_REF=main --dart-define TRACKSTATE_DATA_REF=main\"",
+                            "maxAttempts": 1
+                        },
+                        {
+                            "name": "accessibility-axe",
+                            "command": "bash tool/run_if_accessibility_needed.sh \"npm run test:a11y\"",
+                            "maxAttempts": 1
+                        },
+                        {
+                            "name": "accessibility-log-validation",
+                            "command": "bash tool/run_if_accessibility_needed.sh \"node testing/accessibility/log_validation.node.test.js\"",
+                            "maxAttempts": 1
+                        }
+                    ]
+                },
+                "policyGates": {
+                    "enabled": true,
+                    "gates": [
+                        {
+                            "name": "theme-token-lint",
+                            "command": "dart run tool/check_theme_tokens.dart",
+                            "maxAttempts": 2
+                        },
+                        {
+                            "name": "web-safety-lint",
+                            "command": "dart run tool/check_web_safety.dart",
+                            "maxAttempts": 2
+                        },
+                        {
+                            "name": "file-line-limit-lint",
+                            "command": "dart run tool/check_file_line_limits.dart",
+                            "maxAttempts": 2
+                        },
+                        {
+                            "name": "code-duplication-lint",
+                            "command": "npx jscpd@4 lib/ --min-lines 5 --min-tokens 50 --ignore \"**/*.g.dart,**/*.freezed.dart,lib/l10n/generated/**,lib/**/*.gr.dart\" --threshold 1",
+                            "maxAttempts": 2
+                        }
+                    ]
+                }
             }
         }
     },
+    "bug_development": {
+        "customParams": {
+            "autoStartReview": false,
+            "autoStartReviewConfigFile": "agents/pr_review.json",
+            "managedSubmodules": [
+                {
+                    "path": "trackstate-setup",
+                    "branch": "main",
+                    "tagPrefix": "stable"
+                }
+            ],
+            "feedbackLoop": {
+                "postAction": {
+                    "enabled": true,
+                    "maxAttempts": 2
+                },
+                "qualityGates": {
+                    "enabled": true,
+                    "gates": [
+                        {
+                            "name": "flutter-analyze",
+                            "command": "flutter analyze",
+                            "maxAttempts": 2
+                        },
+                        {
+                            "name": "flutter-test",
+                            "command": "flutter test --coverage",
+                            "maxAttempts": 2
+                        },
+                        {
+                            "name": "accessibility-build",
+                            "command": "bash tool/run_if_accessibility_needed.sh \"flutter build web --release --base-href / --pwa-strategy=none --dart-define TRACKSTATE_USE_DEMO_REPOSITORY=true --dart-define TRACKSTATE_REPOSITORY=IstiN/trackstate-setup --dart-define TRACKSTATE_SOURCE_REF=main --dart-define TRACKSTATE_DATA_REF=main\"",
+                            "maxAttempts": 1
+                        },
+                        {
+                            "name": "accessibility-axe",
+                            "command": "bash tool/run_if_accessibility_needed.sh \"npm run test:a11y\"",
+                            "maxAttempts": 1
+                        },
+                        {
+                            "name": "accessibility-log-validation",
+                            "command": "bash tool/run_if_accessibility_needed.sh \"node testing/accessibility/log_validation.node.test.js\"",
+                            "maxAttempts": 1
+                        }
+                    ]
+                },
+                "policyGates": {
+                    "enabled": true,
+                    "gates": [
+                        {
+                            "name": "theme-token-lint",
+                            "command": "dart run tool/check_theme_tokens.dart",
+                            "maxAttempts": 2
+                        },
+                        {
+                            "name": "web-safety-lint",
+                            "command": "dart run tool/check_web_safety.dart",
+                            "maxAttempts": 2
+                        },
+                        {
+                            "name": "file-line-limit-lint",
+                            "command": "dart run tool/check_file_line_limits.dart",
+                            "maxAttempts": 2
+                        },
+                        {
+                            "name": "code-duplication-lint",
+                            "command": "npx jscpd@4 lib/ --min-lines 5 --min-tokens 50 --ignore \"**/*.g.dart,**/*.freezed.dart,lib/l10n/generated/**,lib/**/*.gr.dart\" --threshold 1",
+                            "maxAttempts": 2
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    "bug_fix_batch_development": {
+        "customParams": {
+            "autoStartReview": false,
+            "autoStartReviewConfigFile": "agents/pr_review.json",
+            "managedSubmodules": [
+                {
+                    "path": "trackstate-setup",
+                    "branch": "main",
+                    "tagPrefix": "stable"
+                }
+            ],
+            "feedbackLoop": {
+                "postAction": {
+                    "enabled": true,
+                    "maxAttempts": 2
+                },
+                "qualityGates": {
+                    "enabled": true,
+                    "gates": [
+                        {
+                            "name": "flutter-analyze",
+                            "command": "flutter analyze",
+                            "maxAttempts": 2
+                        },
+                        {
+                            "name": "flutter-test",
+                            "command": "flutter test --coverage",
+                            "maxAttempts": 2
+                        },
+                        {
+                            "name": "accessibility-build",
+                            "command": "bash tool/run_if_accessibility_needed.sh \"flutter build web --release --base-href / --pwa-strategy=none --dart-define TRACKSTATE_USE_DEMO_REPOSITORY=true --dart-define TRACKSTATE_REPOSITORY=IstiN/trackstate-setup --dart-define TRACKSTATE_SOURCE_REF=main --dart-define TRACKSTATE_DATA_REF=main\"",
+                            "maxAttempts": 1
+                        },
+                        {
+                            "name": "accessibility-axe",
+                            "command": "bash tool/run_if_accessibility_needed.sh \"npm run test:a11y\"",
+                            "maxAttempts": 1
+                        },
+                        {
+                            "name": "accessibility-log-validation",
+                            "command": "bash tool/run_if_accessibility_needed.sh \"node testing/accessibility/log_validation.node.test.js\"",
+                            "maxAttempts": 1
+                        }
+                    ]
+                },
+                "policyGates": {
+                    "enabled": true,
+                    "gates": [
+                        {
+                            "name": "theme-token-lint",
+                            "command": "dart run tool/check_theme_tokens.dart",
+                            "maxAttempts": 2
+                        },
+                        {
+                            "name": "web-safety-lint",
+                            "command": "dart run tool/check_web_safety.dart",
+                            "maxAttempts": 2
+                        },
+                        {
+                            "name": "file-line-limit-lint",
+                            "command": "dart run tool/check_file_line_limits.dart",
+                            "maxAttempts": 2
+                        },
+                        {
+                            "name": "code-duplication-lint",
+                            "command": "npx jscpd@4 lib/ --min-lines 5 --min-tokens 50 --ignore \"**/*.g.dart,**/*.freezed.dart,lib/l10n/generated/**,lib/**/*.gr.dart\" --threshold 1",
+                            "maxAttempts": 2
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    "test_case_automation": {
+        "customParams": {
+            "autoStartReview": false,
+            "autoStartReviewConfigFile": "agents/pr_test_automation_review.json"
+        }
+    },
+    "pr_review": {
+        "customParams": {
+            "autoStartRework": false,
+            "autoStartReworkConfigFile": "agents/pr_rework.json",
+            "maxReviewThreadsBeforeForceApprove": 100
+        }
+    },
+    "pr_test_automation_review": {
+        "customParams": {
+            "autoStartRework": false,
+            "autoStartReworkConfigFile": "agents/pr_test_automation_rework.json",
+            "maxReviewThreadsBeforeForceApprove": 100
+        }
+    },
+    "pr_rework": {
+        "customParams": {
+            "autoStartReview": false,
+            "autoStartReviewConfigFile": "agents/pr_review.json",
+            "managedSubmodules": [
+                {
+                    "path": "trackstate-setup",
+                    "branch": "main",
+                    "tagPrefix": "stable"
+                }
+            ],
+            "feedbackLoop": {
+                "postAction": {
+                    "enabled": true,
+                    "maxAttempts": 2
+                },
+                "qualityGates": {
+                    "enabled": true,
+                    "gates": [
+                        {
+                            "name": "flutter-analyze",
+                            "command": "flutter analyze",
+                            "maxAttempts": 2
+                        },
+                        {
+                            "name": "flutter-test",
+                            "command": "flutter test --coverage",
+                            "maxAttempts": 2
+                        },
+                        {
+                            "name": "accessibility-build",
+                            "command": "bash tool/run_if_accessibility_needed.sh \"flutter build web --release --base-href / --pwa-strategy=none --dart-define TRACKSTATE_USE_DEMO_REPOSITORY=true --dart-define TRACKSTATE_REPOSITORY=IstiN/trackstate-setup --dart-define TRACKSTATE_SOURCE_REF=main --dart-define TRACKSTATE_DATA_REF=main\"",
+                            "maxAttempts": 1
+                        },
+                        {
+                            "name": "accessibility-axe",
+                            "command": "bash tool/run_if_accessibility_needed.sh \"npm run test:a11y\"",
+                            "maxAttempts": 1
+                        },
+                        {
+                            "name": "accessibility-log-validation",
+                            "command": "bash tool/run_if_accessibility_needed.sh \"node testing/accessibility/log_validation.node.test.js\"",
+                            "maxAttempts": 1
+                        }
+                    ]
+                },
+                "policyGates": {
+                    "enabled": true,
+                    "gates": [
+                        {
+                            "name": "theme-token-lint",
+                            "command": "dart run tool/check_theme_tokens.dart",
+                            "maxAttempts": 2
+                        },
+                        {
+                            "name": "web-safety-lint",
+                            "command": "dart run tool/check_web_safety.dart",
+                            "maxAttempts": 2
+                        },
+                        {
+                            "name": "file-line-limit-lint",
+                            "command": "dart run tool/check_file_line_limits.dart",
+                            "maxAttempts": 2
+                        },
+                        {
+                            "name": "code-duplication-lint",
+                            "command": "npx jscpd@4 lib/ --min-lines 5 --min-tokens 50 --ignore \"**/*.g.dart,**/*.freezed.dart,lib/l10n/generated/**,lib/**/*.gr.dart\" --threshold 1",
+                            "maxAttempts": 2
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    "pr_test_automation_rework": {
+        "customParams": {
+            "autoStartReview": false,
+            "autoStartReviewConfigFile": "agents/pr_test_automation_review.json",
+            "feedbackLoop": {
+                "postAction": {
+                    "enabled": true,
+                    "maxAttempts": 2
+                }
+            }
+        }
+    },
+    "story_test_automation": {
+        "customParams": {
+            "autoStartReview": false
+        }
+    },
+    "story_test_automation_rework": {
+        "customParams": {
+            "autoStartReview": false,
+            "removeLabel": "sm_story_test_rework_triggered",
+            "feedbackLoop": {
+                "postAction": {
+                    "enabled": true,
+                    "maxAttempts": 2
+                }
+            }
+        }
+    },
+    "pr_story_test_automation_review": {
+        "customParams": {
+            "autoStartMerge": false,
+            "autoStartRework": false,
+            "maxReviewThreadsBeforeForceApprove": 100,
+            "smFallback": false
+        }
+    },
+    "bug_test_automation": {
+        "customParams": {
+            "autoStartReview": false
+        }
+    },
+    "bug_test_automation_rework": {
+        "customParams": {
+            "autoStartReview": false,
+            "removeLabel": "sm_bug_test_rework_triggered",
+            "feedbackLoop": {
+                "postAction": {
+                    "enabled": true,
+                    "maxAttempts": 2
+                }
+            }
+        }
+    },
+    "pr_bug_test_automation_review": {
+        "customParams": {
+            "autoStartMerge": false,
+            "autoStartRework": false,
+            "maxReviewThreadsBeforeForceApprove": 100,
+            "smFallback": false
+        }
+    },
+    "retry_merge": {
+        "customParams": {
+            "autoStartRework": false,
+            "autoStartReworkConfigFile": "agents/pr_rework.json"
+        }
+    },
+    "retry_merge_test": {
+        "customParams": {
+            "autoStartRework": false,
+            "autoStartReworkConfigFile": "agents/pr_test_automation_rework.json"
+        }
+    }
+},
 
     agentParamPatches: {},
 

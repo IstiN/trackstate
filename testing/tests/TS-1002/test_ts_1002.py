@@ -564,6 +564,7 @@ def _workspace_state(repository: str) -> dict[str, object]:
         default_branch=DEFAULT_BRANCH,
         local_display_name=LOCAL_DISPLAY_NAME,
         hosted_display_name=HOSTED_DISPLAY_NAME,
+        active_workspace="hosted",
     )
 
 
