@@ -1,3 +1,4 @@
+import 'dart:ui' show Tristate;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -340,7 +341,7 @@ String? _focusedSemanticsLabel(WidgetTester tester) {
   final labels = <String>[];
 
   void visit(SemanticsNode node) {
-    if (node.getSemanticsData().flagsCollection.isFocused) {
+    if (node.getSemanticsData().flagsCollection.isFocused == Tristate.isTrue) {
       final label = _normalizedLabel(node.label);
       if (label.isNotEmpty) {
         labels.add(label);
@@ -455,7 +456,7 @@ Finder? _activeMenuOverlayScope(
 bool _isInteractiveTarget(SemanticsNode node) {
   return node.flagsCollection.isButton ||
       node.flagsCollection.isTextField ||
-      node.flagsCollection.isFocusable ||
+      node.flagsCollection.isFocused != Tristate.none ||
       node.flagsCollection.isReadOnly;
 }
 

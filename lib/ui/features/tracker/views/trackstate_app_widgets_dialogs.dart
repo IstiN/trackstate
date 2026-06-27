@@ -907,7 +907,11 @@ class _IssueEditDialogState extends State<_IssueEditDialog> {
         return;
       }
       _summaryFocusNode.requestFocus();
-      SemanticsService.announce(message, Directionality.of(context));
+      SemanticsService.sendAnnouncement(
+        View.of(context),
+        message,
+        Directionality.of(context),
+      );
     });
   }
 

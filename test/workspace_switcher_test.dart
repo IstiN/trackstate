@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' show Tristate;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
@@ -4122,7 +4123,7 @@ void main() {
           matching: find.semantics.byPredicate((node) {
             final data = node.getSemanticsData();
             return data.flagsCollection.isButton &&
-                data.flagsCollection.isFocusable;
+                data.flagsCollection.isFocused != Tristate.none;
           }, describeMatch: (_) => 'focusable button semantics node'),
           matchRoot: true,
         );
@@ -4501,17 +4502,17 @@ void main() {
       final thirdSem = thirdRowSemanticsNode.evaluate().single;
 
       expect(
-        mainSem.getSemanticsData().flagsCollection.isFocusable,
+        mainSem.getSemanticsData().flagsCollection.isFocused != Tristate.none,
         isTrue,
         reason: 'Active workspace row should be focusable.',
       );
       expect(
-        altSem.getSemanticsData().flagsCollection.isFocusable,
+        altSem.getSemanticsData().flagsCollection.isFocused != Tristate.none,
         isFalse,
         reason: 'Inactive workspace row should NOT be focusable.',
       );
       expect(
-        thirdSem.getSemanticsData().flagsCollection.isFocusable,
+        thirdSem.getSemanticsData().flagsCollection.isFocused != Tristate.none,
         isFalse,
         reason: 'Inactive workspace row should NOT be focusable.',
       );
@@ -4550,18 +4551,18 @@ void main() {
       final thirdSemAfter = thirdRowSemanticsNodeAfter.evaluate().single;
 
       expect(
-        mainSemAfter.getSemanticsData().flagsCollection.isFocusable,
+        mainSemAfter.getSemanticsData().flagsCollection.isFocused != Tristate.none,
         isFalse,
         reason:
             'Previously active row should lose focusable after selection moves.',
       );
       expect(
-        altSemAfter.getSemanticsData().flagsCollection.isFocusable,
+        altSemAfter.getSemanticsData().flagsCollection.isFocused != Tristate.none,
         isTrue,
         reason: 'Newly active workspace row should be focusable.',
       );
       expect(
-        thirdSemAfter.getSemanticsData().flagsCollection.isFocusable,
+        thirdSemAfter.getSemanticsData().flagsCollection.isFocused != Tristate.none,
         isFalse,
         reason:
             'Inactive workspace row should remain not focusable after selection changes.',
@@ -4823,7 +4824,7 @@ Future<void> _pumpUntilVisible(
 
 String? _focusedLabel(WidgetTester tester, Map<String, Finder> candidates) {
   final focusedSemantics = find.semantics.byPredicate(
-    (node) => node.getSemanticsData().flagsCollection.isFocused,
+    (node) => node.getSemanticsData().flagsCollection.isFocused == Tristate.isTrue,
     describeMatch: (_) => 'focused semantics node',
   );
   final hasFocusedSemantics = focusedSemantics.evaluate().isNotEmpty;
