@@ -39,9 +39,11 @@ jobs:
 
     env:
       # Optional GitHub App credentials. When both are set AND the App is marked as
-      # enabled (AI_TEAMMATE_GITHUB_APP_ENABLED=true), the workflow uses short-lived
-      # App installation tokens instead of PAT_TOKEN for GitHub API calls. Each
-      # installation has its own (higher) 15 000 req/hour rate-limit bucket.
+      # enabled (AI_TEAMMATE_GITHUB_APP_ENABLED=true), the workflow generates
+      # short-lived App installation tokens. They are exposed through dedicated
+      # env vars (AI_TEAMMATE_REPO_TOKEN / SOURCE_GITHUB_TOKEN) so the heavy
+      # repository API calls do not share the PAT's rate-limit bucket, while
+      # identity checks such as `gh api user` continue to use the PAT.
       HAS_APP_CREDS: ${{ (vars.SM_GITHUB_APP_ID != '' || secrets.SM_GITHUB_APP_ID != '') && secrets.SM_GITHUB_APP_PRIVATE_KEY != '' }}
 
     steps:
@@ -246,9 +248,10 @@ jobs:
           FIGMA_TOKEN: ${{ secrets.FIGMA_TOKEN }}
           FIGMA_BASE_PATH: ${{ vars.FIGMA_BASE_PATH }}
 
-          PAT_TOKEN: ${{ steps.istin-app-token.outputs.token || secrets.PAT_TOKEN }}
-          GH_TOKEN: ${{ steps.ai-teammate-app-token.outputs.token || secrets.PAT_TOKEN }}
-          GITHUB_TOKEN: ${{ steps.ai-teammate-app-token.outputs.token || secrets.PAT_TOKEN }}
+          PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
+          AI_TEAMMATE_REPO_TOKEN: ${{ steps.ai-teammate-app-token.outputs.token || '' }}
           SOURCE_GITHUB_TOKEN: ${{ steps.istin-app-token.outputs.token || secrets.PAT_TOKEN }}
           SOURCE_GITHUB_WORKSPACE: IstiN
           SOURCE_GITHUB_REPOSITORY: trackstate
