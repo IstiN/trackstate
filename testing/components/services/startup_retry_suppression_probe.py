@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import time
 from typing import Protocol, Sequence
 
 from testing.components.pages.trackstate_live_app_page import TrackStateLiveAppPage
