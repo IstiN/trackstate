@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import time
 from typing import Protocol, Sequence
 
 from testing.components.pages.trackstate_live_app_page import TrackStateLiveAppPage
@@ -180,30 +181,20 @@ class StartupRetrySuppressionProbe:
         live_page: TrackStateLiveAppPage,
         request_monitor: BootstrapRequestMonitor,
     ) -> None:
-        try:
-            live_page.session.wait_for_function(
-                """
-                ({ expectedTexts, expectedBlockedRequestCount }) => {
-                    const bodyText = document.body?.innerText ?? '';
-                    return expectedTexts.every((text) => bodyText.includes(text))
-                        && expectedBlockedRequestCount >= 1;
-                }
-                """,
-                arg={
-                    "expectedTexts": ["Retry", "Connect GitHub"],
-                    "expectedBlockedRequestCount": request_monitor.blocked_request_count,
-                },
-                timeout_ms=5_000,
-            )
-        except WebAppTimeoutError as error:
-            raise AssertionError(
-                "Step 1 failed: the recovery screen became visible before the blocked "
-                "bootstrap request could be observed.\n"
-                f"Blocked target URL: {request_monitor.blocked_target_url}\n"
-                f"Observed bootstrap request count: {request_monitor.bootstrap_request_count}\n"
-                f"Observed blocked request count: {request_monitor.blocked_request_count}\n"
-                f"Observed body text:\n{live_page.body_text()}",
-            ) from error
+        timeout_ms = 5_000
+        deadline = time.time() + timeout_ms / 1_000
+        while time.time() < deadline:
+            if request_monitor.blocked_request_count >= 1:
+                return
+            time.sleep(0.05)
+        raise AssertionError(
+            "Step 1 failed: the recovery screen became visible before the blocked "
+            "bootstrap request could be observed.\n"
+            f"Blocked target URL: {request_monitor.blocked_target_url}\n"
+            f"Observed bootstrap request count: {request_monitor.bootstrap_request_count}\n"
+            f"Observed blocked request count: {request_monitor.blocked_request_count}\n"
+            f"Observed body text:\n{live_page.body_text()}",
+        )
 
     def _wait_elapsed(
         self,

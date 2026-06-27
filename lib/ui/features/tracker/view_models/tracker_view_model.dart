@@ -2556,6 +2556,16 @@ class TrackerViewModel extends ChangeNotifier {
       _workspaceSyncStatus = const WorkspaceSyncStatus();
       return;
     }
+    // While the hosted session is in startup recovery and not yet connected,
+    // background sync should remain idle. Otherwise an unauthenticated sync
+    // check (e.g. on app resume or focus regain) would issue additional
+    // bootstrap requests and defeat retry-suppression guarantees.
+    if (snapshot.startupRecovery != null &&
+        exposesHostedAccessGates &&
+        !isConnected) {
+      _workspaceSyncStatus = const WorkspaceSyncStatus();
+      return;
+    }
     final service = WorkspaceSyncService(
       repository: _repository as WorkspaceSyncRepository,
       loadSnapshot: _repository.loadSnapshot,
