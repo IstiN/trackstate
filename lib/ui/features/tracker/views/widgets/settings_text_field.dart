@@ -83,47 +83,19 @@ class SettingsTextField extends StatelessWidget {
     );
 
     if (kIsWeb && controller != null) {
-      final textController = controller!;
-      return ValueListenableBuilder<TextEditingValue>(
-        valueListenable: textController,
-        builder: (context, value, _) {
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            browser_text_field_value_sync.syncBrowserTextFieldValue(
-              label: label,
-              controller: textController,
-              value: value.text,
-              enabled: enabled,
-              readOnly: !enabled,
-              errorText: errorText,
-              errorColor: cssHexColor(colors.error),
-            );
-          });
-          return Semantics(
-            label: label,
-            textField: true,
-            enabled: enabled,
-            value: value.text,
-            hint: errorText,
-            liveRegion: errorText != null,
-            validationResult: errorText == null
-                ? SemanticsValidationResult.none
-                : SemanticsValidationResult.invalid,
-            child: ExcludeSemantics(
-              child: TextField(
-                key: fieldKey,
-                controller: textController,
-                focusNode: focusNode,
-                autofocus: autofocus,
-                enabled: enabled,
-                onChanged: onChanged,
-                minLines: minLines,
-                maxLines: maxLines,
-                style: style,
-                decoration: decoration,
-              ),
-            ),
-          );
-        },
+      return _SettingsTextFieldWebSemantics(
+        fieldKey: fieldKey,
+        label: label,
+        controller: controller!,
+        focusNode: focusNode,
+        autofocus: autofocus,
+        enabled: enabled,
+        onChanged: onChanged,
+        minLines: minLines,
+        maxLines: maxLines,
+        style: style,
+        decoration: decoration,
+        errorText: errorText,
       );
     }
 
@@ -139,6 +111,119 @@ class SettingsTextField extends StatelessWidget {
       maxLines: maxLines,
       style: style,
       decoration: decoration,
+    );
+  }
+}
+
+class _SettingsTextFieldWebSemantics extends StatefulWidget {
+  const _SettingsTextFieldWebSemantics({
+    required this.fieldKey,
+    required this.label,
+    required this.controller,
+    required this.focusNode,
+    required this.autofocus,
+    required this.enabled,
+    required this.onChanged,
+    required this.minLines,
+    required this.maxLines,
+    required this.style,
+    required this.decoration,
+    required this.errorText,
+  });
+
+  final Key? fieldKey;
+  final String label;
+  final TextEditingController controller;
+  final FocusNode? focusNode;
+  final bool autofocus;
+  final bool enabled;
+  final ValueChanged<String>? onChanged;
+  final int? minLines;
+  final int? maxLines;
+  final TextStyle style;
+  final InputDecoration decoration;
+  final String? errorText;
+
+  @override
+  State<_SettingsTextFieldWebSemantics> createState() =>
+      _SettingsTextFieldWebSemanticsState();
+}
+
+class _SettingsTextFieldWebSemanticsState
+    extends State<_SettingsTextFieldWebSemantics> {
+  late String _lastText;
+
+  @override
+  void initState() {
+    super.initState();
+    _lastText = widget.controller.text;
+    widget.controller.addListener(_handleControllerChanged);
+  }
+
+  @override
+  void didUpdateWidget(covariant _SettingsTextFieldWebSemantics oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.controller != oldWidget.controller) {
+      oldWidget.controller.removeListener(_handleControllerChanged);
+      widget.controller.addListener(_handleControllerChanged);
+      _handleControllerChanged();
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_handleControllerChanged);
+    super.dispose();
+  }
+
+  void _handleControllerChanged() {
+    final nextText = widget.controller.text;
+    if (nextText == _lastText) {
+      return;
+    }
+    setState(() {
+      _lastText = nextText;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.ts;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      browser_text_field_value_sync.syncBrowserTextFieldValue(
+        label: widget.label,
+        controller: widget.controller,
+        value: _lastText,
+        enabled: widget.enabled,
+        readOnly: !widget.enabled,
+        errorText: widget.errorText,
+        errorColor: cssHexColor(colors.error),
+      );
+    });
+    return Semantics(
+      label: widget.label,
+      textField: true,
+      enabled: widget.enabled,
+      value: _lastText,
+      hint: widget.errorText,
+      liveRegion: widget.errorText != null,
+      validationResult: widget.errorText == null
+          ? SemanticsValidationResult.none
+          : SemanticsValidationResult.invalid,
+      child: ExcludeSemantics(
+        child: TextField(
+          key: widget.fieldKey,
+          controller: widget.controller,
+          focusNode: widget.focusNode,
+          autofocus: widget.autofocus,
+          enabled: widget.enabled,
+          onChanged: widget.onChanged,
+          minLines: widget.minLines,
+          maxLines: widget.maxLines,
+          style: widget.style,
+          decoration: widget.decoration,
+        ),
+      ),
     );
   }
 }
