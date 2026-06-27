@@ -212,8 +212,12 @@ class TrackerViewModel extends ChangeNotifier {
       return startupOverride;
     }
     final session = providerSession;
-    if (session == null ||
-        session.connectionState != ProviderConnectionState.connected) {
+    if (session == null) {
+      return _isConnected
+          ? HostedRepositoryAccessMode.writable
+          : HostedRepositoryAccessMode.disconnected;
+    }
+    if (session.connectionState != ProviderConnectionState.connected) {
       return HostedRepositoryAccessMode.disconnected;
     }
     if (!session.canWrite) {
