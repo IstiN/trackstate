@@ -153,14 +153,14 @@ module.exports = {
         "configFile": "agents/bug_test_automation.json",
         "skipIfLabel": "sm_bug_test_automation_triggered",
         "addLabel": "sm_bug_test_automation_triggered",
-        "enabled": false
+        "enabled": true
     },
     {
         "description": "In Testing Bugs (pr_approved or already-merged test PR) → merge test automation PR",
         "jql": "project = {jiraProject} AND issuetype in ('Bug') AND status in ('In Testing') AND labels in ('pr_approved','test_pr_merged') AND labels NOT IN ('test_pr_finalized') ORDER BY created ASC",
         "configFile": "agents/bug_test_automation_merge.json",
         "localExecution": true,
-        "enabled": false
+        "enabled": true
     },
     {
         "description": "In Testing Bugs (test_pr_rework_needed) → rework test automation",
@@ -168,7 +168,7 @@ module.exports = {
         "configFile": "agents/bug_test_automation_rework.json",
         "skipIfLabel": "sm_bug_test_rework_triggered",
         "addLabel": "sm_bug_test_rework_triggered",
-        "enabled": false
+        "enabled": true
     },
     {
         "description": "In Testing Bugs with open test-automation PR → review",
@@ -176,14 +176,14 @@ module.exports = {
         "configFile": "agents/pr_bug_test_automation_review.json",
         "skipIfLabel": "sm_bug_test_review_triggered",
         "addLabel": "sm_bug_test_review_triggered",
-        "enabled": false
+        "enabled": true
     },
     {
         "description": "In Testing Stories (pr_approved or already-merged test PR) → merge test automation PR",
         "jql": "project = {jiraProject} AND issuetype in ('Story') AND status in ('In Testing') AND labels in ('pr_approved','test_pr_merged') AND labels NOT IN ('test_pr_finalized') ORDER BY created ASC",
         "configFile": "agents/story_test_automation_merge.json",
         "localExecution": true,
-        "enabled": false
+        "enabled": true
     },
     {
         "description": "Ready For Testing Stories → automate linked test cases in bulk",
@@ -194,7 +194,7 @@ module.exports = {
             "sm_test_cases_triggered"
         ],
         "addLabel": "sm_story_test_automation_triggered",
-        "enabled": false
+        "enabled": true
     },
     {
         "description": "In Testing Stories (test_pr_rework_needed) → rework test automation",
@@ -202,7 +202,7 @@ module.exports = {
         "configFile": "agents/story_test_automation_rework.json",
         "skipIfLabel": "sm_story_test_rework_triggered",
         "addLabel": "sm_story_test_rework_triggered",
-        "enabled": false
+        "enabled": true
     },
     {
         "description": "In Testing Stories with open test-automation PR → review",
@@ -210,14 +210,14 @@ module.exports = {
         "configFile": "agents/pr_story_test_automation_review.json",
         "skipIfLabel": "sm_story_test_review_triggered",
         "addLabel": "sm_story_test_review_triggered",
-        "enabled": false
+        "enabled": true
     },
     {
         "description": "In Testing Stories → check all TCs passed → Done",
         "jql": "project = {jiraProject} AND issuetype in ('Story') AND status in ('In Testing')",
         "configFile": "agents/story_done_check.json",
         "skipIfLabel": "sm_story_done_check_triggered",
-        "enabled": false,
+        "enabled": true,
         "localExecution": true
     },
     {
@@ -225,7 +225,7 @@ module.exports = {
         "jql": "project = {jiraProject} AND issuetype in ('Bug') AND status in ('In Testing')",
         "configFile": "agents/bug_done_check.json",
         "skipIfLabel": "sm_bug_done_check_triggered",
-        "enabled": false,
+        "enabled": true,
         "localExecution": true
     },
     {
@@ -233,7 +233,7 @@ module.exports = {
         "jql": "project = {jiraProject} AND issuetype in ('Test Case') AND status in ('Failed') ORDER BY updated ASC",
         "configFile": "agents/recover_failed_tc_bug_status.json",
         "localExecution": true,
-        "enabled": false
+        "enabled": true
     },
     {
         "description": "Failed Test Cases → create or link bugs in batch",
@@ -244,7 +244,7 @@ module.exports = {
         "addLabel": "sm_bulk_bugs_creation_triggered",
         "recoverStaleTriggerLabel": true,
         "limit": 1,
-        "enabled": false
+        "enabled": true
     },
     {
         "description": "Bug To Fix Tickets → all linked Bugs Done → move to Backlog / Ready For Testing",
@@ -267,7 +267,7 @@ module.exports = {
         "jql": "project = {jiraProject} AND issuetype in ('Test Case') AND status in ('In Development') AND updated <= -15m",
         "configFile": "agents/recover_stuck_test_case.json",
         "localExecution": true,
-        "enabled": false
+        "enabled": true
     },
     {
         "description": "Failed Test Cases → create or link bug (single, disabled by default — use bulk_bugs_creation instead)",
@@ -285,7 +285,7 @@ module.exports = {
         "configFile": "agents/test_case_automation.json",
         "skipIfLabel": "sm_test_automation_triggered",
         "addLabel": "sm_test_automation_triggered",
-        "enabled": false
+        "enabled": true
     },
     {
         "description": "Merged Stories → Ready For Testing + generate test cases",
@@ -365,7 +365,7 @@ module.exports = {
         "jql": "project = {jiraProject} AND issuetype in ('Test Case') AND status in ('In Review - Passed', 'In Review - Failed', 'Passed', 'Failed', 'Pull Request Review', 'Merged') AND labels NOT IN ('sm_test_rework_triggered') AND updated >= -2d ORDER BY created ASC",
         "configFile": "agents/recover_dirty_review_test_case.json",
         "localExecution": true,
-        "enabled": false
+        "enabled": true
     },
     {
         "description": "In Review Test Cases → trigger pr_test_automation_review",
@@ -373,7 +373,7 @@ module.exports = {
         "configFile": "agents/pr_test_automation_review.json",
         "skipIfLabel": "sm_test_review_triggered",
         "addLabel": "sm_test_review_triggered",
-        "enabled": false
+        "enabled": true
     },
     {
         "description": "In Rework Test Cases → trigger pr_test_automation_rework",
@@ -381,14 +381,14 @@ module.exports = {
         "configFile": "agents/pr_test_automation_rework.json",
         "skipIfLabel": "sm_test_rework_triggered",
         "addLabel": "sm_test_rework_triggered",
-        "enabled": false
+        "enabled": true
     },
     {
         "description": "In Review Test Cases (pr_approved) → retry merge",
         "jql": "project = {jiraProject} AND issuetype in ('Test Case') AND status in ('In Review - Passed', 'In Review - Failed') AND labels = 'pr_approved' ORDER BY created ASC",
         "configFile": "agents/retry_merge_test.json",
         "localExecution": true,
-        "enabled": false
+        "enabled": true
     },
     {
         "description": "In Rework Test Cases → trigger pr_test_automation_rework",
@@ -396,14 +396,14 @@ module.exports = {
         "configFile": "agents/pr_test_automation_rework.json",
         "skipIfLabel": "sm_test_rework_triggered",
         "addLabel": "sm_test_rework_triggered",
-        "enabled": false
+        "enabled": true
     },
     {
         "description": "In Review Test Cases with dirty PR → move to In Rework",
         "jql": "project = {jiraProject} AND issuetype in ('Test Case') AND status in ('In Review - Passed', 'In Review - Failed')",
         "configFile": "agents/recover_dirty_review_test_case.json",
         "localExecution": true,
-        "enabled": false
+        "enabled": true
     },
     {
         "description": "Merged bug-fix batch Epics → finalize linked bugs as Done",
