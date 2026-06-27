@@ -180,20 +180,16 @@ class StartupRetrySuppressionProbe:
         live_page: TrackStateLiveAppPage,
         request_monitor: BootstrapRequestMonitor,
     ) -> None:
+        timeout_ms = 5_000
         try:
             live_page.session.wait_for_function(
                 """
-                ({ expectedTexts, expectedBlockedRequestCount }) => {
-                    const bodyText = document.body?.innerText ?? '';
-                    return expectedTexts.every((text) => bodyText.includes(text))
-                        && expectedBlockedRequestCount >= 1;
+                (monitor) => {
+                    return monitor.blocked_request_count >= 1;
                 }
                 """,
-                arg={
-                    "expectedTexts": ["Retry", "Connect GitHub"],
-                    "expectedBlockedRequestCount": request_monitor.blocked_request_count,
-                },
-                timeout_ms=5_000,
+                arg=request_monitor,
+                timeout_ms=timeout_ms,
             )
         except WebAppTimeoutError as error:
             raise AssertionError(

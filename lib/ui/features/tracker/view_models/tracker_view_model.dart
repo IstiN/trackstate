@@ -310,9 +310,6 @@ class TrackerViewModel extends ChangeNotifier {
 
   Future<void> load({bool deferAccessRestore = false}) async {
     final previousStartupRecovery = startupRecovery;
-    final retainedStartupRecovery = _snapshot == null
-        ? previousStartupRecovery
-        : null;
     startupAuthProbeDiagnostics.reset();
     _isLoading = true;
     _searchPage = const TrackStateIssueSearchPage.empty(
@@ -321,7 +318,6 @@ class TrackerViewModel extends ChangeNotifier {
     _searchResults = const [];
     _hasLoadedInitialSearchResults = false;
     _message = null;
-    _startupRecovery = retainedStartupRecovery;
     _didAutoResumeStartupRecoveryAfterAuthentication = false;
     _isRestoringLocalHostedAccess = false;
     _isAutomaticAccessRestoreInProgress = false;
@@ -362,7 +358,6 @@ class TrackerViewModel extends ChangeNotifier {
         await _primeStartupGitHubAuthProbe();
       }
       await _loadSnapshotAndSearch(allowHostedStartupFallback: true);
-      _startupRecovery = _snapshot?.startupRecovery;
       if (usesLocalPersistence) {
         await _loadLocalRepositoryUser();
         deferredAccessRestore = _restoreLocalHostedAccess;
@@ -2157,13 +2152,15 @@ class TrackerViewModel extends ChangeNotifier {
       }
       return repository.loadSnapshot();
     })();
+    final isFallback = repository is ProviderBackedTrackStateRepository &&
+        repository.usesHostedStartupShellFallback(snapshot);
     await _applyReloadedSnapshot(
       snapshot,
       previousSelectedIssue: _selectedIssue,
       preferredSelectedIssueKey: _selectedIssue?.key,
+      preserveStartupRecovery: isFallback,
     );
-    if (repository is ProviderBackedTrackStateRepository &&
-        repository.usesHostedStartupShellFallback(snapshot)) {
+    if (isFallback) {
       _startupHostedAccessModeOverride =
           HostedRepositoryAccessMode.disconnected;
       startupAuthProbeDiagnostics.recordFallbackShellReady(
@@ -2560,6 +2557,24 @@ class TrackerViewModel extends ChangeNotifier {
       _workspaceSyncStatus = const WorkspaceSyncStatus();
       return;
     }
+    // While the hosted session is in startup recovery and not yet connected,
+    // background sync should remain idle. Otherwise an unauthenticated sync
+    // check (e.g. on app resume or focus regain) would issue additional
+    // bootstrap requests and defeat retry-suppression guarantees.
+    //
+    // The `isFallbackSnapshot` guard is kept defensively: even though the
+    // repository now sets `startupRecovery` for every probe timeout, there
+    // may still be fallback-snapshot paths (e.g. older provider adapters or
+    // shell-ready shortcuts) that do not populate `startupRecovery`. The
+    // disjunct ensures sync stays suppressed in those cases too.
+    final isFallbackSnapshot = _repository is ProviderBackedTrackStateRepository &&
+        _repository.usesHostedStartupShellFallback(snapshot);
+    if ((snapshot.startupRecovery != null || isFallbackSnapshot) &&
+        exposesHostedAccessGates &&
+        !isConnected) {
+      _workspaceSyncStatus = const WorkspaceSyncStatus();
+      return;
+    }
     final service = WorkspaceSyncService(
       repository: _repository as WorkspaceSyncRepository,
       loadSnapshot: _repository.loadSnapshot,
@@ -2850,10 +2865,13 @@ class TrackerViewModel extends ChangeNotifier {
     required TrackStateIssue? previousSelectedIssue,
     required String? preferredSelectedIssueKey,
     bool fallbackWhenMissing = true,
+    bool preserveStartupRecovery = false,
   }) async {
     final previousSelectedIssueKey = _selectedIssue?.key;
     _snapshot = snapshot;
-    _startupRecovery = snapshot.startupRecovery;
+    if (!preserveStartupRecovery || snapshot.startupRecovery != null) {
+      _startupRecovery = snapshot.startupRecovery;
+    }
     if (_jql.contains('project = TRACK') && snapshot.project.key != 'TRACK') {
       _jql = _jql.replaceFirst(
         'project = TRACK',
