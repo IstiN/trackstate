@@ -1837,6 +1837,15 @@ class TrackerViewModel extends ChangeNotifier {
                 _isConnected = true;
                 if (callbackToken != null) {
                   _startupHostedAccessModeOverride = null;
+                } else if (_snapshot != null &&
+                    _repository is ProviderBackedTrackStateRepository &&
+                    _repository.usesHostedStartupShellFallback(_snapshot)) {
+                  // The shell was blocked while the deferred auth probe ran over
+                  // the fallback snapshot. Now that auth succeeded we can switch
+                  // from the guarded loading state to the disconnected/read-only
+                  // shell so the user sees the real UI instead of the spinner.
+                  _startupHostedAccessModeOverride =
+                      HostedRepositoryAccessMode.disconnected;
                 }
                 if (callbackToken != null) {
                   await _authStore.saveToken(
@@ -2162,8 +2171,10 @@ class TrackerViewModel extends ChangeNotifier {
       preserveStartupRecovery: isFallback,
     );
     if (isFallback) {
-      _startupHostedAccessModeOverride =
-          HostedRepositoryAccessMode.disconnected;
+      // Do NOT set _startupHostedAccessModeOverride here. The interactive shell
+      // must stay blocked while the deferred startup auth probe is still
+      // running. The override is released once auth completes (see
+      // _restoreGitHubConnection.onSuccess) or when no deferred auth is pending.
       startupAuthProbeDiagnostics.recordFallbackShellReady(
         timeout: repository.hostedStartupProbeTimeout,
       );
