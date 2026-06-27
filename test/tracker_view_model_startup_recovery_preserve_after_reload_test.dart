@@ -158,45 +158,9 @@ class _RecoveringThenCleanRepository extends ProviderBackedTrackStateRepository 
   final _DelayedAuthProvider provider;
   final TrackerSnapshot snapshot;
   TrackerStartupRecovery? nextSnapshotStartupRecovery;
-  int _loadSnapshotCalls = 0;
 
   @override
   Future<TrackerSnapshot> loadSnapshot() async {
-    _loadSnapshotCalls += 1;
-    final result = TrackerSnapshot(
-      project: snapshot.project,
-      issues: snapshot.issues,
-      repositoryIndex: snapshot.repositoryIndex,
-      loadWarnings: snapshot.loadWarnings,
-      readiness: snapshot.readiness,
-      startupRecovery: nextSnapshotStartupRecovery,
-    );
-    replaceCachedState(snapshot: result);
-    return result;
-  }
-}
-
-class _SlowRecoveringHostedStartupRepository
-    extends ProviderBackedTrackStateRepository {
-  _SlowRecoveringHostedStartupRepository({
-    required this.provider,
-    required this.snapshot,
-  }) : super(
-         provider: provider,
-         hostedStartupProbeTimeout: const Duration(milliseconds: 10),
-       );
-
-  final _DelayedAuthProvider provider;
-  final TrackerSnapshot snapshot;
-  TrackerStartupRecovery? nextSnapshotStartupRecovery;
-  int _loadSnapshotCalls = 0;
-
-  @override
-  Future<TrackerSnapshot> loadSnapshot() async {
-    _loadSnapshotCalls += 1;
-    if (_loadSnapshotCalls == 1) {
-      await Future<void>.delayed(const Duration(milliseconds: 200));
-    }
     final result = TrackerSnapshot(
       project: snapshot.project,
       issues: snapshot.issues,
