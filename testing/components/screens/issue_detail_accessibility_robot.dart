@@ -1,4 +1,3 @@
-import 'dart:ui' show Tristate;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/rendering.dart';
@@ -1242,7 +1241,7 @@ class IssueDetailAccessibilityRobot
 
   String? _focusedLabel(Map<String, Finder> candidates) {
     final focusedSemantics = find.semantics.byPredicate(
-      (node) => node.getSemanticsData().flagsCollection.isFocused == Tristate.isTrue,
+      (node) => node.getSemanticsData().flagsCollection.isFocused,
       describeMatch: (_) => 'focused semantics node',
     );
     if (focusedSemantics.evaluate().isEmpty) {
@@ -1252,7 +1251,7 @@ class IssueDetailAccessibilityRobot
     for (final entry in candidates.entries) {
       final exactFocusedMatch = find.semantics.byPredicate(
         (node) =>
-            node.getSemanticsData().flagsCollection.isFocused == Tristate.isTrue &&
+            node.getSemanticsData().flagsCollection.isFocused &&
             _normalizedLabel(node.label) == entry.key,
         describeMatch: (_) => 'focused semantics labeled ${entry.key}',
       );
@@ -1282,7 +1281,7 @@ class IssueDetailAccessibilityRobot
   List<String> _focusedSemanticsLabels() {
     return find.semantics
         .byPredicate(
-          (node) => node.getSemanticsData().flagsCollection.isFocused == Tristate.isTrue,
+          (node) => node.getSemanticsData().flagsCollection.isFocused,
           describeMatch: (_) => 'focused semantics node',
         )
         .evaluate()

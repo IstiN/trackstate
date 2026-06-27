@@ -1,4 +1,3 @@
-import 'dart:ui' show Tristate;
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -256,7 +255,7 @@ List<String> _focusedSemanticsLabels(WidgetTester tester) {
   final labels = <String>[];
   void visit(SemanticsNode node) {
     final data = node.getSemanticsData();
-    if (data.flagsCollection.isFocused == Tristate.isTrue) {
+    if (data.flagsCollection.isFocused) {
       final label = data.label.trim();
       labels.add(label.isEmpty ? '<empty label>' : label);
     }

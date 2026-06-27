@@ -1,4 +1,3 @@
-import 'dart:ui' show Tristate;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -690,7 +689,7 @@ Color _resolvedActionSurface(
 bool _isInteractiveTarget(SemanticsNode node) {
   return node.flagsCollection.isButton ||
       node.flagsCollection.isTextField ||
-      node.flagsCollection.isFocused != Tristate.none ||
+      node.flagsCollection.isFocusable ||
       node.flagsCollection.isReadOnly;
 }
 
@@ -767,7 +766,7 @@ List<String> _focusedSemanticsLabels(WidgetTester tester) {
   final labels = <String>[];
   void visit(SemanticsNode node) {
     final data = node.getSemanticsData();
-    if (data.flagsCollection.isFocused == Tristate.isTrue) {
+    if (data.flagsCollection.isFocused) {
       final label = data.label.trim();
       labels.add(label.isEmpty ? '<empty label>' : label);
     }

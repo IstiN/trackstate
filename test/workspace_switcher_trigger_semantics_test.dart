@@ -1,4 +1,3 @@
-import 'dart:ui' show Tristate;
 import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -32,7 +31,7 @@ void main() {
 
       expect(triggerSemantics.flagsCollection.isButton, isTrue);
       expect(
-        triggerSemantics.flagsCollection.isFocused != Tristate.none,
+        triggerSemantics.flagsCollection.isFocusable,
         isTrue,
         reason:
             'The exported workspace switcher semantics node must be keyboard focusable '
@@ -358,17 +357,17 @@ void _expectExpandedState(
   final semantics = tester.getSemantics(trigger).getSemanticsData();
 
   expect(
-    semantics.flagsCollection.isExpanded != Tristate.none,
+    semantics.flagsCollection.hasExpandedState,
     hasExpandedState,
     reason:
         '$context should expose hasExpandedState=$hasExpandedState, '
-        'but was ${semantics.flagsCollection.isExpanded != Tristate.none}.',
+        'but was ${semantics.flagsCollection.hasExpandedState}.',
   );
   expect(
-    semantics.flagsCollection.isExpanded == Tristate.isTrue,
+    semantics.flagsCollection.isExpanded,
     isExpanded,
     reason:
         '$context should expose isExpanded=$isExpanded, '
-        'but was ${semantics.flagsCollection.isExpanded == Tristate.isTrue}.',
+        'but was ${semantics.flagsCollection.isExpanded}.',
   );
 }

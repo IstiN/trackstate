@@ -1,4 +1,3 @@
-import 'dart:ui' show Tristate;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -36,7 +35,7 @@ void main() {
             (node) {
               final data = node.getSemanticsData();
               return data.flagsCollection.isButton &&
-                  data.flagsCollection.isFocused != Tristate.none;
+                  data.flagsCollection.isFocusable;
             },
             describeMatch: (_) => 'focusable button semantics node',
           ),

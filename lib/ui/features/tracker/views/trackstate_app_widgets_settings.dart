@@ -1264,7 +1264,8 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
             container: true,
             button: true,
             enabled: true,
-            focused: isActive ? true : null,
+            focusable: isActive,
+            focused: isActive,
             selected: isActive,
             identifier: rowSemanticsIdentifier,
             label:
