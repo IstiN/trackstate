@@ -169,6 +169,14 @@ class RateLimitRecoveryRuntime(AbstractContextManager[PlaywrightWebAppSession]):
             )
         if path == f"contents/{_join(root, 'config', 'priorities.json')}":
             return _content([])
+        if path == f"contents/{_join(root, 'config', 'components.json')}":
+            return _content([])
+        if path == f"contents/{_join(root, 'config', 'versions.json')}":
+            return _content([])
+        if path == f"contents/{_join(root, 'config', 'resolutions.json')}":
+            return _content([])
+        if path == f"contents/{_join(root, 'DEMO-1', 'main.md')}":
+            return _content("---\nkey: DEMO-1\nproject: DEMO\nissueType: Story\nstatus: todo\n---\n# Summary\nDemo issue.")
         return None
 
     def __exit__(self, exc_type, exc, exc_tb) -> None:

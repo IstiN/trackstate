@@ -2113,7 +2113,7 @@ class ProviderBackedTrackStateRepository
 
   void _captureHostedStartupRecoveryFromTimeout(String failedPath) {
     _startupRecovery ??= TrackerStartupRecovery(
-      kind: TrackerStartupRecoveryKind.githubRateLimit,
+      kind: TrackerStartupRecoveryKind.hostedBootstrapTimeout,
       failedPath: failedPath,
     );
   }

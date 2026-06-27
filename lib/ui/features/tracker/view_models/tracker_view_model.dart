@@ -2561,6 +2561,12 @@ class TrackerViewModel extends ChangeNotifier {
     // background sync should remain idle. Otherwise an unauthenticated sync
     // check (e.g. on app resume or focus regain) would issue additional
     // bootstrap requests and defeat retry-suppression guarantees.
+    //
+    // The `isFallbackSnapshot` guard is kept defensively: even though the
+    // repository now sets `startupRecovery` for every probe timeout, there
+    // may still be fallback-snapshot paths (e.g. older provider adapters or
+    // shell-ready shortcuts) that do not populate `startupRecovery`. The
+    // disjunct ensures sync stays suppressed in those cases too.
     final isFallbackSnapshot = _repository is ProviderBackedTrackStateRepository &&
         _repository.usesHostedStartupShellFallback(snapshot);
     if ((snapshot.startupRecovery != null || isFallbackSnapshot) &&

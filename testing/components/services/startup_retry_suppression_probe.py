@@ -182,19 +182,25 @@ class StartupRetrySuppressionProbe:
         request_monitor: BootstrapRequestMonitor,
     ) -> None:
         timeout_ms = 5_000
-        deadline = time.time() + timeout_ms / 1_000
-        while time.time() < deadline:
-            if request_monitor.blocked_request_count >= 1:
-                return
-            time.sleep(0.05)
-        raise AssertionError(
-            "Step 1 failed: the recovery screen became visible before the blocked "
-            "bootstrap request could be observed.\n"
-            f"Blocked target URL: {request_monitor.blocked_target_url}\n"
-            f"Observed bootstrap request count: {request_monitor.bootstrap_request_count}\n"
-            f"Observed blocked request count: {request_monitor.blocked_request_count}\n"
-            f"Observed body text:\n{live_page.body_text()}",
-        )
+        try:
+            live_page.session.wait_for_function(
+                """
+                (monitor) => {
+                    return monitor.blocked_request_count >= 1;
+                }
+                """,
+                arg=request_monitor,
+                timeout_ms=timeout_ms,
+            )
+        except WebAppTimeoutError as error:
+            raise AssertionError(
+                "Step 1 failed: the recovery screen became visible before the blocked "
+                "bootstrap request could be observed.\n"
+                f"Blocked target URL: {request_monitor.blocked_target_url}\n"
+                f"Observed bootstrap request count: {request_monitor.bootstrap_request_count}\n"
+                f"Observed blocked request count: {request_monitor.blocked_request_count}\n"
+                f"Observed body text:\n{live_page.body_text()}",
+            ) from error
 
     def _wait_elapsed(
         self,

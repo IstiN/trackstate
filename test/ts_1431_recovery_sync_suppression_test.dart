@@ -16,7 +16,10 @@ void main() {
     'unauthenticated hosted startup recovery does not start background workspace sync',
     () async {
       final counts = <String, int>{};
-      final repository = _buildRateLimitedRepository(counts);
+      final repository = _buildMockRepository(
+        counts,
+        issuesJsonDelay: Duration.zero,
+      );
       final viewModel = TrackerViewModel(repository: repository);
       addTearDown(viewModel.dispose);
 
@@ -43,7 +46,7 @@ void main() {
     'hosted startup fallback snapshot suppresses background workspace sync even when timeout fires before rate-limit response',
     () async {
       final counts = <String, int>{};
-      final repository = _buildDelayedRateLimitedRepository(
+      final repository = _buildMockRepository(
         counts,
         probeTimeout: const Duration(milliseconds: 50),
         issuesJsonDelay: const Duration(milliseconds: 200),
@@ -73,73 +76,10 @@ void main() {
   );
 }
 
-TrackStateRepository _buildRateLimitedRepository(Map<String, int> counts) {
-  const repo = 'istin/trackstate-setup';
-  const branch = 'main';
-  const dataRoot = 'DEMO';
-  const tree = {
-    'tree': [
-      {'path': 'DEMO/project.json', 'type': 'blob'},
-      {'path': 'DEMO/config/statuses.json', 'type': 'blob'},
-      {'path': 'DEMO/config/issue-types.json', 'type': 'blob'},
-      {'path': 'DEMO/config/fields.json', 'type': 'blob'},
-      {'path': 'DEMO/config/workflows.json', 'type': 'blob'},
-      {'path': 'DEMO/config/priorities.json', 'type': 'blob'},
-      {'path': 'DEMO/.trackstate/index/issues.json', 'type': 'blob'},
-      {'path': 'DEMO/DEMO-1/main.md', 'type': 'blob'},
-    ],
-  };
-  const projectJson = '{"key":"DEMO","name":"Demo","defaultLocale":"en"}';
-  const statusesJson = '[{"id":"todo","name":"To Do","category":"new"}]';
-  const issueTypesJson = '[{"id":"story","name":"Story","workflowId":"default","hierarchyLevel":0}]';
-  const fieldsJson = '[{"id":"summary","name":"Summary","type":"string","required":true,"reserved":true}]';
-  const workflowsJson = '{"default":{"name":"Default","statuses":["todo"],"transitions":[]}}';
-  const prioritiesJson = '[]';
-
-  return SetupTrackStateRepository(
-    client: MockClient((request) {
-      final path = request.url.path;
-      counts[path] = (counts[path] ?? 0) + 1;
-
-      if (path == '/repos/$repo/git/trees/$branch') {
-        return Future.value(http.Response(jsonEncode(tree), 200));
-      }
-      if (path == '/repos/$repo/contents/$dataRoot/project.json') {
-        return Future.value(http.Response(jsonEncode({'content': base64Encode(utf8.encode(projectJson)), 'sha': 'p'}), 200));
-      }
-      if (path == '/repos/$repo/contents/$dataRoot/config/statuses.json') {
-        return Future.value(http.Response(jsonEncode({'content': base64Encode(utf8.encode(statusesJson)), 'sha': 's'}), 200));
-      }
-      if (path == '/repos/$repo/contents/$dataRoot/config/issue-types.json') {
-        return Future.value(http.Response(jsonEncode({'content': base64Encode(utf8.encode(issueTypesJson)), 'sha': 'i'}), 200));
-      }
-      if (path == '/repos/$repo/contents/$dataRoot/config/fields.json') {
-        return Future.value(http.Response(jsonEncode({'content': base64Encode(utf8.encode(fieldsJson)), 'sha': 'f'}), 200));
-      }
-      if (path == '/repos/$repo/contents/$dataRoot/config/workflows.json') {
-        return Future.value(http.Response(jsonEncode({'content': base64Encode(utf8.encode(workflowsJson)), 'sha': 'w'}), 200));
-      }
-      if (path == '/repos/$repo/contents/$dataRoot/config/priorities.json') {
-        return Future.value(http.Response(jsonEncode({'content': base64Encode(utf8.encode(prioritiesJson)), 'sha': 'pr'}), 200));
-      }
-      if (path == '/repos/$repo/contents/$dataRoot/.trackstate/index/issues.json') {
-        return Future.value(http.Response(
-          jsonEncode({'message': 'API rate limit exceeded'}),
-          403,
-        ));
-      }
-      return Future.value(http.Response('not found', 404));
-    }),
-    repositoryName: repo,
-    sourceRef: branch,
-    dataRef: branch,
-  );
-}
-
-TrackStateRepository _buildDelayedRateLimitedRepository(
+TrackStateRepository _buildMockRepository(
   Map<String, int> counts, {
-  required Duration probeTimeout,
-  required Duration issuesJsonDelay,
+  Duration? probeTimeout,
+  Duration? issuesJsonDelay,
 }) {
   const repo = 'istin/trackstate-setup';
   const branch = 'main';
@@ -162,6 +102,8 @@ TrackStateRepository _buildDelayedRateLimitedRepository(
   const fieldsJson = '[{"id":"summary","name":"Summary","type":"string","required":true,"reserved":true}]';
   const workflowsJson = '{"default":{"name":"Default","statuses":["todo"],"transitions":[]}}';
   const prioritiesJson = '[]';
+
+  final effectiveIssuesJsonDelay = issuesJsonDelay ?? Duration.zero;
 
   return SetupTrackStateRepository(
     client: MockClient((request) async {
@@ -190,7 +132,9 @@ TrackStateRepository _buildDelayedRateLimitedRepository(
         return http.Response(jsonEncode({'content': base64Encode(utf8.encode(prioritiesJson)), 'sha': 'pr'}), 200);
       }
       if (path == '/repos/$repo/contents/$dataRoot/.trackstate/index/issues.json') {
-        await Future<void>.delayed(issuesJsonDelay);
+        if (effectiveIssuesJsonDelay > Duration.zero) {
+          await Future<void>.delayed(effectiveIssuesJsonDelay);
+        }
         return http.Response(
           jsonEncode({'message': 'API rate limit exceeded'}),
           403,
@@ -201,6 +145,6 @@ TrackStateRepository _buildDelayedRateLimitedRepository(
     repositoryName: repo,
     sourceRef: branch,
     dataRef: branch,
-    hostedStartupProbeTimeout: probeTimeout,
+    hostedStartupProbeTimeout: probeTimeout ?? const Duration(seconds: 11),
   );
 }
