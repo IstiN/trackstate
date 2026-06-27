@@ -5,6 +5,7 @@ from typing import Protocol, Sequence
 
 from testing.components.pages.trackstate_live_app_page import TrackStateLiveAppPage
 from testing.core.interfaces.web_app_session import WebAppTimeoutError
+from testing.core.utils.polling import poll_until
 
 
 class BootstrapRequestMonitor(Protocol):
@@ -180,18 +181,13 @@ class StartupRetrySuppressionProbe:
         live_page: TrackStateLiveAppPage,
         request_monitor: BootstrapRequestMonitor,
     ) -> None:
-        timeout_ms = 5_000
-        try:
-            live_page.session.wait_for_function(
-                """
-                (monitor) => {
-                    return monitor.blocked_request_count >= 1;
-                }
-                """,
-                arg=request_monitor,
-                timeout_ms=timeout_ms,
-            )
-        except WebAppTimeoutError as error:
+        found, _ = poll_until(
+            probe=lambda: request_monitor.blocked_request_count,
+            is_satisfied=lambda count: count >= 1,
+            timeout_seconds=5.0,
+            interval_seconds=0.1,
+        )
+        if not found:
             raise AssertionError(
                 "Step 1 failed: the recovery screen became visible before the blocked "
                 "bootstrap request could be observed.\n"
@@ -199,7 +195,7 @@ class StartupRetrySuppressionProbe:
                 f"Observed bootstrap request count: {request_monitor.bootstrap_request_count}\n"
                 f"Observed blocked request count: {request_monitor.blocked_request_count}\n"
                 f"Observed body text:\n{live_page.body_text()}",
-            ) from error
+            )
 
     def _wait_elapsed(
         self,
