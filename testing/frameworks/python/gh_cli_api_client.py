@@ -46,6 +46,13 @@ class GhCliApiClient(GitHubApiClient):
         environment = os.environ.copy()
         environment.setdefault("GH_PAGER", "cat")
 
+        # Use the GitHub App installation token for repository-scoped calls so they
+        # do not consume the PAT's rate-limit budget. App tokens cannot access
+        # `/user`, so identity checks continue to use the PAT exposed via GH_TOKEN.
+        repo_token = os.environ.get("AI_TEAMMATE_REPO_TOKEN")
+        if repo_token and endpoint != "user" and not endpoint.startswith("user/"):
+            environment["GH_TOKEN"] = repo_token
+
         def _run_once() -> subprocess.CompletedProcess[str]:
             try:
                 return subprocess.run(

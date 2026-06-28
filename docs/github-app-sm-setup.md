@@ -59,6 +59,27 @@ Run SM Agent
 
 and the subsequent GitHub API calls should no longer show rate-limit errors for user ID `236856673`.
 
+## Using the same app for AI Teammate
+
+The AI Teammate workflow makes a large number of GitHub API calls on behalf of
+the test probes (e.g. `gh api` against `ai-teammate/trackstate-setup`). With a
+PAT this shares the same 5 000 req/hour user bucket and quickly exhausts it.
+
+The same GitHub App can be used there:
+
+1. Install the app on the `ai-teammate` account and grant it access to the
+   `trackstate-setup` repository. It needs **Actions** `Read and write` and
+   **Contents** `Read and write` so the probes can enable Actions, dispatch
+   workflows, and read repository state.
+2. In `https://github.com/IstiN/trackstate/settings/variables/actions`, create
+   `AI_TEAMMATE_GITHUB_APP_ENABLED` and set it to `true`.
+3. The workflow will now generate two short-lived App tokens:
+   * one for `IstiN/trackstate` (for DMTools/source-repo operations), and
+   * one for `ai-teammate/trackstate-setup` (for the test probes).
+
+If the variable is missing or the app is not installed, the workflow falls back
+to `secrets.PAT_TOKEN` automatically.
+
 ## Rolling back
 
-If anything goes wrong, simply delete the two secrets (or set them to empty values). The workflow will then fall back to `secrets.PAT_TOKEN` automatically.
+If anything goes wrong, simply delete the two secrets (or set them to empty values) and/or remove the `AI_TEAMMATE_GITHUB_APP_ENABLED` variable. The workflows will then fall back to `secrets.PAT_TOKEN` automatically.
