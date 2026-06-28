@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 
 import '../../../../../domain/models/trackstate_models.dart';
 import '../../../../../l10n/generated/app_localizations.dart';
+import '../../../../../ui/core/trackstate_icons.dart';
 import '../../../../../ui/core/trackstate_theme.dart';
 import 'common_widgets.dart';
 import 'settings_text_field.dart';
@@ -424,8 +425,8 @@ class LocaleEntryRow extends StatelessWidget {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(
-                  Icons.warning_amber_rounded,
+                TrackStateIcon(
+                  TrackStateIconGlyph.warning,
                   size: 16,
                   color: colors.warning,
                   semanticLabel: warningMessage,

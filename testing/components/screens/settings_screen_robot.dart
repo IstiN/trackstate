@@ -332,7 +332,7 @@ class SettingsScreenRobot {
 
   Finder localeWarningIcon(String text) => find.descendant(
     of: localeWarningContainer(text),
-    matching: find.byType(Icon),
+    matching: find.byType(TrackStateIcon),
   );
 
   Color localeWarningTextColor(String text) =>
@@ -381,7 +381,7 @@ class SettingsScreenRobot {
     }
     final element = icon.evaluate().first;
     final widget = element.widget;
-    if (widget is Icon && widget.color != null) {
+    if (widget is TrackStateIcon && widget.color != null) {
       return widget.color!;
     }
     return IconTheme.of(element).color;
