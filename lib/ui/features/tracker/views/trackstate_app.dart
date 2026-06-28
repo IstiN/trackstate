@@ -2419,6 +2419,7 @@ class _TrackStateAppState extends State<TrackStateApp>
                 }
                 _closeDesktopWorkspaceSwitcher(restoreTriggerFocus: false);
               },
+              isFocusOwnerInsidePanel: _isDesktopWorkspaceSwitcherFocused,
               onBrowserEscape: () {
                 if (!mounted || !_isDesktopWorkspaceSwitcherVisible) {
                   return;
