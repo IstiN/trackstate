@@ -22,6 +22,26 @@ class SetupRepoSmokeConfig:
     benchmark_min_success_rate: float
 
 
+def _env_float(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
 def load_setup_repo_smoke_config() -> SetupRepoSmokeConfig:
     repository = os.getenv(
         "TRACKSTATE_LIVE_SETUP_REPOSITORY",
@@ -53,11 +73,23 @@ def load_setup_repo_smoke_config() -> SetupRepoSmokeConfig:
             "Hierarchy",
             "Settings",
         ),
-        page_interactive_budget_seconds=3.0,
-        page_interactive_warmup_runs=1,
-        cli_command_timeout_seconds=30.0,
-        benchmark_concurrency=10,
-        benchmark_command_budget_seconds=3.0,
-        benchmark_command_max_seconds=5.0,
-        benchmark_min_success_rate=1.0,
+        page_interactive_budget_seconds=_env_float(
+            "SETUP_SMOKE_PAGE_INTERACTIVE_BUDGET_SECONDS", 3.0
+        ),
+        page_interactive_warmup_runs=_env_int(
+            "SETUP_SMOKE_PAGE_INTERACTIVE_WARMUP_RUNS", 1
+        ),
+        cli_command_timeout_seconds=_env_float(
+            "SETUP_SMOKE_CLI_COMMAND_TIMEOUT_SECONDS", 30.0
+        ),
+        benchmark_concurrency=_env_int("SETUP_SMOKE_BENCHMARK_CONCURRENCY", 10),
+        benchmark_command_budget_seconds=_env_float(
+            "SETUP_SMOKE_BENCHMARK_COMMAND_BUDGET_SECONDS", 3.0
+        ),
+        benchmark_command_max_seconds=_env_float(
+            "SETUP_SMOKE_BENCHMARK_COMMAND_MAX_SECONDS", 5.0
+        ),
+        benchmark_min_success_rate=_env_float(
+            "SETUP_SMOKE_BENCHMARK_MIN_SUCCESS_RATE", 1.0
+        ),
     )

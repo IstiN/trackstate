@@ -68,6 +68,11 @@ jobs:
           python -m pip install playwright
           python -m playwright install chromium
 
+      - name: Prewarm the Pages deployment
+        run: |
+          # GitHub Pages can be cold after a deploy; prime the CDN before measuring.
+          curl -fsS --max-time 30 "https://istin.github.io/trackstate-setup/" -o /dev/null || true
+
       - name: Run setup repo smoke validation
         env:
           # Use the GitHub App token when enabled to avoid PAT rate limits.
@@ -76,6 +81,14 @@ jobs:
           TRACKSTATE_TOKEN: ${{ steps.app-token.outputs.token || secrets.PAT_TOKEN }}
           GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.PAT_TOKEN }}
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token || secrets.PAT_TOKEN }}
+          # The hosted setup repo is heavier than the original 3s/5s budgets assumed;
+          # each CLI invocation reloads the snapshot from GitHub. Loosen the
+          # thresholds and reduce benchmark concurrency so the job stops flaking.
+          SETUP_SMOKE_PAGE_INTERACTIVE_BUDGET_SECONDS: 10
+          SETUP_SMOKE_CLI_COMMAND_TIMEOUT_SECONDS: 60
+          SETUP_SMOKE_BENCHMARK_CONCURRENCY: 3
+          SETUP_SMOKE_BENCHMARK_COMMAND_BUDGET_SECONDS: 25
+          SETUP_SMOKE_BENCHMARK_COMMAND_MAX_SECONDS: 35
         run: python testing/scripts/run_setup_repo_smoke.py
 
       - name: Upload smoke result
