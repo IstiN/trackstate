@@ -576,7 +576,23 @@ class GitHubTrackStateProvider
         _repoJsonCache ??
         await _getGitHubJson('/repos/${connection.repository}')
             as Map<String, Object?>;
-    return _permissionFromRepoJson(repoJson);
+    final permission = _permissionFromRepoJson(repoJson);
+    // GitHub App installation access tokens authenticate as the App, not as a
+    // repository collaborator, so /repos/{repo} returns all false in the
+    // permissions block even when the App has contents:write. The token itself
+    // carries the real granted permissions; since we cannot introspect it,
+    // treat a successful App authentication as writable and let the actual
+    // mutation fail with a real 403/409 if the App lacks permission.
+    if (!permission.canWrite && _isGitHubAppInstallationToken(connection.token)) {
+      return RepositoryPermission(
+        canRead: true,
+        canWrite: true,
+        isAdmin: false,
+        attachmentUploadMode: AttachmentUploadMode.noLfs,
+        supportsReleaseAttachmentWrites: !kIsWeb,
+      );
+    }
+    return permission;
   }
 
   @override
