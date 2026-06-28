@@ -68,10 +68,29 @@ jobs:
           python -m pip install playwright
           python -m playwright install chromium
 
+      - name: Build CLI binary from source
+        run: |
+          # The committed bin/trackstate_cli is stale; rebuild it so Dart code
+          # changes (provider fixes, auth handling, etc.) actually take effect.
+          flutter pub get
+          dart compile exe bin/trackstate.dart -o bin/trackstate_cli
+
       - name: Prewarm the Pages deployment
         run: |
           # GitHub Pages can be cold after a deploy; prime the CDN before measuring.
           curl -fsS --max-time 30 "https://istin.github.io/trackstate-setup/" -o /dev/null || true
+
+      - name: Create smoke test branch
+        id: smoke-branch
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.PAT_TOKEN }}
+        run: |
+          branch="setup-repo-smoke/${{ github.run_id }}-${{ github.run_attempt }}"
+          main_sha=$(gh api "repos/IstiN/trackstate-setup/git/ref/heads/main" --jq .object.sha)
+          gh api "repos/IstiN/trackstate-setup/git/refs" -X POST \
+            -f ref="refs/heads/${branch}" \
+            -f sha="${main_sha}"
+          echo "branch=${branch}" >> "$GITHUB_OUTPUT"
 
       - name: Run setup repo smoke validation
         env:
@@ -81,6 +100,9 @@ jobs:
           TRACKSTATE_TOKEN: ${{ steps.app-token.outputs.token || secrets.PAT_TOKEN }}
           GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.PAT_TOKEN }}
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token || secrets.PAT_TOKEN }}
+          # Write to a temporary branch: IstiN/trackstate-setup/main is protected
+          # by required status checks, so direct commits fail with 409.
+          TRACKSTATE_LIVE_SETUP_REF: ${{ steps.smoke-branch.outputs.branch }}
           # The hosted setup repo is heavier than the original 3s/5s budgets assumed;
           # each CLI invocation reloads the snapshot from GitHub. Loosen the
           # thresholds and reduce benchmark concurrency so the job stops flaking.
@@ -90,6 +112,13 @@ jobs:
           SETUP_SMOKE_BENCHMARK_COMMAND_BUDGET_SECONDS: 25
           SETUP_SMOKE_BENCHMARK_COMMAND_MAX_SECONDS: 35
         run: python testing/scripts/run_setup_repo_smoke.py
+
+      - name: Delete smoke test branch
+        if: always() && steps.smoke-branch.outputs.branch != ''
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.PAT_TOKEN }}
+        run: |
+          gh api "repos/IstiN/trackstate-setup/git/refs/heads/${{ steps.smoke-branch.outputs.branch }}" -X DELETE || true
 
       - name: Upload smoke result
         if: always()
