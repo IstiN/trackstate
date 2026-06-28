@@ -22,6 +22,7 @@ enum TrackStateIconGlyph {
   plus,
   moon,
   sun,
+  warning,
 }
 
 class TrackStateIcon extends StatelessWidget {
@@ -367,6 +368,19 @@ class _TrackStateIconPainter extends CustomPainter {
           Offset(s * .66, s * .6),
           paint,
         );
+      case TrackStateIconGlyph.warning:
+        final path = Path()
+          ..moveTo(s * .5, s * .12)
+          ..lineTo(s * .16, s * .82)
+          ..lineTo(s * .84, s * .82)
+          ..close();
+        canvas.drawPath(path, paint);
+        canvas.drawLine(
+          Offset(s * .5, s * .34),
+          Offset(s * .5, s * .62),
+          paint,
+        );
+        canvas.drawCircle(Offset(s * .5, s * .72), s * .05, paint);
     }
   }
 
