@@ -1786,8 +1786,8 @@ class _LocaleEntryRow extends StatelessWidget {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(
-                  Icons.warning_amber_rounded,
+                TrackStateIcon(
+                  TrackStateIconGlyph.warning,
                   size: 16,
                   color: colors.warning,
                   semanticLabel: warningMessage,
