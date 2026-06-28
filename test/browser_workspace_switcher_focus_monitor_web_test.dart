@@ -487,6 +487,68 @@ void main() {
     );
 
     test(
+      'focusin on an un-annotated text field does not report outside when the owner context is still inside the workspace switcher',
+      () {
+        _appendPanel(host);
+        final externalInput = _appendInput(
+          host,
+          label: 'Repository',
+          left: 760,
+          top: 40,
+          width: 220,
+          height: 36,
+        );
+
+        var focusOutsideCalls = 0;
+        final subscription =
+            createBrowserWorkspaceSwitcherFocusMonitorSubscription(
+              onBrowserTab: () {},
+              onBrowserFocusOutside: () {
+                focusOutsideCalls += 1;
+              },
+              onBrowserBoundaryKey: (_) {},
+              isFocusOwnerInsidePanel: () => true,
+            );
+        addTearDown(subscription.cancel);
+
+        externalInput.focus();
+        expect(web.document.activeElement, same(externalInput));
+        expect(focusOutsideCalls, 0);
+      },
+    );
+
+    test(
+      'focusin on an un-annotated text field reports outside when the owner context is not inside the workspace switcher',
+      () {
+        _appendPanel(host);
+        final externalInput = _appendInput(
+          host,
+          label: 'Repository',
+          left: 760,
+          top: 40,
+          width: 220,
+          height: 36,
+        );
+
+        var focusOutsideCalls = 0;
+        final subscription =
+            createBrowserWorkspaceSwitcherFocusMonitorSubscription(
+              onBrowserTab: () {},
+              onBrowserFocusOutside: () {
+                focusOutsideCalls += 1;
+              },
+              onBrowserBoundaryKey: (_) {},
+              isFocusOwnerInsidePanel: () => false,
+            );
+        addTearDown(subscription.cancel);
+
+        externalInput.focus();
+        expect(web.document.activeElement, same(externalInput));
+        expect(focusOutsideCalls, 1);
+      },
+    );
+
+    test(
       'Tab from the last in-panel control wraps to the selected row instead of escaping the switcher',
       () {
         _appendButton(

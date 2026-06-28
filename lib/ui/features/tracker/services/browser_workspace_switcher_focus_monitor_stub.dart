@@ -61,6 +61,7 @@ createBrowserWorkspaceSwitcherFocusMonitorSubscription({
   required VoidCallback onBrowserFocusOutside,
   VoidCallback? onBrowserEscape,
   required void Function(String key) onBrowserBoundaryKey,
+  bool Function()? isFocusOwnerInsidePanel,
 }) {
   _keep(onBrowserTab);
   _keep(onBrowserFocusOutside);
