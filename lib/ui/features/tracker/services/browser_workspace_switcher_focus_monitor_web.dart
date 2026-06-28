@@ -114,7 +114,15 @@ createBrowserWorkspaceSwitcherFocusMonitorSubscription({
   required VoidCallback onBrowserFocusOutside,
   VoidCallback? onBrowserEscape,
   required void Function(String key) onBrowserBoundaryKey,
+  bool Function()? isFocusOwnerInsidePanel,
 }) {
+  void notifyFocusOutside() {
+    if (isFocusOwnerInsidePanel?.call() ?? false) {
+      return;
+    }
+    onBrowserFocusOutside();
+  }
+
   final pointerdownListener = ((web.Event event) {
     _recordBrowserWorkspaceSwitcherPointerInteraction(event);
   }).toJS;
@@ -137,7 +145,7 @@ createBrowserWorkspaceSwitcherFocusMonitorSubscription({
       }
       if (tabMoveResult ==
           _BrowserWorkspaceSwitcherTabMoveResult.outsideWorkspaceSwitcher) {
-        onBrowserFocusOutside();
+        notifyFocusOutside();
       }
       onBrowserTab();
       return;
@@ -172,7 +180,7 @@ createBrowserWorkspaceSwitcherFocusMonitorSubscription({
     if (isBrowserFocusWithinWorkspaceSwitcher()) {
       return;
     }
-    onBrowserFocusOutside();
+    notifyFocusOutside();
   }).toJS;
   final focusoutListener = ((web.Event event) {
     final blurredElement = event.target as web.Element?;
