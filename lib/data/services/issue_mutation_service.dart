@@ -1932,13 +1932,79 @@ Future<RepositoryCommitResult> _applyChanges({
       'This repository provider does not support multi-file issue mutations yet.',
     );
   }
-  return mutator.applyFileChanges(
-    RepositoryFileChangeRequest(
-      branch: branch,
-      message: message,
-      changes: changes,
-    ),
-  );
+  try {
+    return await mutator.applyFileChanges(
+      RepositoryFileChangeRequest(
+        branch: branch,
+        message: message,
+        changes: changes,
+      ),
+    );
+  } on TrackStateProviderException catch (error) {
+    final status = _statusCodeFromProviderException(error);
+    // Some fine-grained PATs can write via the Contents API but are rejected
+    // by the Git Data API (refs/trees/commits). Fall back to sequential
+    // per-file writes so create/update still works for those tokens.
+    if (status == 401 || status == 403) {
+      return await _applyChangesSequentially(
+        provider: provider,
+        branch: branch,
+        message: message,
+        changes: changes,
+      );
+    }
+    rethrow;
+  }
+}
+
+int? _statusCodeFromProviderException(TrackStateProviderException error) {
+  final match = RegExp(r'\((\d{3})\):').firstMatch(error.message);
+  if (match == null) return null;
+  return int.tryParse(match.group(1) ?? '');
+}
+
+Future<RepositoryCommitResult> _applyChangesSequentially({
+  required TrackStateProviderAdapter provider,
+  required String branch,
+  required String message,
+  required List<RepositoryFileChange> changes,
+}) async {
+  RepositoryCommitResult? lastResult;
+  for (final change in changes) {
+    switch (change) {
+      case RepositoryTextFileChange():
+        lastResult = RepositoryCommitResult(
+          branch: branch,
+          message: message,
+          revision: (await provider.writeTextFile(
+            RepositoryWriteRequest(
+              path: change.path,
+              content: change.content,
+              message: message,
+              branch: branch,
+              expectedRevision: change.expectedRevision,
+            ),
+          )).revision,
+        );
+      case RepositoryBinaryFileChange():
+        // Binary changes still require the Git Data API; rethrow so the caller
+        // surfaces the original auth error rather than silently dropping data.
+        throw const TrackStateRepositoryException(
+          'Multi-file binary changes require Git Data API access.',
+        );
+      case RepositoryDeleteFileChange():
+        // Sequential delete via Contents API is not implemented yet.
+        throw const TrackStateRepositoryException(
+          'File deletion requires Git Data API access.',
+        );
+    }
+  }
+  return lastResult ??
+      RepositoryCommitResult(
+        branch: branch,
+        message: message,
+        revision: '',
+      );
 }
 
 Future<Set<String>> _blobPaths(
