@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import shlex
 import subprocess
@@ -63,7 +64,7 @@ class GitHubCliProjectFramework(ProjectCliProbe):
 
     def viewer_login(self) -> CliCommandResult:
         command = ("gh", "api", "user", "--jq", ".login")
-        result = self._run(command)
+        result = self._run(command, use_user_token=True)
         login = result.stdout.strip()
         return CliCommandResult(
             command=result.command,
@@ -247,7 +248,12 @@ class GitHubCliProjectFramework(ProjectCliProbe):
                 stderr=str(error),
             )
 
-    def _run(self, command: tuple[str, ...]) -> CliCommandResult:
+    def _run(
+        self,
+        command: tuple[str, ...],
+        *,
+        use_user_token: bool = False,
+    ) -> CliCommandResult:
         def _run_once() -> subprocess.CompletedProcess[str]:
             return subprocess.run(
                 command,
@@ -255,6 +261,7 @@ class GitHubCliProjectFramework(ProjectCliProbe):
                 capture_output=True,
                 text=True,
                 check=False,
+                env=self._command_env(use_user_token=use_user_token),
             )
 
         completed = run_with_rate_limit_retry(_run_once)
@@ -264,6 +271,21 @@ class GitHubCliProjectFramework(ProjectCliProbe):
             stdout=completed.stdout,
             stderr=completed.stderr,
         )
+
+    def _command_env(self, *, use_user_token: bool) -> dict[str, str] | None:
+        """Return an env dict that uses the App token for repo calls and PAT for identity.
+
+        GitHub App installation tokens cannot call `GET /user`, so `viewer_login`
+        and similar identity checks continue to use the PAT via `GH_TOKEN`.
+        Repository-scoped calls use `AI_TEAMMATE_REPO_TOKEN` when available to
+        avoid sharing the PAT's rate-limit bucket.
+        """
+        repo_token = os.environ.get("AI_TEAMMATE_REPO_TOKEN")
+        if not repo_token or use_user_token:
+            return None
+        env = os.environ.copy()
+        env["GH_TOKEN"] = repo_token
+        return env
 
     def _contains_shell_metacharacters(self, token: str) -> bool:
         shell_metacharacters = ("|", "&&", ";", "`", "$(", ">", "<")
