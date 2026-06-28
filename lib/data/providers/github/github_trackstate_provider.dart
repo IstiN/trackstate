@@ -572,10 +572,9 @@ class GitHubTrackStateProvider
         supportsReleaseAttachmentWrites: false,
       );
     }
-    final cached = _repoJsonCache;
-    final repoJson = cached != null
-        ? cached
-        : await _getGitHubJson('/repos/${connection.repository}')
+    final repoJson =
+        _repoJsonCache ??
+        await _getGitHubJson('/repos/${connection.repository}')
             as Map<String, Object?>;
     return _permissionFromRepoJson(repoJson);
   }
