@@ -68,6 +68,13 @@ jobs:
           python -m pip install playwright
           python -m playwright install chromium
 
+      - name: Build CLI binary from source
+        run: |
+          # The committed bin/trackstate_cli is stale; rebuild it so Dart code
+          # changes (provider fixes, auth handling, etc.) actually take effect.
+          flutter pub get
+          dart compile exe bin/trackstate.dart -o bin/trackstate_cli
+
       - name: Prewarm the Pages deployment
         run: |
           # GitHub Pages can be cold after a deploy; prime the CDN before measuring.
