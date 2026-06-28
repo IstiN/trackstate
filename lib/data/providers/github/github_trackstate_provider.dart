@@ -75,6 +75,7 @@ class GitHubTrackStateProvider
   late final http.Client _ownedClient = http.Client();
   final Map<String, Future<Map<String, Object?>>> _sharedWebUserProbes =
       <String, Future<Map<String, Object?>>>{};
+  Map<String, Object?>? _repoJsonCache;
   String? _bootstrapReadToken;
   final String repositoryName;
   final String sourceRef;
@@ -109,6 +110,9 @@ class GitHubTrackStateProvider
         prefix: 'GitHub connection failed',
       );
     }
+
+    final repoJson = jsonDecode(repoResponse.body) as Map<String, Object?>;
+    _repoJsonCache = repoJson;
 
     // GitHub App installation access tokens cannot call /user unless the App
     // has been granted the "Read user profile" account permission. Most SM
@@ -568,8 +572,10 @@ class GitHubTrackStateProvider
         supportsReleaseAttachmentWrites: false,
       );
     }
-    final repoJson =
-        await _getGitHubJson('/repos/${connection.repository}')
+    final cached = _repoJsonCache;
+    final repoJson = cached != null
+        ? cached
+        : await _getGitHubJson('/repos/${connection.repository}')
             as Map<String, Object?>;
     return _permissionFromRepoJson(repoJson);
   }
