@@ -111,49 +111,27 @@ class AccessCallout extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                ExcludeSemantics(
-                  child: Expanded(
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        TrackStateIcon(
-                          TrackStateIconGlyph.gitBranch,
-                          size: 18,
-                          color: accentColor,
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            title,
-                            style: theme.textTheme.titleSmall?.copyWith(
-                              color: contentColor,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
+            ExcludeSemantics(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  TrackStateIcon(
+                    TrackStateIconGlyph.gitBranch,
+                    size: 18,
+                    color: accentColor,
                   ),
-                ),
-                if (onDismiss != null)
-                  Semantics(
-                    button: true,
-                    label: dismissLabel ?? 'Close',
-                    child: IconButton(
-                      icon: Icon(Icons.close, size: 18, color: contentColor),
-                      onPressed: onDismiss,
-                      tooltip: dismissLabel ?? 'Close',
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(
-                        minWidth: 28,
-                        minHeight: 28,
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      title,
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        color: contentColor,
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
                   ),
-              ],
+                ],
+              ),
             ),
             const SizedBox(height: 8),
             ExcludeSemantics(
@@ -180,9 +158,7 @@ class AccessCallout extends StatelessWidget {
                 ),
               ),
             ],
-            if ((primaryActionLabel != null && onPrimaryAction != null) ||
-                (secondaryActionLabel != null &&
-                    onSecondaryAction != null)) ...[
+            if (_hasActions) ...[
               const SizedBox(height: 12),
               Wrap(
                 spacing: 8,
@@ -206,7 +182,8 @@ class AccessCallout extends StatelessWidget {
                         child: Text(primaryActionLabel!),
                       ),
                     ),
-                  if (secondaryActionLabel != null && onSecondaryAction != null)
+                  if (secondaryActionLabel != null &&
+                      onSecondaryAction != null)
                     OrderedFocusAction(
                       order: actionTraversalOrderBase == null
                           ? null
@@ -219,6 +196,14 @@ class AccessCallout extends StatelessWidget {
                         child: Text(secondaryActionLabel!),
                       ),
                     ),
+                  if (dismissLabel != null && onDismiss != null)
+                    TextButton(
+                      onPressed: onDismiss,
+                      style: TextButton.styleFrom(
+                        foregroundColor: contentColor,
+                      ),
+                      child: Text(dismissLabel!),
+                    ),
                 ],
               ),
             ],
@@ -227,4 +212,9 @@ class AccessCallout extends StatelessWidget {
       ),
     );
   }
+
+  bool get _hasActions =>
+      (primaryActionLabel != null && onPrimaryAction != null) ||
+      (secondaryActionLabel != null && onSecondaryAction != null) ||
+      (dismissLabel != null && onDismiss != null);
 }
