@@ -111,41 +111,49 @@ class AccessCallout extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            ExcludeSemantics(
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  TrackStateIcon(
-                    TrackStateIconGlyph.gitBranch,
-                    size: 18,
-                    color: accentColor,
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      title,
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        color: contentColor,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                  if (onDismiss != null)
-                    Semantics(
-                      button: true,
-                      label: dismissLabel ?? 'Close',
-                      child: IconButton(
-                        icon: Icon(Icons.close, size: 18, color: contentColor),
-                        onPressed: onDismiss,
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(
-                          minWidth: 28,
-                          minHeight: 28,
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ExcludeSemantics(
+                  child: Expanded(
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        TrackStateIcon(
+                          TrackStateIconGlyph.gitBranch,
+                          size: 18,
+                          color: accentColor,
                         ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            title,
+                            style: theme.textTheme.titleSmall?.copyWith(
+                              color: contentColor,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                if (onDismiss != null)
+                  Semantics(
+                    button: true,
+                    label: dismissLabel ?? 'Close',
+                    child: IconButton(
+                      icon: Icon(Icons.close, size: 18, color: contentColor),
+                      onPressed: onDismiss,
+                      tooltip: dismissLabel ?? 'Close',
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(
+                        minWidth: 28,
+                        minHeight: 28,
                       ),
                     ),
-                ],
-              ),
+                  ),
+              ],
             ),
             const SizedBox(height: 8),
             ExcludeSemantics(
