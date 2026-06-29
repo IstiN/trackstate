@@ -340,7 +340,7 @@ String? _focusedSemanticsLabel(WidgetTester tester) {
   final labels = <String>[];
 
   void visit(SemanticsNode node) {
-    if (node.getSemanticsData().flagsCollection.isFocused) {
+    if (node.getSemanticsData().hasFlag(SemanticsFlag.isFocused)) {
       final label = _normalizedLabel(node.label);
       if (label.isNotEmpty) {
         labels.add(label);
@@ -453,10 +453,10 @@ Finder? _activeMenuOverlayScope(
 }
 
 bool _isInteractiveTarget(SemanticsNode node) {
-  return node.flagsCollection.isButton ||
-      node.flagsCollection.isTextField ||
-      node.flagsCollection.isFocusable ||
-      node.flagsCollection.isReadOnly;
+  return node.hasFlag(SemanticsFlag.isButton) ||
+      node.hasFlag(SemanticsFlag.isTextField) ||
+      node.hasFlag(SemanticsFlag.isFocusable) ||
+      node.hasFlag(SemanticsFlag.isReadOnly);
 }
 
 bool _isMergedContainerLabel(String label, List<SemanticsNode> children) {

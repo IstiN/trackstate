@@ -272,7 +272,7 @@ void main() {
           matching: find.semantics.byPredicate((node) {
             final data = node.getSemanticsData();
             return data.label.trim() == 'Save and switch' &&
-                data.flagsCollection.isButton;
+                data.hasFlag(SemanticsFlag.isButton);
           }, describeMatch: (_) => 'Save and switch button in switcher panel'),
         );
         expect(

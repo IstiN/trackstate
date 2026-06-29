@@ -687,10 +687,10 @@ Color _resolvedActionSurface(
 }
 
 bool _isInteractiveTarget(SemanticsNode node) {
-  return node.flagsCollection.isButton ||
-      node.flagsCollection.isTextField ||
-      node.flagsCollection.isFocusable ||
-      node.flagsCollection.isReadOnly;
+  return node.hasFlag(SemanticsFlag.isButton) ||
+      node.hasFlag(SemanticsFlag.isTextField) ||
+      node.hasFlag(SemanticsFlag.isFocusable) ||
+      node.hasFlag(SemanticsFlag.isReadOnly);
 }
 
 bool _isMergedContainerLabel(String label, List<SemanticsNode> children) {
@@ -766,7 +766,7 @@ List<String> _focusedSemanticsLabels(WidgetTester tester) {
   final labels = <String>[];
   void visit(SemanticsNode node) {
     final data = node.getSemanticsData();
-    if (data.flagsCollection.isFocused) {
+    if (data.hasFlag(SemanticsFlag.isFocused)) {
       final label = data.label.trim();
       labels.add(label.isEmpty ? '<empty label>' : label);
     }

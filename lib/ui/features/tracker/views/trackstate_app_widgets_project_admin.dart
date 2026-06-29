@@ -673,6 +673,7 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
         FocusTraversalOrder(
           order: const NumericFocusOrder(1),
           child: DropdownButtonFormField<AttachmentStorageMode>(
+            icon: const TrackStateIcon(TrackStateIconGlyph.chevronDown),
             key: const ValueKey('attachment-storage-mode-field'),
             initialValue: attachmentStorage.mode,
             decoration: InputDecoration(labelText: l10n.attachmentStorageMode),
@@ -1009,6 +1010,7 @@ class _ProjectSettingsAdminState extends State<_ProjectSettingsAdmin>
               children: [
                 Expanded(
                   child: DropdownButtonFormField<String>(
+                    icon: const TrackStateIcon(TrackStateIconGlyph.chevronDown),
                     initialValue: settings.defaultLocale,
                     decoration: InputDecoration(labelText: l10n.defaultLocale),
                     items: [
@@ -1523,6 +1525,7 @@ class _LocaleCodeEditorState extends State<_LocaleCodeEditor> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         DropdownButtonFormField<String>(
+          icon: const TrackStateIcon(TrackStateIconGlyph.chevronDown),
           initialValue: _selectedLocaleCode,
           decoration: InputDecoration(
             labelText: l10n.localeCode,
@@ -1850,6 +1853,7 @@ class _StatusEditorState extends State<_StatusEditor> {
         SettingsTextField(label: l10n.name, controller: _nameController),
         const SizedBox(height: 12),
         DropdownButtonFormField<String>(
+          icon: const TrackStateIcon(TrackStateIconGlyph.chevronDown),
           initialValue: _category,
           decoration: InputDecoration(labelText: l10n.catalogCategory),
           items: [
@@ -1944,6 +1948,7 @@ class _IssueTypeEditorState extends State<_IssueTypeEditor> {
         ),
         const SizedBox(height: 12),
         DropdownButtonFormField<String>(
+          icon: const TrackStateIcon(TrackStateIconGlyph.chevronDown),
           initialValue: _iconId,
           decoration: InputDecoration(labelText: l10n.catalogIcon),
           items: [
@@ -1961,6 +1966,7 @@ class _IssueTypeEditorState extends State<_IssueTypeEditor> {
         ),
         const SizedBox(height: 12),
         DropdownButtonFormField<String>(
+          icon: const TrackStateIcon(TrackStateIconGlyph.chevronDown),
           initialValue: _workflowId,
           decoration: InputDecoration(labelText: l10n.catalogWorkflow),
           items: [
@@ -2094,6 +2100,7 @@ class _FieldEditorState extends State<_FieldEditor> {
                 enabled: false,
               )
             : DropdownButtonFormField<String>(
+                icon: const TrackStateIcon(TrackStateIconGlyph.chevronDown),
                 initialValue: _type,
                 decoration: InputDecoration(labelText: l10n.catalogType),
                 items: const [
@@ -2420,6 +2427,7 @@ class _WorkflowTransitionEditorRowState
             ),
             const SizedBox(height: 8),
             DropdownButtonFormField<String>(
+              icon: const TrackStateIcon(TrackStateIconGlyph.chevronDown),
               initialValue: _fromStatusId,
               decoration: InputDecoration(labelText: l10n.transitionFrom),
               items: statusItems,
@@ -2432,6 +2440,7 @@ class _WorkflowTransitionEditorRowState
             ),
             const SizedBox(height: 8),
             DropdownButtonFormField<String>(
+              icon: const TrackStateIcon(TrackStateIconGlyph.chevronDown),
               initialValue: _toStatusId,
               decoration: InputDecoration(labelText: l10n.transitionTo),
               items: statusItems,

@@ -19,6 +19,8 @@ import '../../../../../domain/models/workspace_profile_models.dart';
 import '../../../../../l10n/generated/app_localizations.dart';
 import '../../../core/trackstate_icons.dart';
 import '../../../core/trackstate_theme.dart';
+import '../../../core/window_title_bar.dart';
+import '../../../../platform/platform_info.dart';
 import '../services/attachment_picker.dart';
 import '../services/browser_header_controls_flex_container_stub.dart'
     if (dart.library.js_interop) '../services/browser_header_controls_flex_container_web.dart'

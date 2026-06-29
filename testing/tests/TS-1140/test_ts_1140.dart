@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import 'package:flutter/semantics.dart';
 import 'package:flutter/widgets.dart' show Semantics;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -88,7 +89,7 @@ void main() {
         final liveRegionNode = find.semantics.byPredicate(
           (node) =>
               node.getSemanticsData().label.trim() == expectedMessage &&
-              node.getSemanticsData().flagsCollection.isLiveRegion,
+              node.getSemanticsData().hasFlag(SemanticsFlag.isLiveRegion),
           describeMatch: (_) =>
               'live-region semantics node for the mutation feedback message',
         );

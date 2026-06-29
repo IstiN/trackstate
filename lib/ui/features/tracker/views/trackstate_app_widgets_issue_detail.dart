@@ -1404,6 +1404,7 @@ class _HostedProviderConfigurationState
   late final FocusNode _tokenFocusNode;
   late final FocusNode _connectTokenFocusNode;
   bool _rememberToken = true;
+  bool _isConnecting = false;
 
   @override
   void initState() {
@@ -1482,7 +1483,7 @@ class _HostedProviderConfigurationState
                       value: _rememberToken,
                       title: Text(l10n.rememberOnThisBrowser),
                       subtitle: Text(l10n.rememberOnThisBrowserHelp),
-                      onChanged: viewModel.isSaving
+                      onChanged: _isConnecting
                           ? null
                           : (value) => setState(
                               () => _rememberToken = value ?? _rememberToken,
@@ -1505,12 +1506,23 @@ class _HostedProviderConfigurationState
                           sortKey: OrdinalSortKey(5),
                           child: FilledButton(
                             focusNode: _connectTokenFocusNode,
-                            onPressed: viewModel.isSaving
+                            onPressed: _isConnecting
                                 ? null
-                                : () => viewModel.connectGitHub(
-                                    _tokenController.text,
-                                    remember: _rememberToken,
-                                  ),
+                                : () {
+                                    setState(() => _isConnecting = true);
+                                    viewModel
+                                        .connectGitHub(
+                                          _tokenController.text,
+                                          remember: _rememberToken,
+                                        )
+                                        .whenComplete(
+                                          () => mounted
+                                              ? setState(
+                                                  () => _isConnecting = false,
+                                                )
+                                              : null,
+                                        );
+                                  },
                             child: ExcludeSemantics(
                               child: Text(l10n.connectToken),
                             ),
@@ -1521,7 +1533,7 @@ class _HostedProviderConfigurationState
                             button: true,
                             label: l10n.continueWithGitHubApp,
                             child: OutlinedButton(
-                              onPressed: viewModel.isSaving
+                              onPressed: _isConnecting
                                   ? null
                                   : viewModel.startGitHubAppLogin,
                               child: Text(l10n.continueWithGitHubApp),
@@ -1855,6 +1867,7 @@ class _DropdownCreateField extends StatelessWidget {
     return Semantics(
       label: label,
       child: DropdownButtonFormField<String>(
+        icon: const TrackStateIcon(TrackStateIconGlyph.chevronDown),
         key: ValueKey('$label-${value ?? 'empty'}'),
         focusNode: focusNode,
         initialValue: items.any((item) => item.value == value) ? value : null,

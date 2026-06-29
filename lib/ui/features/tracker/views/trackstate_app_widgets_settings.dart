@@ -277,6 +277,8 @@ class _SettingsState extends State<_Settings> {
             onSecondaryAction: widget.viewModel.supportsGitHubAuth
                 ? () => _selectProvider(_SettingsProviderSelection.hosted)
                 : null,
+            dismissLabel: l10n.close,
+            onDismiss: widget.viewModel.dismissStartupRecovery,
           ),
           const SizedBox(height: 16),
         ],
@@ -294,8 +296,7 @@ class _SettingsState extends State<_Settings> {
           ),
         ),
         const SizedBox(height: 16),
-        if (widget.viewModel.startupRecovery == null)
-          _ProjectSettingsAdmin(viewModel: widget.viewModel),
+        _ProjectSettingsAdmin(viewModel: widget.viewModel),
       ],
     );
   }
@@ -811,6 +812,9 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
                             final showLocalHostedAccessAction =
                                 workspace.isLocal &&
                                 widget.viewModel.usesLocalPersistence;
+                            final isHostedNeedsSignIn = workspace.isHosted &&
+                                !widget.authenticatedWorkspaceIds
+                                    .contains(workspaceId);
                             return _WorkspaceSwitcherRow(
                               key: ValueKey('workspace-$workspaceId'),
                               workspace: workspace,
@@ -830,6 +834,8 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
                               focusOrderBase: index * 3.0 + 1,
                               primaryActionLabel: isUnavailableLocal
                                   ? l10n.retry
+                                  : isHostedNeedsSignIn
+                                  ? l10n.connectGitHub
                                   : showLocalHostedAccessAction
                                   ? (hasLocalHostedAccess
                                         ? l10n.manageGitHubAccess
@@ -837,12 +843,19 @@ class _WorkspaceSwitcherSheetState extends State<_WorkspaceSwitcherSheet> {
                                   : null,
                               primaryActionSemanticLabel: isUnavailableLocal
                                   ? '${l10n.retry}: ${workspace.displayName}'
+                                  : isHostedNeedsSignIn
+                                  ? '${l10n.connectGitHub}: ${workspace.displayName}'
                                   : null,
                               onPrimaryAction: isUnavailableLocal
                                   ? () =>
                                         widget.onRetryUnavailableLocalWorkspace(
                                           workspace,
                                         )
+                                  : isHostedNeedsSignIn
+                                  ? () => _showRepositoryAccessDialog(
+                                      context,
+                                      widget.viewModel,
+                                    )
                                   : showLocalHostedAccessAction
                                   ? () => _showRepositoryAccessDialog(
                                       context,
@@ -1116,6 +1129,7 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
     super.initState();
     _summaryFocusNode = FocusNode(
       debugLabel: 'workspace-switcher-row-summary-${widget.workspace.id}',
+      canRequestFocus: widget.isActive,
       skipTraversal: !widget.isActive,
     );
     widget.onSummaryFocusRequesterChanged(_requestSummaryFocus);
@@ -1125,6 +1139,7 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
   void didUpdateWidget(covariant _WorkspaceSwitcherRow oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.isActive != oldWidget.isActive) {
+      _summaryFocusNode.canRequestFocus = widget.isActive;
       _summaryFocusNode.skipTraversal = !widget.isActive;
     }
     if (!identical(
@@ -1262,7 +1277,7 @@ class _WorkspaceSwitcherRowState extends State<_WorkspaceSwitcherRow> {
           )
         : Semantics(
             container: true,
-            button: true,
+            button: isActive,
             enabled: true,
             focusable: isActive,
             focused: isActive,

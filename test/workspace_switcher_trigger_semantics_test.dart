@@ -1,5 +1,6 @@
 import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
@@ -29,9 +30,9 @@ void main() {
       );
       final triggerSemantics = triggerNode.getSemanticsData();
 
-      expect(triggerSemantics.flagsCollection.isButton, isTrue);
+      expect(triggerSemantics.hasFlag(SemanticsFlag.isButton), isTrue);
       expect(
-        triggerSemantics.flagsCollection.isFocusable,
+        triggerSemantics.hasFlag(SemanticsFlag.isFocusable),
         isTrue,
         reason:
             'The exported workspace switcher semantics node must be keyboard focusable '
@@ -357,17 +358,17 @@ void _expectExpandedState(
   final semantics = tester.getSemantics(trigger).getSemanticsData();
 
   expect(
-    semantics.flagsCollection.hasExpandedState,
+    semantics.hasFlag(SemanticsFlag.hasExpandedState),
     hasExpandedState,
     reason:
         '$context should expose hasExpandedState=$hasExpandedState, '
-        'but was ${semantics.flagsCollection.hasExpandedState}.',
+        'but was ${semantics.hasFlag(SemanticsFlag.hasExpandedState)}.',
   );
   expect(
-    semantics.flagsCollection.isExpanded,
+    semantics.hasFlag(SemanticsFlag.isExpanded),
     isExpanded,
     reason:
         '$context should expose isExpanded=$isExpanded, '
-        'but was ${semantics.flagsCollection.isExpanded}.',
+        'but was ${semantics.hasFlag(SemanticsFlag.isExpanded)}.',
   );
 }

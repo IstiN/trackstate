@@ -266,12 +266,37 @@ void main() {
     ]);
   });
 
+  test('supports IN and NOT IN clauses for status and other fields', () {
+    final inProgressOrDone = service.search(
+      issues: issues,
+      project: project,
+      jql: 'project = TRACK AND status IN ("In Progress", Done)',
+    );
+    final notTodoOrDone = service.search(
+      issues: issues,
+      project: project,
+      jql: 'project = TRACK AND status NOT IN ("To Do", Done)',
+    );
+
+    expect(inProgressOrDone.issues.map((issue) => issue.key), [
+      'TRACK-2',
+      'TRACK-3',
+      'TRACK-10',
+      'TRACK-11',
+    ]);
+    expect(notTodoOrDone.issues.map((issue) => issue.key), [
+      'TRACK-2',
+      'TRACK-3',
+      'TRACK-10',
+    ]);
+  });
+
   test('rejects unsupported operators and unknown fields', () {
     expect(
       () => service.search(
         issues: issues,
         project: project,
-        jql: 'status IN (Done)',
+        jql: 'status WAS Done',
       ),
       throwsA(isA<JqlSearchException>()),
     );

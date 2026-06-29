@@ -39,7 +39,7 @@ void main() {
         );
         await tester.pumpAndSettle();
 
-        await tester.tap(find.widgetWithText(OutlinedButton, 'Connect GitHub'));
+        await tester.tap(find.widgetWithText(OutlinedButton, 'Connect GitHub').first);
         await tester.pumpAndSettle();
 
         await tester.enterText(_tokenField, 'ghp_ts371_read_only');

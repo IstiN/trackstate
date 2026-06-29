@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -12,6 +11,7 @@ import '../testing/components/factories/testing_dependencies.dart';
 import '../testing/core/interfaces/create_issue_accessibility_screen.dart';
 import '../testing/core/utils/local_trackstate_fixture.dart';
 import '../testing/fixtures/create_issue_accessibility_screen_fixture.dart';
+import 'dart:ui';
 
 void main() {
   setUp(() {

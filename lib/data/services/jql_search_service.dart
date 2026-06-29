@@ -157,6 +157,29 @@ class _JqlParser {
       return _TextSearchClause(value, isNegated: operatorText == '!~');
     }
 
+    final inMatch = RegExp(
+      r'^([A-Za-z][A-Za-z0-9]*)\s+(NOT\s+)?IN\s*\((.*)\)$',
+      caseSensitive: false,
+    ).firstMatch(clause);
+    if (inMatch != null) {
+      final field = _resolveField(inMatch.group(1)!);
+      if (field == _SupportedField.text) {
+        throw JqlSearchException(
+          'Field "${inMatch.group(1)}" does not support IN.',
+        );
+      }
+      final isNegated = inMatch.group(2) != null;
+      final rawValues = inMatch.group(3)!;
+      final values = _splitByCommaOutsideQuotes(rawValues)
+          .map((value) => _unquote(value.trim()))
+          .where((value) => value.isNotEmpty)
+          .toList();
+      if (values.isEmpty) {
+        throw JqlSearchException('Clause "$clause" is missing values.');
+      }
+      return _InJqlClause(field: field, values: values, isNegated: isNegated);
+    }
+
     final equalityMatch = RegExp(
       r'^([A-Za-z][A-Za-z0-9]*)\s*(!=|=)\s*(.+)$',
       caseSensitive: false,
@@ -502,6 +525,101 @@ class _ComparisonJqlClause extends _JqlClause {
     }
     return false;
   }
+}
+
+class _InJqlClause extends _JqlClause {
+  const _InJqlClause({
+    required this.field,
+    required this.values,
+    required this.isNegated,
+  });
+
+  final _SupportedField field;
+  final List<String> values;
+  final bool isNegated;
+
+  @override
+  bool matches(TrackStateIssue issue, ProjectConfig project) {
+    for (final value in values) {
+      if (_matchesValue(issue, project, value)) {
+        return !isNegated;
+      }
+    }
+    return isNegated;
+  }
+
+  bool _matchesValue(
+    TrackStateIssue issue,
+    ProjectConfig project,
+    String value,
+  ) {
+    final normalizedValue = value.toLowerCase();
+    return switch (field) {
+      _SupportedField.project =>
+        issue.project.toLowerCase() == normalizedValue,
+      _SupportedField.issueType => _matchesConfiguredEntry(
+        issue.issueTypeId,
+        project.issueTypeDefinitions,
+        normalizedValue,
+      ),
+      _SupportedField.status => _matchesConfiguredEntry(
+        issue.statusId,
+        project.statusDefinitions,
+        normalizedValue,
+      ),
+      _SupportedField.priority => _matchesConfiguredEntry(
+        issue.priorityId,
+        project.priorityDefinitions,
+        normalizedValue,
+      ),
+      _SupportedField.archived => _matchesArchived(issue, normalizedValue),
+      _SupportedField.assignee =>
+        issue.assignee.trim().toLowerCase() == normalizedValue,
+      _SupportedField.labels => issue.labels.any(
+        (label) => label.toLowerCase() == normalizedValue,
+      ),
+      _SupportedField.parent =>
+        (issue.parentKey ?? '').toLowerCase() == normalizedValue,
+      _SupportedField.epic =>
+        (issue.epicKey ?? '').toLowerCase() == normalizedValue,
+      _SupportedField.key => issue.key.toLowerCase() == normalizedValue,
+      _SupportedField.summary =>
+        issue.summary.toLowerCase() == normalizedValue,
+      _SupportedField.text => _searchableText(issue).contains(normalizedValue),
+    };
+  }
+
+  bool _matchesConfiguredEntry(
+    String issueValue,
+    List<TrackStateConfigEntry> definitions,
+    String candidateValue,
+  ) {
+    for (final definition in definitions) {
+      final normalizedId = definition.id.toLowerCase();
+      final normalizedName = definition.name.toLowerCase();
+      if (candidateValue == normalizedId || candidateValue == normalizedName) {
+        return issueValue.toLowerCase() == normalizedId;
+      }
+    }
+    return issueValue.toLowerCase() == candidateValue;
+  }
+
+  bool _matchesArchived(TrackStateIssue issue, String candidateValue) {
+    if (candidateValue == 'true' ||
+        candidateValue == 'yes' ||
+        candidateValue == 'archived') {
+      return issue.isArchived;
+    }
+    if (candidateValue == 'false' ||
+        candidateValue == 'no' ||
+        candidateValue == 'active') {
+      return !issue.isArchived;
+    }
+    return false;
+  }
+
+  @override
+  bool get requiresIssueDetails => field == _SupportedField.text;
 }
 
 class _EmptyJqlClause extends _JqlClause {

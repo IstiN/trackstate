@@ -13,7 +13,7 @@ void main() {
   testWidgets(
     'main entrypoint mounts the TrackState shell instead of the TS-908 probe surface',
     (tester) async {
-      app_main.main();
+      await app_main.main();
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 100));
       await tester.pump(const Duration(seconds: 1));

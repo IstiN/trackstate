@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
@@ -7,6 +8,7 @@ import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
 import '../../core/interfaces/saved_workspace_settings_driver.dart';
 import '../../core/models/saved_workspace_settings_state.dart';
+import 'dart:ui';
 
 class FlutterSavedWorkspaceSettingsDriver
     implements SavedWorkspaceSettingsDriver {
@@ -125,9 +127,11 @@ class FlutterSavedWorkspaceSettingsDriver
       }
       workspaceLabels.add(label);
       if (_tester
-          .getSemantics(workspaceCard.first)
-          .flagsCollection
-          .isSelected) {
+              .getSemantics(workspaceCard.first)
+              .getSemanticsData()
+              .flagsCollection
+              .isSelected ==
+          Tristate.isTrue) {
         selectedWorkspaceLabels.add(label);
       }
     }

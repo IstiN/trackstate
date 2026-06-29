@@ -61,6 +61,8 @@ class AccessCallout extends StatelessWidget {
     this.onPrimaryAction,
     this.secondaryActionLabel,
     this.onSecondaryAction,
+    this.dismissLabel,
+    this.onDismiss,
     this.actionTraversalOrderBase,
   });
 
@@ -74,6 +76,8 @@ class AccessCallout extends StatelessWidget {
   final VoidCallback? onPrimaryAction;
   final String? secondaryActionLabel;
   final VoidCallback? onSecondaryAction;
+  final String? dismissLabel;
+  final VoidCallback? onDismiss;
   final double? actionTraversalOrderBase;
 
   @override
@@ -126,6 +130,20 @@ class AccessCallout extends StatelessWidget {
                       ),
                     ),
                   ),
+                  if (onDismiss != null)
+                    Semantics(
+                      button: true,
+                      label: dismissLabel ?? 'Close',
+                      child: IconButton(
+                        icon: Icon(Icons.close, size: 18, color: contentColor),
+                        onPressed: onDismiss,
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(
+                          minWidth: 28,
+                          minHeight: 28,
+                        ),
+                      ),
+                    ),
                 ],
               ),
             ),

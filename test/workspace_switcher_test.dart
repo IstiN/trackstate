@@ -4121,8 +4121,8 @@ void main() {
           of: triggerSemantics,
           matching: find.semantics.byPredicate((node) {
             final data = node.getSemanticsData();
-            return data.flagsCollection.isButton &&
-                data.flagsCollection.isFocusable;
+            return data.hasFlag(SemanticsFlag.isButton) &&
+                data.hasFlag(SemanticsFlag.isFocusable);
           }, describeMatch: (_) => 'focusable button semantics node'),
           matchRoot: true,
         );
@@ -4501,19 +4501,19 @@ void main() {
       final thirdSem = thirdRowSemanticsNode.evaluate().single;
 
       expect(
-        mainSem.getSemanticsData().flagsCollection.isFocusable,
+        mainSem.getSemanticsData().hasFlag(SemanticsFlag.isFocused),
         isTrue,
-        reason: 'Active workspace row should be focusable.',
+        reason: 'Active workspace row should be focused.',
       );
       expect(
-        altSem.getSemanticsData().flagsCollection.isFocusable,
+        altSem.getSemanticsData().hasFlag(SemanticsFlag.isFocused),
         isFalse,
-        reason: 'Inactive workspace row should NOT be focusable.',
+        reason: 'Inactive workspace row should NOT be focused.',
       );
       expect(
-        thirdSem.getSemanticsData().flagsCollection.isFocusable,
+        thirdSem.getSemanticsData().hasFlag(SemanticsFlag.isFocused),
         isFalse,
-        reason: 'Inactive workspace row should NOT be focusable.',
+        reason: 'Inactive workspace row should NOT be focused.',
       );
 
       // Press ArrowDown to move selection to the second workspace.
@@ -4528,7 +4528,7 @@ void main() {
 
       expect(service.state.activeWorkspaceId, 'hosted:alt/repo@main');
 
-      // After ArrowDown, only the newly active row should be focusable.
+      // After ArrowDown, only the newly active row should be focused.
       final mainRowSemanticsNodeAfter = find.semantics.byPredicate(
         (node) =>
             node.getSemanticsData().identifier ==
@@ -4550,21 +4550,21 @@ void main() {
       final thirdSemAfter = thirdRowSemanticsNodeAfter.evaluate().single;
 
       expect(
-        mainSemAfter.getSemanticsData().flagsCollection.isFocusable,
+        mainSemAfter.getSemanticsData().hasFlag(SemanticsFlag.isFocused),
         isFalse,
         reason:
-            'Previously active row should lose focusable after selection moves.',
+            'Previously active row should lose focus after selection moves.',
       );
       expect(
-        altSemAfter.getSemanticsData().flagsCollection.isFocusable,
+        altSemAfter.getSemanticsData().hasFlag(SemanticsFlag.isFocused),
         isTrue,
-        reason: 'Newly active workspace row should be focusable.',
+        reason: 'Newly active workspace row should be focused.',
       );
       expect(
-        thirdSemAfter.getSemanticsData().flagsCollection.isFocusable,
+        thirdSemAfter.getSemanticsData().hasFlag(SemanticsFlag.isFocused),
         isFalse,
         reason:
-            'Inactive workspace row should remain not focusable after selection changes.',
+            'Inactive workspace row should remain not focused after selection changes.',
       );
 
       semantics.dispose();
@@ -4823,7 +4823,7 @@ Future<void> _pumpUntilVisible(
 
 String? _focusedLabel(WidgetTester tester, Map<String, Finder> candidates) {
   final focusedSemantics = find.semantics.byPredicate(
-    (node) => node.getSemanticsData().flagsCollection.isFocused,
+    (node) => node.getSemanticsData().hasFlag(SemanticsFlag.isFocused),
     describeMatch: (_) => 'focused semantics node',
   );
   final hasFocusedSemantics = focusedSemantics.evaluate().isNotEmpty;

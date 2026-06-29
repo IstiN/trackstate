@@ -217,7 +217,7 @@ List<String> _focusedSemanticsLabels(WidgetTester tester) {
   final labels = <String>[];
   void visit(SemanticsNode node) {
     final data = node.getSemanticsData();
-    if (data.flagsCollection.isFocused) {
+    if (data.hasFlag(SemanticsFlag.isFocused)) {
       final label = data.label.trim();
       labels.add(label.isEmpty ? '<empty label>' : label);
     }

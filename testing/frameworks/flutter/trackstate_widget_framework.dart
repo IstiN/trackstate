@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
@@ -207,8 +208,9 @@ class TrackStateWidgetFramework implements SettingsProviderDriver {
   bool _finderHasSelectedState(Finder finder) {
     final matches = finder.evaluate().toList();
     for (var index = 0; index < matches.length; index++) {
-      final flags = tester.getSemantics(finder.at(index)).flagsCollection;
-      if (flags.isChecked || flags.isSelected) {
+      final node = tester.getSemantics(finder.at(index));
+      if (node.hasFlag(SemanticsFlag.isChecked) ||
+          node.hasFlag(SemanticsFlag.isSelected)) {
         return true;
       }
     }
