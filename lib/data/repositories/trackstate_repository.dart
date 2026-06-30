@@ -310,6 +310,9 @@ class ProviderBackedTrackStateRepository
   }) async {
     try {
       final check = await _provider.checkSync(previousState: previousState);
+      if (check.signals.isNotEmpty || check.changedPaths.isNotEmpty) {
+        markHostedTreeStale();
+      }
       final permission = check.state.permission;
       if (permission != null) {
         _syncProviderSession(
