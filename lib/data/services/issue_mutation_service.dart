@@ -2328,10 +2328,24 @@ Future<_WorkflowDefinition> _loadWorkflow({
       ],
     );
   } on TrackStateProviderException {
-    throw const TrackStateRepositoryException(
-      'Workflow rules are required for status transitions but config/workflows.json was not found.',
-    );
+    // Freshly cloned repositories may not have config/workflows.json yet.
+    // Use a permissive default workflow so status transitions still work.
+    return _permissiveWorkflow(project.statusDefinitions);
   }
+}
+
+_WorkflowDefinition _permissiveWorkflow(
+  List<TrackStateConfigEntry> statusDefinitions,
+) {
+  final statusIds = statusDefinitions.map((status) => status.id).toList();
+  return _WorkflowDefinition(
+    transitions: [
+      for (final fromId in statusIds)
+        for (final toId in statusIds)
+          if (fromId != toId)
+            _WorkflowTransition(fromId: fromId, toId: toId),
+    ],
+  );
 }
 
 bool _isTransitionAllowed(
