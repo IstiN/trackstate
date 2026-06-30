@@ -1,6 +1,5 @@
 import 'dart:typed_data';
 
-import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
@@ -38,7 +37,7 @@ void main() {
         final liveRegionAlert = find.semantics.byPredicate(
           (node) =>
               node.getSemanticsData().label.trim() == expectedMessage &&
-              node.getSemanticsData().hasFlag(SemanticsFlag.isLiveRegion),
+              node.getSemanticsData().flagsCollection.isLiveRegion,
           describeMatch: (_) =>
               'live-region semantics node for the move validation failure banner',
         );

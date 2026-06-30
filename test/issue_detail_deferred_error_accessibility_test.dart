@@ -1,4 +1,4 @@
-import 'package:flutter/semantics.dart';
+import 'dart:ui' show Tristate;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/widgets.dart';
@@ -144,7 +144,7 @@ String? _focusedCandidateLabel(List<String> candidateLabels) {
   for (final label in candidateLabels) {
     final focused = find.semantics.byPredicate(
       (node) =>
-          node.getSemanticsData().hasFlag(SemanticsFlag.isFocused) &&
+          node.getSemanticsData().flagsCollection.isFocused == Tristate.isTrue &&
           _normalizeLabel(node.label) == label,
       describeMatch: (_) => 'focused semantics labeled $label',
     );

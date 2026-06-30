@@ -1918,8 +1918,8 @@ class TrackerViewModel extends ChangeNotifier {
                   final recovery = _startupRecoveryFrom(error);
                   if (recovery != null) {
                     _startupRecovery = recovery;
-                  } else if (_message == null) {
-                    _message = TrackerMessage.dataLoadFailed(error);
+                  } else {
+                    _message ??= TrackerMessage.dataLoadFailed(error);
                   }
                 }
               },

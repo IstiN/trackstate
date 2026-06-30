@@ -30,7 +30,7 @@ void main() {
 
       final buttonNodes = <SemanticsNode>[];
       void collectButtonNodes(SemanticsNode node) {
-        if (node.getSemanticsData().hasFlag(SemanticsFlag.isButton)) {
+        if (node.getSemanticsData().flagsCollection.isButton) {
           buttonNodes.add(node);
         }
         node.visitChildren((child) {
@@ -88,7 +88,7 @@ void main() {
       final data = tester
           .getSemantics(find.bySemanticsLabel('Connect GitHub'))
           .getSemanticsData();
-      expect(data.hasFlag(SemanticsFlag.isButton), isTrue);
+      expect(data.flagsCollection.isButton, isTrue);
       expect(data.hasAction(SemanticsAction.tap), isFalse);
 
       semantics.dispose();

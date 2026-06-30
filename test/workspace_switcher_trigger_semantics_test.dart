@@ -1,6 +1,6 @@
+import 'dart:ui' show Tristate;
 import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
@@ -30,9 +30,9 @@ void main() {
       );
       final triggerSemantics = triggerNode.getSemanticsData();
 
-      expect(triggerSemantics.hasFlag(SemanticsFlag.isButton), isTrue);
+      expect(triggerSemantics.flagsCollection.isButton, isTrue);
       expect(
-        triggerSemantics.hasFlag(SemanticsFlag.isFocusable),
+        triggerSemantics.flagsCollection.isFocused != Tristate.none,
         isTrue,
         reason:
             'The exported workspace switcher semantics node must be keyboard focusable '
@@ -358,17 +358,17 @@ void _expectExpandedState(
   final semantics = tester.getSemantics(trigger).getSemanticsData();
 
   expect(
-    semantics.hasFlag(SemanticsFlag.hasExpandedState),
+    semantics.flagsCollection.isExpanded != Tristate.none,
     hasExpandedState,
     reason:
         '$context should expose hasExpandedState=$hasExpandedState, '
-        'but was ${semantics.hasFlag(SemanticsFlag.hasExpandedState)}.',
+        'but was ${semantics.flagsCollection.isExpanded != Tristate.none}.',
   );
   expect(
-    semantics.hasFlag(SemanticsFlag.isExpanded),
+    semantics.flagsCollection.isExpanded == Tristate.isTrue,
     isExpanded,
     reason:
         '$context should expose isExpanded=$isExpanded, '
-        'but was ${semantics.hasFlag(SemanticsFlag.isExpanded)}.',
+        'but was ${semantics.flagsCollection.isExpanded == Tristate.isTrue}.',
   );
 }
