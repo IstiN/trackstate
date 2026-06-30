@@ -701,9 +701,7 @@ class TrackStateAppScreen implements TrackStateAppComponent {
       if (tester
               .getSemantics(finder.at(index))
               .getSemanticsData()
-              .flagsCollection
-              .isSelected ==
-          Tristate.isTrue) {
+              .hasFlag(SemanticsFlag.isSelected)) { // ignore: deprecated_member_use
         return true;
       }
     }

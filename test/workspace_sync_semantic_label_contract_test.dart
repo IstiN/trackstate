@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   test(
     'flutter analyze rejects a raw string passed to the workspace sync semantic label API',
+    timeout: const Timeout(Duration(minutes: 2)),
     () async {
       final tempDir = await Directory.systemTemp.createTemp(
         'trackstate-sync-semantic-contract',

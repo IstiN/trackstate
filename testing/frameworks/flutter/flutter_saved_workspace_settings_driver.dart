@@ -129,9 +129,7 @@ class FlutterSavedWorkspaceSettingsDriver
       if (_tester
               .getSemantics(workspaceCard.first)
               .getSemanticsData()
-              .flagsCollection
-              .isSelected ==
-          Tristate.isTrue) {
+              .hasFlag(SemanticsFlag.isSelected)) { // ignore: deprecated_member_use
         selectedWorkspaceLabels.add(label);
       }
     }
