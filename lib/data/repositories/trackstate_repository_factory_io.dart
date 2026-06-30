@@ -10,7 +10,10 @@ TrackStateRepository createPlatformTrackStateRepository({
   String? localRepositoryPath,
 }) {
   return switch (runtime) {
-    TrackStateRuntime.github => SetupTrackStateRepository(client: client),
+    TrackStateRuntime.github => SetupTrackStateRepository(
+        client: client,
+        hostedStartupProbeTimeout: const Duration(seconds: 5),
+      ),
     TrackStateRuntime.localGit => LocalTrackStateRepository(
       repositoryPath:
           (localRepositoryPath ?? configuredLocalRepositoryPath).trim().isEmpty

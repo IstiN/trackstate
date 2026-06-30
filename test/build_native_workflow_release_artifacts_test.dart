@@ -20,7 +20,7 @@ void main() {
     return Process.run(
       'bash',
       <String>[
-        '-lc',
+        '-c',
         'set -euo pipefail\n'
             'source "\$HELPER_SCRIPT"\n'
             '$command\n',

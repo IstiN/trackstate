@@ -9,7 +9,7 @@ import 'package:trackstate/ui/features/tracker/view_models/tracker_view_model.da
 
 void main() {
   test(
-    'deferred access restore with startup recovery keeps recovery visible after background auth succeeds and reloads snapshot',
+    'deferred access restore with startup recovery clears recovery after background auth succeeds and reloads a clean snapshot',
     () async {
       const workspaceId = 'hosted:trackstate/trackstate@main';
       final provider = _DelayedAuthProvider();
@@ -62,26 +62,25 @@ void main() {
       await Future<void>.delayed(Duration.zero);
       await Future<void>.delayed(Duration.zero);
 
-      // Even though the reloaded snapshot has no startupRecovery, the view
-      // model must preserve the original recovery so the user can still see
-      // the callout and retry.
+      // The reloaded snapshot has no startupRecovery, so the original rate
+      // limit recovery should be cleared now that auth succeeded.
       expect(
         viewModel.hasStartupRecovery,
-        isTrue,
+        isFalse,
         reason:
-            'The startup recovery must survive the snapshot reload after background auth succeeds.',
+            'The startup recovery must be cleared after a clean snapshot reload follows a successful background auth.',
       );
       expect(
         viewModel.startupRecovery,
-        isNotNull,
+        isNull,
         reason:
-            'The recovery callout must remain available after the snapshot is reloaded.',
+            'The recovery callout must be dismissed once the snapshot is reloaded successfully.',
       );
       expect(
         viewModel.section,
-        TrackerSection.settings,
+        TrackerSection.dashboard,
         reason:
-            'The app must remain routed to Settings while the recovery is still present.',
+            'The app should return to the default section once the recovery is cleared.',
       );
       expect(
         viewModel.isStartupGuardBlockingInteractiveShell,

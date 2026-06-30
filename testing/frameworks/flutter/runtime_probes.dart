@@ -1,4 +1,3 @@
-import 'dart:ui';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
@@ -12,6 +11,7 @@ import '../../core/models/runtime_startup_observation.dart';
 import '../../core/models/runtime_ui_observation.dart';
 import '../../core/models/runtime_ui_stability_observation.dart';
 import 'runtime_define_override_probe_stub.dart'
+import 'dart:ui';
     if (dart.library.io) 'runtime_define_override_probe_io.dart'
     as runtime_define_override_probe;
 

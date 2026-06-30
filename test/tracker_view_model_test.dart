@@ -219,6 +219,38 @@ void main() {
     },
   );
 
+  test(
+    'view model keeps stored token when automatic restore fails with a rate limit',
+    () async {
+      final authStore = _TokenTrackingAuthStore(
+        repository: SetupTrackStateRepository.repositoryName,
+        token: 'github-token',
+      );
+      final viewModel = TrackerViewModel(
+        repository: _RateLimitConnectRepository(),
+        authStore: authStore,
+      );
+
+      await viewModel.load();
+
+      expect(viewModel.snapshot, isNotNull);
+      expect(viewModel.isLoading, isFalse);
+      expect(viewModel.hasStartupRecovery, isTrue);
+      expect(
+        viewModel.startupRecovery?.kind,
+        TrackerStartupRecoveryKind.githubRateLimit,
+      );
+      expect(
+        authStore.clearedRepositories,
+        isEmpty,
+        reason:
+            'A non-authentication error such as a rate limit must not wipe the '
+            'stored token, otherwise the user is forced to re-enter it on every '
+            'launch.',
+      );
+    },
+  );
+
   test('view model appends the next search page through load more', () async {
     final viewModel = TrackerViewModel(
       repository: DemoTrackStateRepository(
@@ -533,7 +565,7 @@ void main() {
   );
 
   test(
-    'view model resumes startup recovery once after GitHub authentication succeeds',
+    'view model clears startup recovery once after GitHub authentication succeeds and reload resolves',
     () async {
       final snapshot = await const DemoTrackStateRepository().loadSnapshot();
       final repository = _StartupRecoveryRepository(
@@ -546,15 +578,15 @@ void main() {
 
       expect(repository.loadCount, 2);
       expect(repository.connectCount, 1);
-      // The recovery must survive the snapshot reload after background auth
-      // succeeds so the user can still see the callout and retry (TS-1429).
+      // Once the post-auth reload returns a clean snapshot the original rate
+      // limit recovery is no longer relevant.
       expect(
         viewModel.startupRecovery,
-        isNotNull,
+        isNull,
         reason:
-            'The startup recovery must remain visible after the snapshot is reloaded following a successful GitHub connection.',
+            'The startup recovery must be cleared after the snapshot is reloaded successfully following a GitHub connection.',
       );
-      expect(viewModel.section, TrackerSection.settings);
+      expect(viewModel.section, TrackerSection.dashboard);
     },
   );
 
@@ -2346,6 +2378,21 @@ class _FailingStoredTokenRepository extends DemoTrackStateRepository {
   @override
   Future<RepositoryUser> connect(RepositoryConnection connection) async {
     throw const TrackStateRepositoryException('Bad credentials');
+  }
+}
+
+class _RateLimitConnectRepository extends DemoTrackStateRepository {
+  @override
+  bool get supportsGitHubAuth => true;
+
+  @override
+  Future<RepositoryUser> connect(RepositoryConnection connection) async {
+    throw const GitHubRateLimitException(
+      message:
+          'GitHub API request failed for /user (403): API rate limit exceeded',
+      requestPath: '/user',
+      statusCode: 403,
+    );
   }
 }
 

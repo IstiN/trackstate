@@ -12,6 +12,7 @@ import '../../core/interfaces/local_git_repository_port.dart';
 import '../../core/interfaces/trackstate_app_component.dart';
 import '../../core/models/issue_search_result_selection_observation.dart';
 import '../../frameworks/flutter/trackstate_test_runtime.dart';
+import 'dart:ui';
 
 class TrackStateAppScreen implements TrackStateAppComponent {
   TrackStateAppScreen(
@@ -698,8 +699,9 @@ class TrackStateAppScreen implements TrackStateAppComponent {
     final matches = finder.evaluate().toList();
     for (var index = 0; index < matches.length; index++) {
       if (tester
-          .getSemantics(finder.at(index))
-          .hasFlag(SemanticsFlag.isSelected)) {
+              .getSemantics(finder.at(index))
+              .getSemanticsData()
+              .hasFlag(SemanticsFlag.isSelected)) { // ignore: deprecated_member_use
         return true;
       }
     }

@@ -289,9 +289,9 @@ class CreateIssueAccessibilityRobot {
   }
 
   bool _isScreenReaderTarget(SemanticsNode node) {
-    return node.flagsCollection.isButton ||
-        node.flagsCollection.isTextField ||
-        node.flagsCollection.isReadOnly;
+    return node.hasFlag(SemanticsFlag.isButton) ||
+        node.hasFlag(SemanticsFlag.isTextField) ||
+        node.hasFlag(SemanticsFlag.isReadOnly);
   }
 
   bool _isMergedContainerLabel(String label, List<SemanticsNode> children) {

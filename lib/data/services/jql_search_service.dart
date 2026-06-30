@@ -157,6 +157,29 @@ class _JqlParser {
       return _TextSearchClause(value, isNegated: operatorText == '!~');
     }
 
+    final inMatch = RegExp(
+      r'^([A-Za-z][A-Za-z0-9]*)\s+(NOT\s+)?IN\s*\((.*)\)$',
+      caseSensitive: false,
+    ).firstMatch(clause);
+    if (inMatch != null) {
+      final field = _resolveField(inMatch.group(1)!);
+      if (field == _SupportedField.text) {
+        throw JqlSearchException(
+          'Field "${inMatch.group(1)}" does not support IN.',
+        );
+      }
+      final isNegated = inMatch.group(2) != null;
+      final rawValues = inMatch.group(3)!;
+      final values = _splitByCommaOutsideQuotes(rawValues)
+          .map((value) => _unquote(value.trim()))
+          .where((value) => value.isNotEmpty)
+          .toList();
+      if (values.isEmpty) {
+        throw JqlSearchException('Clause "$clause" is missing values.');
+      }
+      return _InJqlClause(field: field, values: values, isNegated: isNegated);
+    }
+
     final equalityMatch = RegExp(
       r'^([A-Za-z][A-Za-z0-9]*)\s*(!=|=)\s*(.+)$',
       caseSensitive: false,
@@ -424,24 +447,17 @@ abstract class _JqlClause {
   bool matches(TrackStateIssue issue, ProjectConfig project);
 
   bool get requiresIssueDetails => false;
-}
 
-class _ComparisonJqlClause extends _JqlClause {
-  const _ComparisonJqlClause({
-    required this.field,
-    required this.isNegated,
-    required this.value,
-  });
-
-  final _SupportedField field;
-  final bool isNegated;
-  final String value;
-
-  @override
-  bool matches(TrackStateIssue issue, ProjectConfig project) {
+  bool _matchesFieldValue(
+    _SupportedField field,
+    TrackStateIssue issue,
+    ProjectConfig project,
+    String value,
+  ) {
     final normalizedValue = value.toLowerCase();
-    final matches = switch (field) {
-      _SupportedField.project => issue.project.toLowerCase() == normalizedValue,
+    return switch (field) {
+      _SupportedField.project =>
+        issue.project.toLowerCase() == normalizedValue,
       _SupportedField.issueType => _matchesConfiguredEntry(
         issue.issueTypeId,
         project.issueTypeDefinitions,
@@ -468,10 +484,10 @@ class _ComparisonJqlClause extends _JqlClause {
       _SupportedField.epic =>
         (issue.epicKey ?? '').toLowerCase() == normalizedValue,
       _SupportedField.key => issue.key.toLowerCase() == normalizedValue,
-      _SupportedField.summary => issue.summary.toLowerCase() == normalizedValue,
+      _SupportedField.summary =>
+        issue.summary.toLowerCase() == normalizedValue,
       _SupportedField.text => _searchableText(issue).contains(normalizedValue),
     };
-    return isNegated ? !matches : matches;
   }
 
   bool _matchesConfiguredEntry(
@@ -502,6 +518,56 @@ class _ComparisonJqlClause extends _JqlClause {
     }
     return false;
   }
+}
+
+class _ComparisonJqlClause extends _JqlClause {
+  const _ComparisonJqlClause({
+    required this.field,
+    required this.isNegated,
+    required this.value,
+  });
+
+  final _SupportedField field;
+  final bool isNegated;
+  final String value;
+
+  @override
+  bool matches(TrackStateIssue issue, ProjectConfig project) {
+    final matches = _matchesFieldValue(field, issue, project, value);
+    return isNegated ? !matches : matches;
+  }
+}
+
+class _InJqlClause extends _JqlClause {
+  const _InJqlClause({
+    required this.field,
+    required this.values,
+    required this.isNegated,
+  });
+
+  final _SupportedField field;
+  final List<String> values;
+  final bool isNegated;
+
+  @override
+  bool matches(TrackStateIssue issue, ProjectConfig project) {
+    for (final value in values) {
+      if (_matchesValue(issue, project, value)) {
+        return !isNegated;
+      }
+    }
+    return isNegated;
+  }
+
+  bool _matchesValue(
+    TrackStateIssue issue,
+    ProjectConfig project,
+    String value,
+  ) =>
+      _matchesFieldValue(field, issue, project, value);
+
+  @override
+  bool get requiresIssueDetails => field == _SupportedField.text;
 }
 
 class _EmptyJqlClause extends _JqlClause {

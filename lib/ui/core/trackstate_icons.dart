@@ -23,6 +23,10 @@ enum TrackStateIconGlyph {
   moon,
   sun,
   warning,
+  chevronDown,
+  chevronUp,
+  chevronLeft,
+  chevronRight,
 }
 
 class TrackStateIcon extends StatelessWidget {
@@ -381,6 +385,30 @@ class _TrackStateIconPainter extends CustomPainter {
           paint,
         );
         canvas.drawCircle(Offset(s * .5, s * .72), s * .05, paint);
+      case TrackStateIconGlyph.chevronDown:
+        final path = Path()
+          ..moveTo(s * .28, s * .38)
+          ..lineTo(s * .5, s * .62)
+          ..lineTo(s * .72, s * .38);
+        canvas.drawPath(path, paint);
+      case TrackStateIconGlyph.chevronUp:
+        final path = Path()
+          ..moveTo(s * .28, s * .62)
+          ..lineTo(s * .5, s * .38)
+          ..lineTo(s * .72, s * .62);
+        canvas.drawPath(path, paint);
+      case TrackStateIconGlyph.chevronLeft:
+        final path = Path()
+          ..moveTo(s * .62, s * .28)
+          ..lineTo(s * .38, s * .5)
+          ..lineTo(s * .62, s * .72);
+        canvas.drawPath(path, paint);
+      case TrackStateIconGlyph.chevronRight:
+        final path = Path()
+          ..moveTo(s * .38, s * .28)
+          ..lineTo(s * .62, s * .5)
+          ..lineTo(s * .38, s * .72);
+        canvas.drawPath(path, paint);
     }
   }
 

@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trackstate/data/repositories/trackstate_repository.dart';
@@ -34,8 +35,8 @@ void main() {
           matching: find.semantics.byPredicate(
             (node) {
               final data = node.getSemanticsData();
-              return data.flagsCollection.isButton &&
-                  data.flagsCollection.isFocusable;
+              return data.hasFlag(SemanticsFlag.isButton) && // ignore: deprecated_member_use
+                  data.hasFlag(SemanticsFlag.isFocusable); // ignore: deprecated_member_use
             },
             describeMatch: (_) => 'focusable button semantics node',
           ),

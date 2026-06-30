@@ -9,7 +9,7 @@ void main() {
   });
 
   testWidgets('main bootstraps the TrackState app', (tester) async {
-    app_main.main();
+    await app_main.main();
     await tester.pump();
 
     expect(find.byType(TrackStateApp), findsOneWidget);

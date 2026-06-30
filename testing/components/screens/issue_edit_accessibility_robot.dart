@@ -475,7 +475,7 @@ class IssueEditAccessibilityRobot {
       }
       final data = node.getSemanticsData();
       final label = _normalizedLabel(data.label);
-      if (data.flagsCollection.isFocused && label.isNotEmpty) {
+      if (data.hasFlag(SemanticsFlag.isFocused) && label.isNotEmpty) {
         focusedLabel = label;
         return;
       }
@@ -530,7 +530,7 @@ class IssueEditAccessibilityRobot {
 
   String? _focusedLabel(Map<String, Finder> candidates) {
     final focusedSemantics = find.semantics.byPredicate(
-      (node) => node.getSemanticsData().flagsCollection.isFocused,
+      (node) => node.getSemanticsData().hasFlag(SemanticsFlag.isFocused),
       describeMatch: (_) => 'focused semantics node',
     );
     final hasFocusedSemantics = focusedSemantics.evaluate().isNotEmpty;
@@ -539,7 +539,7 @@ class IssueEditAccessibilityRobot {
       if (hasFocusedSemantics) {
         final exactFocusedMatch = find.semantics.byPredicate(
           (node) =>
-              node.getSemanticsData().flagsCollection.isFocused &&
+              node.getSemanticsData().hasFlag(SemanticsFlag.isFocused) &&
               _normalizedLabel(node.label) == entry.key,
           describeMatch: (_) => 'focused semantics labeled ${entry.key}',
         );
@@ -623,7 +623,7 @@ class IssueEditAccessibilityRobot {
         targets.add(
           _ScreenReaderTarget(
             label: label,
-            isButton: node.getSemanticsData().flagsCollection.isButton,
+            isButton: node.getSemanticsData().hasFlag(SemanticsFlag.isButton),
           ),
         );
       }
@@ -638,9 +638,9 @@ class IssueEditAccessibilityRobot {
 
   bool _isScreenReaderTarget(SemanticsNode node) {
     final data = node.getSemanticsData();
-    return data.flagsCollection.isButton ||
-        data.flagsCollection.isTextField ||
-        data.flagsCollection.isReadOnly;
+    return data.hasFlag(SemanticsFlag.isButton) ||
+        data.hasFlag(SemanticsFlag.isTextField) ||
+        data.hasFlag(SemanticsFlag.isReadOnly);
   }
 
   bool _isMergedContainerLabel(String label, List<SemanticsNode> children) {

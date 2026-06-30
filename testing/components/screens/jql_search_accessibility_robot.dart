@@ -196,7 +196,7 @@ class JqlSearchAccessibilityRobot
 
   String? focusedLabel(Map<String, Finder> candidates) {
     final focusedSemantics = find.semantics.byPredicate(
-      (node) => node.getSemanticsData().flagsCollection.isFocused,
+      (node) => node.getSemanticsData().hasFlag(SemanticsFlag.isFocused),
       describeMatch: (_) => 'focused semantics node',
     );
     if (focusedSemantics.evaluate().isEmpty) {
@@ -333,8 +333,9 @@ class JqlSearchAccessibilityRobot
   }
 
   bool _isInteractiveTarget(SemanticsNode node) {
-    final flags = node.getSemanticsData().flagsCollection;
-    return flags.isButton || flags.isTextField;
+    final data = node.getSemanticsData();
+    return data.hasFlag(SemanticsFlag.isButton) ||
+        data.hasFlag(SemanticsFlag.isTextField);
   }
 
   bool _isMergedContainerLabel(String label, List<SemanticsNode> children) {

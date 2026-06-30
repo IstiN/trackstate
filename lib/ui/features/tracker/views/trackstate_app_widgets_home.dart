@@ -72,42 +72,49 @@ class _TrackerHome extends StatelessWidget {
     final colors = context.ts;
     if (viewModel.snapshot == null) {
       if (viewModel.startupRecovery != null) {
-        return Scaffold(
-          backgroundColor: colors.page,
-          body: SafeArea(
-            child: StartupRecoveryView(
-              viewModel: viewModel,
-              onRetryStartupRecovery: onRetryStartupRecovery,
-              secondaryActionLabel:
-                  viewModel.supportsGitHubAuth ? l10n.connectGitHub : null,
-              onSecondaryAction: viewModel.supportsGitHubAuth
-                  ? () => _showRepositoryAccessDialog(context, viewModel)
-                  : null,
+        return _withWindowTitleBar(
+          Scaffold(
+            backgroundColor: colors.page,
+            body: SafeArea(
+              child: StartupRecoveryView(
+                viewModel: viewModel,
+                onRetryStartupRecovery: onRetryStartupRecovery,
+                secondaryActionLabel: viewModel.supportsGitHubAuth
+                    ? l10n.connectGitHub
+                    : null,
+                onSecondaryAction: viewModel.supportsGitHubAuth
+                    ? () => _showRepositoryAccessDialog(context, viewModel)
+                    : null,
+              ),
             ),
           ),
         );
       }
       if (viewModel.isLoading) {
-        return Scaffold(
-          body: Center(
-            child: Semantics(
-              label: l10n.appTitle,
-              child: CircularProgressIndicator(color: colors.primary),
+        return _withWindowTitleBar(
+          Scaffold(
+            body: Center(
+              child: Semantics(
+                label: l10n.appTitle,
+                child: CircularProgressIndicator(color: colors.primary),
+              ),
             ),
           ),
         );
       }
-      return Scaffold(
-        backgroundColor: colors.page,
-        body: SafeArea(
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 720),
-              child: MessageBanner(
-                message: viewModel.message,
-                onDismiss: viewModel.message == null
-                    ? null
-                    : viewModel.dismissMessage,
+      return _withWindowTitleBar(
+        Scaffold(
+          backgroundColor: colors.page,
+          body: SafeArea(
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 720),
+                child: MessageBanner(
+                  message: viewModel.message,
+                  onDismiss: viewModel.message == null
+                      ? null
+                      : viewModel.dismissMessage,
+                ),
               ),
             ),
           ),
@@ -116,141 +123,159 @@ class _TrackerHome extends StatelessWidget {
     }
 
     if (viewModel.isStartupGuardBlockingInteractiveShell) {
-      return Scaffold(
-        body: Center(
-          child: Semantics(
-            label: l10n.appTitle,
-            child: CircularProgressIndicator(color: colors.primary),
+      return _withWindowTitleBar(
+        Scaffold(
+          body: Center(
+            child: Semantics(
+              label: l10n.appTitle,
+              child: CircularProgressIndicator(color: colors.primary),
+            ),
           ),
         ),
       );
     }
 
-    return Shortcuts(
-      shortcuts: const {
-        SingleActivator(LogicalKeyboardKey.digit1): _SelectSectionIntent(
-          TrackerSection.dashboard,
-        ),
-        SingleActivator(LogicalKeyboardKey.digit2): _SelectSectionIntent(
-          TrackerSection.board,
-        ),
-        SingleActivator(LogicalKeyboardKey.digit3): _SelectSectionIntent(
-          TrackerSection.search,
-        ),
-      },
-      child: Actions(
-        actions: {
-          _SelectSectionIntent: CallbackAction<_SelectSectionIntent>(
-            onInvoke: (intent) {
-              viewModel.selectSection(intent.section);
-              return null;
-            },
+    return _withWindowTitleBar(
+      Shortcuts(
+        shortcuts: const {
+          SingleActivator(LogicalKeyboardKey.digit1): _SelectSectionIntent(
+            TrackerSection.dashboard,
+          ),
+          SingleActivator(LogicalKeyboardKey.digit2): _SelectSectionIntent(
+            TrackerSection.board,
+          ),
+          SingleActivator(LogicalKeyboardKey.digit3): _SelectSectionIntent(
+            TrackerSection.search,
           ),
         },
-        child: FocusTraversalGroup(
-          policy: OrderedTraversalPolicy(),
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final isCompact = constraints.maxWidth < 980;
-              final shellProps = _ShellProps(
-                viewModel: viewModel,
-                workspaces: workspaces,
-                authenticatedWorkspaceIds: authenticatedWorkspaceIds,
-                localWorkspaceAvailability: localWorkspaceAvailability,
-                workspaceSwitcherTriggerKey: workspaceSwitcherTriggerKey,
-                workspaceSwitcherTriggerFocusNode:
-                    workspaceSwitcherTriggerFocusNode,
-                desktopSearchFocusNode: desktopSearchFocusNode,
-                desktopSettingsFocusNode: desktopSettingsFocusNode,
-                workspaceSwitcherOverlayHostKey:
-                    workspaceSwitcherOverlayHostKey,
-                isCreateIssueVisible: isCreateIssueVisible,
-                isDesktopWorkspaceSwitcherVisible:
-                    isDesktopWorkspaceSwitcherVisible,
-                desktopWorkspaceSwitcherPanelRect:
-                    desktopWorkspaceSwitcherPanelRect,
-                desktopWorkspaceSwitcherContent:
-                    desktopWorkspaceSwitcherContent,
-                onOpenCreateIssue: onOpenCreateIssue,
-                onOpenWorkspaceSwitcher: onOpenWorkspaceSwitcher,
-                onCloseDesktopWorkspaceSwitcher:
-                    onCloseDesktopWorkspaceSwitcher,
-                onCloseCreateIssue: onCloseCreateIssue,
-                createIssuePrefill: createIssuePrefill,
-                onOpenWorkspaceOnboarding: onOpenWorkspaceOnboarding,
-                canOpenWorkspaceOnboarding: canOpenWorkspaceOnboarding,
-                onApplyLocalGitConfiguration: onApplyLocalGitConfiguration,
-                onApplyHostedConfiguration: onApplyHostedConfiguration,
-                onSelectWorkspace: onSelectWorkspace,
-                onDeleteWorkspace: onDeleteWorkspace,
-                onMoveWorkspaceSelection: onMoveWorkspaceSelection,
-                onFocusActiveWorkspaceSwitcherRow:
-                    onFocusActiveWorkspaceSwitcherRow,
-                workspaceRestoreFailure: workspaceRestoreFailure,
-                onRetryStartupRecovery: onRetryStartupRecovery,
-                onRetryWorkspaceRestore: onRetryWorkspaceRestore,
-                attachmentPicker: attachmentPicker,
-              );
-              return Scaffold(
-                backgroundColor: colors.page,
-                body: SafeArea(
-                  child: isCompact
-                      ? _AdaptiveShell(compact: true, props: shellProps)
-                      : _BrowserDesktopPrimaryNavigationTabOrderBinder(
-                          enabled: !isDesktopWorkspaceSwitcherVisible,
-                          orderedTargets: [
-                            browser_workspace_switcher_focus_monitor
-                                .BrowserDesktopPrimaryNavigationTabOrderTarget.accessibleLabel(
-                              l10n.createIssue,
-                            ),
-                            if (canOpenWorkspaceOnboarding)
+        child: Actions(
+          actions: {
+            _SelectSectionIntent: CallbackAction<_SelectSectionIntent>(
+              onInvoke: (intent) {
+                viewModel.selectSection(intent.section);
+                return null;
+              },
+            ),
+          },
+          child: FocusTraversalGroup(
+            policy: OrderedTraversalPolicy(),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final isCompact = constraints.maxWidth < 980;
+                final shellProps = _ShellProps(
+                  viewModel: viewModel,
+                  workspaces: workspaces,
+                  authenticatedWorkspaceIds: authenticatedWorkspaceIds,
+                  localWorkspaceAvailability: localWorkspaceAvailability,
+                  workspaceSwitcherTriggerKey: workspaceSwitcherTriggerKey,
+                  workspaceSwitcherTriggerFocusNode:
+                      workspaceSwitcherTriggerFocusNode,
+                  desktopSearchFocusNode: desktopSearchFocusNode,
+                  desktopSettingsFocusNode: desktopSettingsFocusNode,
+                  workspaceSwitcherOverlayHostKey:
+                      workspaceSwitcherOverlayHostKey,
+                  isCreateIssueVisible: isCreateIssueVisible,
+                  isDesktopWorkspaceSwitcherVisible:
+                      isDesktopWorkspaceSwitcherVisible,
+                  desktopWorkspaceSwitcherPanelRect:
+                      desktopWorkspaceSwitcherPanelRect,
+                  desktopWorkspaceSwitcherContent:
+                      desktopWorkspaceSwitcherContent,
+                  onOpenCreateIssue: onOpenCreateIssue,
+                  onOpenWorkspaceSwitcher: onOpenWorkspaceSwitcher,
+                  onCloseDesktopWorkspaceSwitcher:
+                      onCloseDesktopWorkspaceSwitcher,
+                  onCloseCreateIssue: onCloseCreateIssue,
+                  createIssuePrefill: createIssuePrefill,
+                  onOpenWorkspaceOnboarding: onOpenWorkspaceOnboarding,
+                  canOpenWorkspaceOnboarding: canOpenWorkspaceOnboarding,
+                  onApplyLocalGitConfiguration: onApplyLocalGitConfiguration,
+                  onApplyHostedConfiguration: onApplyHostedConfiguration,
+                  onSelectWorkspace: onSelectWorkspace,
+                  onDeleteWorkspace: onDeleteWorkspace,
+                  onMoveWorkspaceSelection: onMoveWorkspaceSelection,
+                  onFocusActiveWorkspaceSwitcherRow:
+                      onFocusActiveWorkspaceSwitcherRow,
+                  workspaceRestoreFailure: workspaceRestoreFailure,
+                  onRetryStartupRecovery: onRetryStartupRecovery,
+                  onRetryWorkspaceRestore: onRetryWorkspaceRestore,
+                  attachmentPicker: attachmentPicker,
+                );
+                return Scaffold(
+                  backgroundColor: colors.page,
+                  body: SafeArea(
+                    child: isCompact
+                        ? _AdaptiveShell(compact: true, props: shellProps)
+                        : _BrowserDesktopPrimaryNavigationTabOrderBinder(
+                            enabled: !isDesktopWorkspaceSwitcherVisible,
+                            orderedTargets: [
                               browser_workspace_switcher_focus_monitor
                                   .BrowserDesktopPrimaryNavigationTabOrderTarget.accessibleLabel(
-                                l10n.addWorkspace,
+                                l10n.createIssue,
                               ),
-                            browser_workspace_switcher_focus_monitor
-                                .BrowserDesktopPrimaryNavigationTabOrderTarget.accessibleLabel(
-                              l10n.dashboard,
+                              if (canOpenWorkspaceOnboarding)
+                                browser_workspace_switcher_focus_monitor
+                                    .BrowserDesktopPrimaryNavigationTabOrderTarget.accessibleLabel(
+                                  l10n.addWorkspace,
+                                ),
+                              browser_workspace_switcher_focus_monitor
+                                  .BrowserDesktopPrimaryNavigationTabOrderTarget.accessibleLabel(
+                                l10n.dashboard,
+                              ),
+                              browser_workspace_switcher_focus_monitor
+                                  .BrowserDesktopPrimaryNavigationTabOrderTarget.accessibleLabel(
+                                l10n.board,
+                              ),
+                              browser_workspace_switcher_focus_monitor
+                                  .BrowserDesktopPrimaryNavigationTabOrderTarget.accessibleLabel(
+                                l10n.jqlSearch,
+                              ),
+                              browser_workspace_switcher_focus_monitor
+                                  .BrowserDesktopPrimaryNavigationTabOrderTarget.accessibleLabel(
+                                l10n.hierarchy,
+                              ),
+                              browser_workspace_switcher_focus_monitor
+                                  .BrowserDesktopPrimaryNavigationTabOrderTarget.accessibleLabel(
+                                l10n.settings,
+                              ),
+                              browser_workspace_switcher_focus_monitor
+                                  .BrowserDesktopPrimaryNavigationTabOrderTarget.semanticsIdentifier(
+                                browserDesktopWorkspaceSwitcherTriggerSemanticsIdentifier,
+                              ),
+                              browser_workspace_switcher_focus_monitor
+                                  .BrowserDesktopPrimaryNavigationTabOrderTarget.inputLabel(
+                                l10n.searchIssues,
+                              ),
+                            ],
+                            child: _AdaptiveShell(
+                              compact: false,
+                              props: shellProps,
                             ),
-                            browser_workspace_switcher_focus_monitor
-                                .BrowserDesktopPrimaryNavigationTabOrderTarget.accessibleLabel(
-                              l10n.board,
-                            ),
-                            browser_workspace_switcher_focus_monitor
-                                .BrowserDesktopPrimaryNavigationTabOrderTarget.accessibleLabel(
-                              l10n.jqlSearch,
-                            ),
-                            browser_workspace_switcher_focus_monitor
-                                .BrowserDesktopPrimaryNavigationTabOrderTarget.accessibleLabel(
-                              l10n.hierarchy,
-                            ),
-                            browser_workspace_switcher_focus_monitor
-                                .BrowserDesktopPrimaryNavigationTabOrderTarget.accessibleLabel(
-                              l10n.settings,
-                            ),
-                            browser_workspace_switcher_focus_monitor
-                                .BrowserDesktopPrimaryNavigationTabOrderTarget.semanticsIdentifier(
-                              browserDesktopWorkspaceSwitcherTriggerSemanticsIdentifier,
-                            ),
-                            browser_workspace_switcher_focus_monitor
-                                .BrowserDesktopPrimaryNavigationTabOrderTarget.inputLabel(
-                              l10n.searchIssues,
-                            ),
-                          ],
-                          child: _AdaptiveShell(
-                            compact: false,
-                            props: shellProps,
                           ),
-                        ),
-                ),
-                bottomNavigationBar: isCompact && !isCreateIssueVisible
-                    ? _BottomNavigation(viewModel: viewModel)
-                    : null,
-              );
-            },
+                  ),
+                  bottomNavigationBar: isCompact && !isCreateIssueVisible
+                      ? _BottomNavigation(viewModel: viewModel)
+                      : null,
+                );
+              },
+            ),
           ),
         ),
       ),
+    );
+  }
+
+  Widget _withWindowTitleBar(Widget child) {
+    if (kIsWeb || !isDesktop) return child;
+    // window_manager is a platform plugin that is unavailable in headless
+    // widget tests, so keep the legacy layout when running under `flutter test`.
+    if (isRunningInTest) return child;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const WindowTitleBar(),
+        Expanded(child: child),
+      ],
     );
   }
 }

@@ -2858,7 +2858,7 @@ class SetupTrackStateRepository extends ProviderBackedTrackStateRepository {
     String repositoryName = GitHubTrackStateProvider.defaultRepositoryName,
     String sourceRef = GitHubTrackStateProvider.defaultSourceRef,
     String dataRef = GitHubTrackStateProvider.defaultDataRef,
-    super.hostedStartupProbeTimeout = const Duration(seconds: 11),
+    super.hostedStartupProbeTimeout = const Duration(seconds: 5),
   }) : super(
          provider: GitHubTrackStateProvider(
            client: client,

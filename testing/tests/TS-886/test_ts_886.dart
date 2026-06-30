@@ -1,4 +1,3 @@
-import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -7,6 +6,7 @@ import 'package:trackstate/data/repositories/trackstate_repository.dart';
 import 'package:trackstate/ui/features/tracker/views/trackstate_app.dart';
 
 import '../../components/screens/settings_screen_robot.dart';
+import 'dart:ui';
 
 const _approvedDesktopGoldenPath =
     '../../../test/goldens/settings_admin_desktop.png';

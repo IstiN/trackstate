@@ -498,11 +498,12 @@ class FlutterWorkspaceOnboardingDriver implements WorkspaceOnboardingDriver {
         DebugSemanticsDumpOrder.traversalOrder,
       );
       final label = node.label.replaceAll('\n', ' ').trim();
-      final flags = node.getSemanticsData().flagsCollection;
+      final data = node.getSemanticsData();
       if (label.isNotEmpty &&
           !node.isInvisible &&
           !node.isMergedIntoParent &&
-          (flags.isButton || flags.isTextField)) {
+          (data.hasFlag(SemanticsFlag.isButton) ||
+              data.hasFlag(SemanticsFlag.isTextField))) {
         labels.add(label);
       }
       for (final child in children) {

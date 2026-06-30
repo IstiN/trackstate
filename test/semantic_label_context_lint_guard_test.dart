@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   test(
     'flutter analyze flags weakened workspace sync semantic getters that drop sync error context',
+    timeout: const Timeout(Duration(minutes: 2)),
     () async {
       final tempDir = await Directory.systemTemp.createTemp(
         'trackstate-semantic-label-lint',
