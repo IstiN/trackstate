@@ -29,6 +29,11 @@ mixin _TrackStateRepositoryMutations {
     required TrackStateIssue issue,
     required List<RepositoryHistoryCommit> commits,
   });
+
+  Future<TrackerSnapshot> _loadSnapshotAfterWrite() {
+    _repository.markHostedTreeStale();
+    return loadSnapshot();
+  }
   Future<String?> _existingArtifactRevision({
     required String path,
     required String ref,
@@ -112,7 +117,7 @@ mixin _TrackStateRepositoryMutations {
       ),
     );
 
-    final refreshed = await loadSnapshot();
+    final refreshed = await _loadSnapshotAfterWrite();
     return refreshed.issues.firstWhere(
       (issue) => issue.key == key,
       orElse: () => _parseIssue(
@@ -184,6 +189,7 @@ mixin _TrackStateRepositoryMutations {
         expectedRevision: file.revision,
       ),
     );
+    _repository.markHostedTreeStale();
 
     final updatedIssue = currentIssue.copyWith(
       description: normalizedDescription,
@@ -234,6 +240,7 @@ mixin _TrackStateRepositoryMutations {
         expectedRevision: file.revision,
       ),
     );
+    _repository.markHostedTreeStale();
 
     final updatedIssue = issue.copyWith(
       status: status,
@@ -299,6 +306,7 @@ mixin _TrackStateRepositoryMutations {
         branch: writeBranch,
       ),
     );
+    _repository.markHostedTreeStale();
 
     final updatedIssue = currentIssue.copyWith(
       hasCommentsLoaded: true,
@@ -617,6 +625,7 @@ mixin _TrackStateRepositoryMutations {
         attachments: updatedAttachments,
       );
       _replaceCachedIssue(updatedIssue);
+      _repository.markHostedTreeStale();
       return updatedIssue;
     }
     if (lfsTracked &&
@@ -705,6 +714,7 @@ mixin _TrackStateRepositoryMutations {
       attachments: updatedAttachments,
     );
     _replaceCachedIssue(updatedIssue);
+    _repository.markHostedTreeStale();
     return updatedIssue;
   }
 
@@ -884,6 +894,7 @@ mixin _TrackStateRepositoryMutations {
           changes: changes,
         ),
       );
+      _repository.markHostedTreeStale();
 
       final indexedUpdatedIssues = [
         for (final updatedIssue in updatedIssues)
@@ -1097,6 +1108,7 @@ mixin _TrackStateRepositoryMutations {
             changes: changes,
           ),
         );
+        _repository.markHostedTreeStale();
         _snapshot = updatedSnapshot;
         return tombstone;
       } catch (_) {

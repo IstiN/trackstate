@@ -214,6 +214,7 @@ class IssueMutationService {
             message: 'Create $key',
             changes: changes,
           );
+          providerRepository.markHostedTreeStale();
           final refreshed = await providerRepository.loadSnapshot();
           final createdIssue = refreshed.issues.firstWhere(
             (candidate) => candidate.key == key,
@@ -965,6 +966,7 @@ class IssueMutationService {
         ),
         tree: await provider.listTree(ref: writeBranch),
       );
+      providerRepository.markHostedTreeStale();
       return IssueMutationResult.success(
         operation: operation,
         issueKey: issueKey,
@@ -1181,6 +1183,7 @@ class IssueMutationService {
           ),
         ],
       );
+      providerRepository.markHostedTreeStale();
       final refreshed = await providerRepository.loadSnapshot();
       return IssueMutationResult.success(
         operation: operation,

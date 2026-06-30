@@ -51,6 +51,17 @@ abstract interface class TrackStateRepository {
   });
   Future<Uint8List> downloadAttachment(IssueAttachment attachment);
   Future<List<IssueHistoryEntry>> loadIssueHistory(TrackStateIssue issue);
+
+}
+
+extension TrackStateRepositoryTreeCache on TrackStateRepository {
+  /// Marks any cached hosted repository tree as stale so the next snapshot
+  /// load fetches a fresh tree. Call after a successful hosted mutation.
+  void markHostedTreeStale() {
+    if (this case final ProviderBackedTrackStateRepository repository) {
+      repository._treeCacheByRef.clear();
+    }
+  }
 }
 
 abstract interface class ProjectSettingsRepository {
@@ -189,6 +200,26 @@ class ProviderBackedTrackStateRepository
   List<RepositoryTreeEntry> _snapshotTree = const <RepositoryTreeEntry>[];
   @override
   Set<String> _snapshotBlobPaths = const <String>{};
+  final Map<String, ({List<RepositoryTreeEntry> tree, DateTime cachedAt})>
+      _treeCacheByRef = {};
+  static const _treeCacheTtl = Duration(seconds: 5);
+
+  void markHostedTreeStale() => _treeCacheByRef.clear();
+
+  Future<List<RepositoryTreeEntry>> _listTreeCached(String ref) async {
+    final entry = _treeCacheByRef[ref];
+    if (entry != null &&
+        DateTime.now().difference(entry.cachedAt) < _treeCacheTtl) {
+      return entry.tree;
+    }
+    final tree = await _loadHostedStartupProbe<List<RepositoryTreeEntry>>(
+      'listTree($ref)',
+      () => _provider.listTree(ref: ref),
+    );
+    _treeCacheByRef[ref] = (tree: tree, cachedAt: DateTime.now());
+    return tree;
+  }
+
   @override
   final ProviderSession _session;
   final Queue<Completer<void>> _pendingDeleteMutations =
@@ -466,7 +497,7 @@ class ProviderBackedTrackStateRepository
     if (_snapshotTree.isEmpty ||
         _snapshotBlobPaths.isEmpty ||
         shouldLoadAttachments) {
-      final tree = await _provider.listTree(ref: _provider.dataRef);
+      final tree = await _listTreeCached(_provider.dataRef);
       _snapshotTree = tree;
       _snapshotBlobPaths = tree
           .where((entry) => entry.type == 'blob')
@@ -771,6 +802,7 @@ class ProviderBackedTrackStateRepository
         );
       }
     }
+    markHostedTreeStale();
     final refreshedSnapshot = await loadSnapshot();
     _snapshot = refreshedSnapshot;
     return refreshedSnapshot;
@@ -966,10 +998,7 @@ class ProviderBackedTrackStateRepository
     final loadWarnings = <String>[];
     List<RepositoryTreeEntry> tree;
     try {
-      tree = await _loadHostedStartupProbe<List<RepositoryTreeEntry>>(
-        'listTree(${_provider.dataRef})',
-        () => _provider.listTree(ref: _provider.dataRef),
-      );
+      tree = await _listTreeCached(_provider.dataRef);
     } on _HostedStartupProbeTimeout catch (error) {
       loadWarnings.add(
         _hostedStartupTimeoutWarning(
@@ -1558,30 +1587,39 @@ class ProviderBackedTrackStateRepository
     required List<String> loadWarnings,
   }) async {
     final result = <String, Map<String, Map<String, String>>>{};
-    for (final locale in locales) {
+    final localePaths = [
+      for (final locale in locales)
+        if (blobPaths.contains(_joinPath(configRoot, 'i18n/$locale.json')))
+          locale,
+    ];
+    final futures = <Future<(String locale, Object? json)>>[];
+    for (final locale in localePaths) {
       final path = _joinPath(configRoot, 'i18n/$locale.json');
-      if (!blobPaths.contains(path)) {
-        continue;
-      }
-      Object? json;
-      try {
-        json = await _loadHostedStartupProbe<Object?>(
-          path,
-          () => _getRepositoryJson(path),
-        );
-      } on _HostedStartupProbeTimeout catch (error) {
-        loadWarnings.add(
-          _hostedStartupTimeoutWarning(
-            error.path,
-            fallbackDescription: 'localized labels',
-          ),
-        );
-        _captureHostedStartupRecoveryFromTimeout(error.path);
-        continue;
-      } on GitHubRateLimitException catch (error) {
-        _captureHostedStartupRecovery(error);
-        continue;
-      }
+      futures.add(
+        () async {
+          try {
+            final json = await _loadHostedStartupProbe<Object?>(
+              path,
+              () => _getRepositoryJson(path),
+            );
+            return (locale, json);
+          } on _HostedStartupProbeTimeout catch (error) {
+            loadWarnings.add(
+              _hostedStartupTimeoutWarning(
+                error.path,
+                fallbackDescription: 'localized labels',
+              ),
+            );
+            _captureHostedStartupRecoveryFromTimeout(error.path);
+          } on GitHubRateLimitException catch (error) {
+            _captureHostedStartupRecovery(error);
+          }
+          return (locale, null);
+        }(),
+      );
+    }
+    final loaded = await Future.wait(futures);
+    for (final (locale, json) in loaded) {
       if (json is! Map) {
         continue;
       }
