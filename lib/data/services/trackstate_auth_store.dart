@@ -61,15 +61,14 @@ class SharedPreferencesTrackStateAuthStore implements TrackStateAuthStore {
     await repairBrowserPreferencesStorage();
     final preferences = await SharedPreferences.getInstance();
     final workspaceKey = _workspaceTokenKey(workspaceId);
-    if (workspaceKey != null) {
-      await preferences.remove(workspaceKey);
-      return;
-    }
     final repositoryKeys = _legacyRepositoryTokenKeys(repository);
-    if (repositoryKeys.isEmpty) {
+    if (workspaceKey == null && repositoryKeys.isEmpty) {
       throw ArgumentError(
         'A workspaceId or repository is required to resolve the auth token scope.',
       );
+    }
+    if (workspaceKey != null) {
+      await preferences.remove(workspaceKey);
     }
     for (final repositoryKey in repositoryKeys) {
       await preferences.remove(repositoryKey);

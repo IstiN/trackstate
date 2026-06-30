@@ -708,6 +708,14 @@ class TrackerViewModel extends ChangeNotifier {
           repository: _workspaceId == null ? target.repository : null,
           workspaceId: _workspaceId,
         );
+        // Also store under the repository key as a fallback so the token
+        // survives workspace-id changes between sessions.
+        if (_workspaceId != null) {
+          await _authStore.saveToken(
+            normalizedToken,
+            repository: target.repository,
+          );
+        }
       }
       _isConnected = true;
       _hasLocalHostedAccessSession = usesLocalPersistence;
@@ -1896,6 +1904,12 @@ class TrackerViewModel extends ChangeNotifier {
                     repository: _workspaceId == null ? target.repository : null,
                     workspaceId: _workspaceId,
                   );
+                  if (_workspaceId != null) {
+                    await _authStore.saveToken(
+                      callbackToken,
+                      repository: target.repository,
+                    );
+                  }
                 }
                 await _resumeStartupRecoveryAfterAuthentication();
                 await _reloadHostedStartupShellFallbackIfNeeded();
@@ -1911,7 +1925,7 @@ class TrackerViewModel extends ChangeNotifier {
                 if (_isHostedAuthenticationFailure(error)) {
                   _message = TrackerMessage.storedGitHubTokenInvalid(error);
                   await _authStore.clearToken(
-                    repository: _workspaceId == null ? target.repository : null,
+                    repository: target.repository,
                     workspaceId: _workspaceId,
                   );
                 } else {
