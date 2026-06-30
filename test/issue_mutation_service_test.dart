@@ -209,6 +209,30 @@ void main() {
   );
 
   test(
+    'service falls back to a permissive default workflow when config/workflows.json is missing',
+    () async {
+      final repo = await _createMutationRepositoryWithoutWorkflows();
+      addTearDown(() => _deleteDirectoryIfPresent(repo));
+
+      final repository = LocalTrackStateRepository(repositoryPath: repo.path);
+      await repository.loadSnapshot();
+      await repository.connect(
+        const RepositoryConnection(repository: '.', branch: 'main', token: ''),
+      );
+      final service = IssueMutationService(repository: repository);
+
+      // DEMO-3 is in "In Progress"; without workflows.json this would previously
+      // fail with "Workflow rules are required for status transitions".
+      final result = await service.transitionIssue(
+        issueKey: 'DEMO-3',
+        status: 'Done',
+      );
+
+      expect(result.isSuccess, isTrue);
+    },
+  );
+
+  test(
     'service reassigns an issue by moving its subtree to the new epic path',
     () async {
       final repo = await _createMutationRepository();
@@ -984,6 +1008,38 @@ Future<Directory> _createMutationRepository() async {
   ]);
   await _git(directory.path, ['add', '.']);
   await _git(directory.path, ['commit', '-m', 'Initial mutation fixture']);
+  return directory;
+}
+
+Future<Directory> _createMutationRepositoryWithoutWorkflows() async {
+  final directory = await Directory.systemTemp.createTemp(
+    'trackstate-mutation-no-workflow-',
+  );
+  final files = _mutationFixtureFiles();
+  files.remove('DEMO/config/workflows.json');
+  for (final entry in files.entries) {
+    await _writeFile(directory, entry.key, entry.value);
+  }
+
+  await _git(directory.path, ['init', '-b', 'main']);
+  await _git(directory.path, [
+    'config',
+    '--local',
+    'user.name',
+    'Local Tester',
+  ]);
+  await _git(directory.path, [
+    'config',
+    '--local',
+    'user.email',
+    'local@example.com',
+  ]);
+  await _git(directory.path, ['add', '.']);
+  await _git(directory.path, [
+    'commit',
+    '-m',
+    'Initial mutation fixture without workflows',
+  ]);
   return directory;
 }
 
