@@ -520,13 +520,9 @@ class IssueMutationService {
 
       final snapshot = resolution.snapshot!;
       final issue = resolution.issue!;
-      final provider = providerRepository.providerAdapter;
-      final writeBranch = await provider.resolveWriteBranch();
       final workflow = await _loadWorkflow(
-        provider: provider,
         issue: issue,
         project: snapshot.project,
-        ref: writeBranch,
       );
       final transitions = snapshot.project.statusDefinitions
           .where(
@@ -596,10 +592,8 @@ class IssueMutationService {
       }
 
       final workflow = await _loadWorkflow(
-        provider: provider,
         issue: issue,
         project: snapshot.project,
-        ref: writeBranch,
       );
       if (!_isTransitionAllowed(workflow, issue.statusId, targetStatus.id)) {
         return _failure(
@@ -2255,83 +2249,39 @@ IssueMutationResult<String?> _resolveTransitionResolution({
 }
 
 Future<_WorkflowDefinition> _loadWorkflow({
-  required TrackStateProviderAdapter provider,
   required TrackStateIssue issue,
   required ProjectConfig project,
-  required String ref,
 }) async {
-  if (project.workflowDefinitions.isNotEmpty) {
-    final issueTypeDefinition = project.issueTypeDefinitions.where(
-      (definition) => definition.id == issue.issueTypeId,
-    );
-    final workflowId = issueTypeDefinition.isNotEmpty
-        ? issueTypeDefinition.first.workflowId
-        : null;
-    final selectedWorkflow = project.workflowDefinitions
-        .where(
-          (workflow) =>
-              workflow.id == workflowId ||
-              (workflowId == null && workflow.id == 'default'),
-        )
-        .toList();
-    final workflow = selectedWorkflow.isNotEmpty
-        ? selectedWorkflow.first
-        : project.workflowDefinitions.first;
-    return _WorkflowDefinition(
-      transitions: [
-        for (final transition in workflow.transitions)
-          _WorkflowTransition(
-            fromId: transition.fromStatusId,
-            toId: transition.toStatusId,
-          ),
-      ],
-    );
-  }
-  final path = '${issue.project}/config/workflows.json';
-  try {
-    final file = await provider.readTextFile(path, ref: ref);
-    final json = jsonDecode(file.content);
-    if (json is! Map<String, Object?>) {
-      throw const TrackStateRepositoryException(
-        'config/workflows.json must contain an object.',
-      );
-    }
-    final workflowJson = json['default'];
-    if (workflowJson is! Map<String, Object?>) {
-      throw const TrackStateRepositoryException(
-        'config/workflows.json must contain a default workflow.',
-      );
-    }
-    final transitions = workflowJson['transitions'];
-    if (transitions is! List) {
-      throw const TrackStateRepositoryException(
-        'config/workflows.json must contain transitions.',
-      );
-    }
-    return _WorkflowDefinition(
-      transitions: [
-        for (final entry in transitions.whereType<Map>())
-          _WorkflowTransition(
-            fromId:
-                _resolveConfigEntry(
-                  entry['from']?.toString(),
-                  project.statusDefinitions,
-                )?.id ??
-                _canonicalConfigId(entry['from']?.toString()),
-            toId:
-                _resolveConfigEntry(
-                  entry['to']?.toString(),
-                  project.statusDefinitions,
-                )?.id ??
-                _canonicalConfigId(entry['to']?.toString()),
-          ),
-      ],
-    );
-  } on TrackStateProviderException {
-    // Freshly cloned repositories may not have config/workflows.json yet.
-    // Use a permissive default workflow so status transitions still work.
+  if (project.workflowDefinitions.isEmpty) {
+    // No config/workflows.json means no transition restrictions; use a
+    // permissive default so the repository works out of the box.
     return _permissiveWorkflow(project.statusDefinitions);
   }
+  final issueTypeDefinition = project.issueTypeDefinitions.where(
+    (definition) => definition.id == issue.issueTypeId,
+  );
+  final workflowId = issueTypeDefinition.isNotEmpty
+      ? issueTypeDefinition.first.workflowId
+      : null;
+  final selectedWorkflow = project.workflowDefinitions
+      .where(
+        (workflow) =>
+            workflow.id == workflowId ||
+            (workflowId == null && workflow.id == 'default'),
+      )
+      .toList();
+  final workflow = selectedWorkflow.isNotEmpty
+      ? selectedWorkflow.first
+      : project.workflowDefinitions.first;
+  return _WorkflowDefinition(
+    transitions: [
+      for (final transition in workflow.transitions)
+        _WorkflowTransition(
+          fromId: transition.fromStatusId,
+          toId: transition.toStatusId,
+        ),
+    ],
+  );
 }
 
 _WorkflowDefinition _permissiveWorkflow(
