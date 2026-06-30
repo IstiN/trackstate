@@ -1,4 +1,3 @@
-import 'dart:ui' show Tristate;
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -4122,8 +4121,8 @@ void main() {
           of: triggerSemantics,
           matching: find.semantics.byPredicate((node) {
             final data = node.getSemanticsData();
-            return data.flagsCollection.isButton &&
-                data.flagsCollection.isFocused != Tristate.none;
+            return data.hasFlag(SemanticsFlag.isButton) && // ignore: deprecated_member_use
+                data.hasFlag(SemanticsFlag.isFocusable); // ignore: deprecated_member_use
           }, describeMatch: (_) => 'focusable button semantics node'),
           matchRoot: true,
         );
@@ -4502,17 +4501,17 @@ void main() {
       final thirdSem = thirdRowSemanticsNode.evaluate().single;
 
       expect(
-        mainSem.getSemanticsData().flagsCollection.isFocused == Tristate.isTrue,
+        mainSem.getSemanticsData().hasFlag(SemanticsFlag.isFocused), // ignore: deprecated_member_use
         isTrue,
         reason: 'Active workspace row should be focused.',
       );
       expect(
-        altSem.getSemanticsData().flagsCollection.isFocused == Tristate.isTrue,
+        altSem.getSemanticsData().hasFlag(SemanticsFlag.isFocused), // ignore: deprecated_member_use
         isFalse,
         reason: 'Inactive workspace row should NOT be focused.',
       );
       expect(
-        thirdSem.getSemanticsData().flagsCollection.isFocused == Tristate.isTrue,
+        thirdSem.getSemanticsData().hasFlag(SemanticsFlag.isFocused), // ignore: deprecated_member_use
         isFalse,
         reason: 'Inactive workspace row should NOT be focused.',
       );
@@ -4551,18 +4550,18 @@ void main() {
       final thirdSemAfter = thirdRowSemanticsNodeAfter.evaluate().single;
 
       expect(
-        mainSemAfter.getSemanticsData().flagsCollection.isFocused == Tristate.isTrue,
+        mainSemAfter.getSemanticsData().hasFlag(SemanticsFlag.isFocused), // ignore: deprecated_member_use
         isFalse,
         reason:
             'Previously active row should lose focus after selection moves.',
       );
       expect(
-        altSemAfter.getSemanticsData().flagsCollection.isFocused == Tristate.isTrue,
+        altSemAfter.getSemanticsData().hasFlag(SemanticsFlag.isFocused), // ignore: deprecated_member_use
         isTrue,
         reason: 'Newly active workspace row should be focused.',
       );
       expect(
-        thirdSemAfter.getSemanticsData().flagsCollection.isFocused == Tristate.isTrue,
+        thirdSemAfter.getSemanticsData().hasFlag(SemanticsFlag.isFocused), // ignore: deprecated_member_use
         isFalse,
         reason:
             'Inactive workspace row should remain not focused after selection changes.',
@@ -4824,7 +4823,7 @@ Future<void> _pumpUntilVisible(
 
 String? _focusedLabel(WidgetTester tester, Map<String, Finder> candidates) {
   final focusedSemantics = find.semantics.byPredicate(
-    (node) => node.getSemanticsData().flagsCollection.isFocused == Tristate.isTrue,
+    (node) => node.getSemanticsData().hasFlag(SemanticsFlag.isFocused), // ignore: deprecated_member_use
     describeMatch: (_) => 'focused semantics node',
   );
   final hasFocusedSemantics = focusedSemantics.evaluate().isNotEmpty;
